@@ -1,0 +1,916 @@
+@file:Suppress("SpellCheckingInspection")
+
+package com.example.potholereport.ui.report
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationManager
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import com.example.potholereport.data.AddReportResult
+import com.example.potholereport.data.PersistedPotholeReport
+import com.example.potholereport.data.PotholeSeverity
+import com.example.potholereport.data.RecentReportsRepository
+import com.example.potholereport.ml.PhotoCaptureKind
+import com.example.potholereport.ml.PhotoValidationResult
+import com.example.potholereport.ml.PotholePhotoValidator
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private val YellowAccent = Color(0xFFFFD700)
+private val DarkBlue = Color(0xFF1A1A2E)
+private val OffWhite = Color(0xFFF5F2E8)
+private val OrangeSelect = Color(0xFFF58220)
+private val GrayDisabled = Color(0xFF9E9E9E)
+private val GrayButton = Color(0xFF757575)
+
+@Composable
+fun NewReportScreen(
+    reportCityKey: String,
+    reporterUserId: String,
+    onClose: () -> Unit,
+    onReportPersisted: () -> Unit = {},
+    submittedWhileSignedIn: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var closeUpUri by remember { mutableStateOf<Uri?>(null) }
+    var wideUri by remember { mutableStateOf<Uri?>(null) }
+    var closeUpVerified by remember { mutableStateOf(false) }
+    var wideVerified by remember { mutableStateOf(false) }
+    var photoValidating by remember { mutableStateOf(false) }
+    var photoValidationTitle by remember { mutableStateOf<String?>(null) }
+    var photoValidationMessage by remember { mutableStateOf<String?>(null) }
+    var duplicateBlockingReport by remember { mutableStateOf<PersistedPotholeReport?>(null) }
+    var showDuplicateDialog by remember { mutableStateOf(false) }
+
+    var selectedSeverity by remember { mutableStateOf(PotholeSeverity.MODERATE) }
+
+    var note by remember { mutableStateOf("") }
+    val noteMax = 240
+
+    var deviceLat by remember { mutableStateOf<Double?>(null) }
+    var deviceLng by remember { mutableStateOf<Double?>(null) }
+    var manualCoordLat by remember { mutableStateOf<Double?>(null) }
+    var manualCoordLng by remember { mutableStateOf<Double?>(null) }
+    var useManualLocation by remember { mutableStateOf(false) }
+
+    var mapsUrlInput by remember { mutableStateOf("") }
+    var lngFieldInput by remember { mutableStateOf("") }
+
+    var locationLoading by remember { mutableStateOf(false) }
+    var locationBlockedReason by remember { mutableStateOf<String?>(null) }
+
+    var photoChoiceTarget by remember { mutableIntStateOf(1) }
+
+    var showEnableGpsDialog by remember { mutableStateOf(false) }
+    var showPermissionRationale by remember { mutableStateOf(false) }
+
+    fun locationPermitted(): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
+    fun refreshGpsLocation() {
+        if (!locationPermitted()) {
+            locationBlockedReason = "PERMISSION"
+            deviceLat = null
+            deviceLng = null
+            return
+        }
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val gpsOn = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+            lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        if (!gpsOn) {
+            locationBlockedReason = "GPS_OFF"
+            deviceLat = null
+            deviceLng = null
+            return
+        }
+        locationLoading = true
+        if (!useManualLocation) locationBlockedReason = null
+        @SuppressLint("MissingPermission")
+        val loc: Location? = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            ?: lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
+        locationLoading = false
+        if (loc != null) {
+            deviceLat = loc.latitude
+            deviceLng = loc.longitude
+            if (!useManualLocation) locationBlockedReason = null
+        } else {
+            if (!useManualLocation) {
+                locationBlockedReason = "NO_FIX"
+                deviceLat = null
+                deviceLng = null
+            }
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val ok = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (ok) {
+            showPermissionRationale = false
+            refreshGpsLocation()
+        } else {
+            locationBlockedReason = "PERMISSION"
+            showPermissionRationale = true
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (locationPermitted()) {
+            refreshGpsLocation()
+        } else {
+            locationBlockedReason = "PERMISSION"
+        }
+    }
+
+    var cameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    val takePicture = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val capturedUri = cameraPhotoUri
+        if (!success || capturedUri == null) return@rememberLauncherForActivityResult
+        val kind = if (photoChoiceTarget == 1) PhotoCaptureKind.CLOSE_UP else PhotoCaptureKind.WIDE_ROAD
+        photoValidating = true
+        scope.launch {
+            val result = withContext(Dispatchers.Default) {
+                PotholePhotoValidator.validate(
+                    context = context,
+                    uri = capturedUri,
+                    kind = kind,
+                    closeUpUri = if (kind == PhotoCaptureKind.WIDE_ROAD) closeUpUri else null,
+                )
+            }
+            photoValidating = false
+            when (result) {
+                is PhotoValidationResult.Accepted -> {
+                    if (kind == PhotoCaptureKind.CLOSE_UP) {
+                        closeUpUri = capturedUri
+                        closeUpVerified = true
+                        wideUri = null
+                        wideVerified = false
+                    } else {
+                        wideUri = capturedUri
+                        wideVerified = true
+                    }
+                }
+                is PhotoValidationResult.Rejected -> {
+                    photoValidationTitle = result.title
+                    photoValidationMessage = result.message
+                    if (kind == PhotoCaptureKind.CLOSE_UP) {
+                        closeUpUri = null
+                        closeUpVerified = false
+                    } else {
+                        wideUri = null
+                        wideVerified = false
+                    }
+                }
+            }
+        }
+    }
+
+    fun startCameraCapture() {
+        val file = createImageFile(context)
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file,
+        )
+        cameraPhotoUri = uri
+        takePicture.launch(uri)
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startCameraCapture()
+    }
+
+    fun launchCamera(target: Int) {
+        photoChoiceTarget = target
+        when {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED -> startCameraCapture()
+            else -> cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    if (showEnableGpsDialog) {
+        AlertDialog(
+            onDismissRequest = { showEnableGpsDialog = false },
+            title = { Text("Turn on location") },
+            text = { Text("Enable device location (GPS) so we can tag the pothole. You can also use manual entry below.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showEnableGpsDialog = false
+                        context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                    }
+                ) { Text("Location settings") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEnableGpsDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    photoValidationTitle?.let { title ->
+        AlertDialog(
+            onDismissRequest = {
+                photoValidationTitle = null
+                photoValidationMessage = null
+            },
+            title = { Text(title, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    photoValidationMessage.orEmpty(),
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        photoValidationTitle = null
+                        photoValidationMessage = null
+                    },
+                ) {
+                    Text("Retake photo", fontWeight = FontWeight.Bold)
+                }
+            },
+        )
+    }
+
+    if (showPermissionRationale) {
+        AlertDialog(
+            onDismissRequest = { showPermissionRationale = false },
+            title = { Text("Location permission") },
+            text = { Text("Allow location access to auto-tag this report, or use manual maps link below.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showPermissionRationale = false
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.fromParts("package", context.packageName, null)
+                            )
+                        )
+                    }
+                ) { Text("App settings") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermissionRationale = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    val latEffective = if (useManualLocation) manualCoordLat else deviceLat
+    val lngEffective = if (useManualLocation) manualCoordLng else deviceLng
+    val gpsOk = latEffective != null && lngEffective != null
+
+    LaunchedEffect(reportCityKey, reporterUserId, latEffective, lngEffective) {
+        val lat = latEffective
+        val lng = lngEffective
+        duplicateBlockingReport = if (lat != null && lng != null && reporterUserId.isNotBlank()) {
+            withContext(Dispatchers.Default) {
+                RecentReportsRepository.findActiveDuplicateForReporter(
+                    reporterUserId = reporterUserId,
+                    cityKey = reportCityKey,
+                    latitude = lat,
+                    longitude = lng,
+                )
+            }
+        } else {
+            null
+        }
+    }
+
+    val duplicateBlock = duplicateBlockingReport != null
+
+    val missingClose = closeUpUri == null || !closeUpVerified
+    val missingWide = wideUri == null || !wideVerified
+    val missingLoc = !gpsOk
+
+    val footerLabel = when {
+        photoValidating -> "CHECKING PHOTO WITH AI..."
+        duplicateBlock -> {
+            val status = duplicateBlockingReport?.status?.displayLabel?.uppercase() ?: "OPEN"
+            "ALREADY REPORTED HERE ($status)"
+        }
+        missingClose -> "ADD VALID CLOSE-UP PHOTO TO CONTINUE"
+        missingWide -> "ADD VALID WIDE SHOT TO CONTINUE"
+        missingLoc -> "ATTACH LOCATION TO CONTINUE"
+        else -> "SUBMIT REPORT"
+    }
+    val readyToSubmit = !missingClose && !missingWide && !missingLoc && !photoValidating && !duplicateBlock
+
+    if (showDuplicateDialog) {
+        val blocking = duplicateBlockingReport
+        AlertDialog(
+            onDismissRequest = { showDuplicateDialog = false },
+            title = { Text("Already reported", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    if (blocking != null) {
+                        "You already reported this pothole at this location. " +
+                            "Status: ${blocking.status.displayLabel}. " +
+                            "You can submit a new report here only after it is marked Completed (resolved)."
+                    } else {
+                        "You already have an open report for this pothole nearby."
+                    },
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showDuplicateDialog = false }) {
+                    Text("OK", fontWeight = FontWeight.Bold)
+                }
+            },
+        )
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(DarkBlue)
+    ) {
+        Row(Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(OffWhite)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(start = 6.dp, end = 4.dp, top = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "NEW REPORT",
+                            color = YellowAccent,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 16.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(YellowAccent)
+                                .clickable { onClose() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = DarkBlue)
+                        }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    SectionTitle("01 CLOSE-UP OF POTHOLE")
+                    Text(
+                        "FRAME THE HOLE CLEARLY - USED FOR DEPTH AND AREA ESTIMATION",
+                        color = Color.Gray,
+                        fontSize = 8.sp,
+                        lineHeight = 10.sp,
+                        maxLines = 2
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    PhotoDropZone(
+                        enabled = !photoValidating,
+                        label = when {
+                            photoValidating && photoChoiceTarget == 1 -> "ANALYZING PHOTO..."
+                            closeUpVerified -> "CLOSE-UP VERIFIED · TAP TO RETAKE"
+                            else -> "TAP TO OPEN CAMERA"
+                        },
+                        filled = closeUpVerified,
+                        onClick = { launchCamera(1) },
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    SectionTitle("02 WIDE SHOT OF ROAD")
+                    Text(
+                        "STEP BACK - CAPTURE THE FULL ROAD WIDTH WITH POTHOLE VISIBLE - USED FOR LANE-POSITION",
+                        color = Color.Gray,
+                        fontSize = 8.sp,
+                        lineHeight = 10.sp,
+                        maxLines = 2
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    PhotoDropZone(
+                        enabled = closeUpVerified && !photoValidating,
+                        label = when {
+                            !closeUpVerified -> "COMPLETE STEP 01 FIRST"
+                            photoValidating && photoChoiceTarget == 2 -> "ANALYZING PHOTO..."
+                            wideVerified -> "WIDE SHOT VERIFIED · TAP TO RETAKE"
+                            else -> "TAP TO OPEN CAMERA"
+                        },
+                        filled = wideVerified,
+                        onClick = { if (closeUpVerified) launchCamera(2) },
+                    )
+
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Photos are checked on-device with TensorFlow Lite before you can submit.",
+                        color = Color(0xFF5A5A5A),
+                        fontSize = 8.sp,
+                        lineHeight = 10.sp,
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    SectionTitle("03 ATTACH LOCATION")
+                    Text(
+                        "AUTO-DETECTED FROM GPS - USED ONLY TO TAG THE POTHOLE - NOT LINKED TO YOU",
+                        color = Color.Gray,
+                        fontSize = 8.sp,
+                        lineHeight = 10.sp,
+                        maxLines = 2
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    LocationBlock(
+                        loading = locationLoading,
+                        blockedReason = locationBlockedReason,
+                        gpsOk = gpsOk,
+                        latDisplay = latEffective,
+                        lngDisplay = lngEffective,
+                        onRetryGps = {
+                            if (!locationPermitted()) {
+                                locationPermissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
+                                    )
+                                )
+                            } else {
+                                val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+                                val on = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                                    lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+                                if (!on) showEnableGpsDialog = true
+                                else refreshGpsLocation()
+                            }
+                        },
+                        onOpenGpsSettings = { showEnableGpsDialog = true },
+                    )
+
+                    if (duplicateBlock) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "You already reported this pothole here (${duplicateBlockingReport?.status?.displayLabel}). " +
+                                "Submit again only after it is resolved (Completed).",
+                            color = Color(0xFFB45309),
+                            fontSize = 8.sp,
+                            lineHeight = 10.sp,
+                        )
+                    }
+
+                    if (!gpsOk && !locationLoading) {
+                        Spacer(Modifier.height(4.dp))
+                        Text("MANUAL ENTRY", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 10.sp, color = DarkBlue)
+                        Text(
+                            "Paste a Google Maps URL or coordinates.",
+                            color = Color.Gray,
+                            fontSize = 8.sp
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = mapsUrlInput,
+                                onValueChange = {
+                                    mapsUrlInput = it
+                                    useManualLocation = false
+                                    manualCoordLat = null
+                                    manualCoordLng = null
+                                },
+                                modifier = Modifier.weight(1f),
+                                placeholder = { Text("Maps URL", fontSize = 10.sp) },
+                                singleLine = true,
+                                textStyle = TextStyle(fontSize = 10.sp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = DarkBlue,
+                                    unfocusedBorderColor = DarkBlue,
+                                )
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            OutlinedTextField(
+                                value = lngFieldInput,
+                                onValueChange = {
+                                    lngFieldInput = it
+                                    useManualLocation = false
+                                    manualCoordLat = null
+                                    manualCoordLng = null
+                                },
+                                modifier = Modifier.width(88.dp),
+                                placeholder = { Text("lng", fontSize = 10.sp) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                textStyle = TextStyle(fontSize = 10.sp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = DarkBlue,
+                                    unfocusedBorderColor = DarkBlue,
+                                )
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Button(
+                            onClick = {
+                                val parsed = parseMapsInput(mapsUrlInput, lngFieldInput)
+                                if (parsed != null) {
+                                    useManualLocation = true
+                                    manualCoordLat = parsed.first
+                                    manualCoordLng = parsed.second
+                                    locationBlockedReason = null
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkBlue, contentColor = YellowAccent),
+                            shape = RoundedCornerShape(0.dp),
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text("USE THIS LOCATION", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                        }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    SectionTitle("04 HOW BAD IS IT?")
+                    Spacer(Modifier.height(4.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        SeverityTile(Modifier.weight(1f), PotholeSeverity.MINOR, selectedSeverity) { selectedSeverity = it }
+                        SeverityTile(Modifier.weight(1f), PotholeSeverity.MODERATE, selectedSeverity) { selectedSeverity = it }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        SeverityTile(Modifier.weight(1f), PotholeSeverity.SEVERE, selectedSeverity) { selectedSeverity = it }
+                        SeverityTile(Modifier.weight(1f), PotholeSeverity.CRITICAL, selectedSeverity) { selectedSeverity = it }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    SectionTitle("05 NOTE (OPTIONAL)")
+                    OutlinedTextField(
+                        value = note,
+                        onValueChange = { if (it.length <= noteMax) note = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("e.g. Near bus stop, gets worse after rain...", fontSize = 10.sp) },
+                        maxLines = 2,
+                        textStyle = TextStyle(fontSize = 11.sp),
+                        supportingText = {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                Text("${note.length}/$noteMax", fontSize = 9.sp, color = Color.Gray)
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = DarkBlue,
+                            unfocusedBorderColor = DarkBlue,
+                        )
+                    )
+                }
+
+                Column(
+                    modifier = Modifier.padding(start = 6.dp, end = 4.dp, bottom = 6.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            if (!readyToSubmit) return@Button
+                            val closeUri = closeUpUri ?: return@Button
+                            val wideShotUri = wideUri ?: return@Button
+                            val lat = latEffective ?: return@Button
+                            val lng = lngEffective ?: return@Button
+                            scope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    RecentReportsRepository.addReport(
+                                        cityKey = reportCityKey,
+                                        closeUpUri = closeUri,
+                                        wideUri = wideShotUri,
+                                        latitude = lat,
+                                        longitude = lng,
+                                        severity = selectedSeverity,
+                                        note = note,
+                                        reporterUserId = reporterUserId,
+                                        submittedSignedIn = submittedWhileSignedIn,
+                                    )
+                                }
+                                when (result) {
+                                    AddReportResult.Success -> {
+                                        onReportPersisted()
+                                        onClose()
+                                    }
+                                    is AddReportResult.DuplicateActive -> {
+                                        duplicateBlockingReport = result.existing
+                                        showDuplicateDialog = true
+                                    }
+                                    AddReportResult.Failed -> { /* keep form open */ }
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = readyToSubmit,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (readyToSubmit) DarkBlue else GrayButton,
+                            contentColor = if (readyToSubmit) YellowAccent else Color.White.copy(alpha = 0.85f),
+                            disabledContainerColor = GrayButton,
+                            disabledContentColor = Color.White.copy(alpha = 0.85f)
+                        ),
+                        shape = RoundedCornerShape(0.dp)
+                    ) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(footerLabel, fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 2, textAlign = TextAlign.Center)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "NO EMAIL · NO ACCOUNT · NO IP STORED",
+                        color = Color.Gray,
+                        fontSize = 8.sp,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .width(8.dp)
+                    .fillMaxHeight()
+                    .background(YellowAccent)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Black,
+        fontSize = 11.sp,
+        color = DarkBlue,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+    )
+}
+
+@Composable
+private fun PhotoDropZone(
+    enabled: Boolean,
+    label: String,
+    filled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(72.dp)
+            .border(
+                BorderStroke(2.dp, if (enabled) DarkBlue else GrayDisabled),
+                RoundedCornerShape(0.dp)
+            )
+            .background(if (enabled) Color.White.copy(alpha = 0.5f) else Color(0xFFE0E0E0))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                Icons.Filled.CameraAlt,
+                contentDescription = null,
+                tint = if (enabled) DarkBlue else GrayDisabled,
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                label,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (enabled) DarkBlue else GrayDisabled,
+                textAlign = TextAlign.Center,
+                maxLines = 2
+            )
+            if (filled) {
+                Text("✓ Added", fontSize = 8.sp, color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocationBlock(
+    loading: Boolean,
+    blockedReason: String?,
+    gpsOk: Boolean,
+    latDisplay: Double?,
+    lngDisplay: Double?,
+    onRetryGps: () -> Unit,
+    onOpenGpsSettings: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(BorderStroke(1.dp, DarkBlue))
+            .background(Color.White)
+            .padding(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .background(Color(0xFFB71C1C)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Default.LocationOn, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            when {
+                loading -> Text("LOCATING…", color = DarkBlue, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                gpsOk -> {
+                    Text("LOCATION ATTACHED", color = Color(0xFF2E7D32), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "${"%.5f".format(latDisplay!!)}, ${"%.5f".format(lngDisplay!!)}",
+                        fontSize = 9.sp,
+                        color = Color.Gray
+                    )
+                }
+                blockedReason == "GPS_OFF" -> {
+                    Text("GPS DISABLED", color = Color(0xFFB71C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("Turn on location services.", fontSize = 8.sp, color = Color.Gray, maxLines = 2)
+                }
+                blockedReason == "NO_FIX" -> {
+                    Text("LOCATION PENDING", color = Color(0xFFE65100), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("Move outdoors and retry.", fontSize = 8.sp, color = Color.Gray, maxLines = 2)
+                }
+                else -> {
+                    Text("LOCATION BLOCKED", color = Color(0xFFB71C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Allow location permission. On a deployed build you will be prompted to enable GPS.",
+                        fontSize = 8.sp,
+                        color = Color.Gray,
+                        maxLines = 3
+                    )
+                }
+            }
+        }
+        if (!gpsOk && !loading) {
+            Column {
+                Button(
+                    onClick = onRetryGps,
+                    colors = ButtonDefaults.buttonColors(containerColor = YellowAccent, contentColor = DarkBlue),
+                    shape = RoundedCornerShape(0.dp),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                ) {
+                    Text("RETRY GPS", fontWeight = FontWeight.Black, fontSize = 9.sp)
+                }
+                TextButton(onClick = onOpenGpsSettings, contentPadding = ButtonDefaults.TextButtonContentPadding) {
+                    Text("ENABLE GPS", fontSize = 8.sp, color = DarkBlue, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SeverityTile(
+    modifier: Modifier,
+    severity: PotholeSeverity,
+    selected: PotholeSeverity,
+    onSelect: (PotholeSeverity) -> Unit,
+) {
+    val sel = severity == selected
+    Box(
+        modifier = modifier
+            .height(52.dp)
+            .border(BorderStroke(1.dp, DarkBlue))
+            .background(if (sel) OrangeSelect else Color.White.copy(alpha = 0.85f))
+            .clickable { onSelect(severity) }
+            .padding(4.dp)
+    ) {
+        Column {
+            Text(
+                "${severity.code} ${severity.title}",
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 9.sp,
+                color = if (sel) Color.White else DarkBlue
+            )
+            Text(
+                severity.blurb,
+                fontSize = 7.sp,
+                lineHeight = 9.sp,
+                color = if (sel) Color.White.copy(alpha = 0.95f) else Color.DarkGray,
+                maxLines = 2
+            )
+        }
+    }
+}
+
+private fun createImageFile(context: Context): File {
+    val time = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+    return File.createTempFile("JPEG_${time}_", ".jpg", context.cacheDir)
+}
+
+private fun parseMapsInput(url: String, lngExtra: String): Pair<Double, Double>? {
+    val trimmed = url.trim()
+    if (trimmed.isBlank()) return null
+
+    val atMatch = Regex("@(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)").find(trimmed)
+    if (atMatch != null) {
+        val la = atMatch.groupValues[1].toDoubleOrNull() ?: return null
+        val lo = atMatch.groupValues[2].toDoubleOrNull() ?: return null
+        return la to lo
+    }
+    val qMatch = Regex("[?&]q=(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)").find(trimmed)
+    if (qMatch != null) {
+        val la = qMatch.groupValues[1].toDoubleOrNull() ?: return null
+        val lo = qMatch.groupValues[2].toDoubleOrNull() ?: return null
+        return la to lo
+    }
+    val comma = trimmed.split(",").map { it.trim() }
+    if (comma.size == 2) {
+        val la = comma[0].toDoubleOrNull() ?: return null
+        val lo = comma[1].toDoubleOrNull() ?: return null
+        return la to lo
+    }
+    val la = trimmed.toDoubleOrNull()
+    val lo = lngExtra.trim().toDoubleOrNull()
+    if (la != null && lo != null) return la to lo
+    return null
+}
