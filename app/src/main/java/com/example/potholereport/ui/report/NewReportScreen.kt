@@ -67,20 +67,28 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.location.LocationManagerCompat
+import androidx.core.os.CancellationSignal
 import com.example.potholereport.data.AddReportResult
 import com.example.potholereport.data.PersistedPotholeReport
+import com.example.potholereport.data.PotholePosition
 import com.example.potholereport.data.PotholeSeverity
 import com.example.potholereport.data.RecentReportsRepository
 import com.example.potholereport.ml.PhotoCaptureKind
 import com.example.potholereport.ml.PhotoValidationResult
 import com.example.potholereport.ml.PotholePhotoValidator
+import com.example.potholereport.ml.PotholeRiskAnalyzer
+import com.example.potholereport.ml.PotholeRiskInsight
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 
 private val YellowAccent = Color(0xFFFFD700)
 private val DarkBlue = Color(0xFF1A1A2E)
@@ -112,6 +120,8 @@ fun NewReportScreen(
     var showDuplicateDialog by remember { mutableStateOf(false) }
 
     var selectedSeverity by remember { mutableStateOf(PotholeSeverity.MODERATE) }
+    var selectedPosition by remember { mutableStateOf(PotholePosition.MIDDLE) }
+    var aiRiskInsight by remember { mutableStateOf<PotholeRiskInsight?>(null) }
 
     var note by remember { mutableStateOf("") }
     val noteMax = 240
@@ -155,19 +165,18 @@ fun NewReportScreen(
             deviceLng = null
             return
         }
-        locationLoading = true
-        if (!useManualLocation) locationBlockedReason = null
-        @SuppressLint("MissingPermission")
-        val loc: Location? = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            ?: lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
-        locationLoading = false
-        if (loc != null) {
-            deviceLat = loc.latitude
-            deviceLng = loc.longitude
+        scope.launch {
+            locationLoading = true
             if (!useManualLocation) locationBlockedReason = null
-        } else {
-            if (!useManualLocation) {
+            val loc = withContext(Dispatchers.Default) {
+                fetchBestCalibratedLocation(context)
+            }
+            locationLoading = false
+            if (loc != null) {
+                deviceLat = loc.latitude
+                deviceLng = loc.longitude
+                if (!useManualLocation) locationBlockedReason = null
+            } else if (!useManualLocation) {
                 locationBlockedReason = "NO_FIX"
                 deviceLat = null
                 deviceLng = null
@@ -197,6 +206,23 @@ fun NewReportScreen(
         }
     }
 
+    // Re-run the risk analyzer whenever the user changes the lane (left /
+    // middle / right). The analyzer constrains its dark-blob search to that
+    // lane, so the suggested width / depth / severity numbers update.
+    LaunchedEffect(selectedPosition, closeUpVerified) {
+        val captured = closeUpUri ?: return@LaunchedEffect
+        if (!closeUpVerified) return@LaunchedEffect
+        val insight = withContext(Dispatchers.Default) {
+            PotholeRiskAnalyzer.analyze(
+                context = context,
+                closeUpUri = captured,
+                position = selectedPosition,
+                userSeverity = selectedSeverity,
+            )
+        }
+        aiRiskInsight = insight
+    }
+
     var cameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
     val takePicture = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
@@ -218,10 +244,20 @@ fun NewReportScreen(
             when (result) {
                 is PhotoValidationResult.Accepted -> {
                     if (kind == PhotoCaptureKind.CLOSE_UP) {
+                        val insight = withContext(Dispatchers.Default) {
+                            PotholeRiskAnalyzer.analyze(
+                                context = context,
+                                closeUpUri = capturedUri,
+                                position = selectedPosition,
+                                userSeverity = selectedSeverity,
+                            )
+                        }
                         closeUpUri = capturedUri
                         closeUpVerified = true
                         wideUri = null
                         wideVerified = false
+                        aiRiskInsight = insight
+                        insight?.let { selectedSeverity = it.suggestedSeverity }
                     } else {
                         wideUri = capturedUri
                         wideVerified = true
@@ -233,6 +269,7 @@ fun NewReportScreen(
                     if (kind == PhotoCaptureKind.CLOSE_UP) {
                         closeUpUri = null
                         closeUpVerified = false
+                        aiRiskInsight = null
                     } else {
                         wideUri = null
                         wideVerified = false
@@ -611,7 +648,23 @@ fun NewReportScreen(
 
                     Spacer(Modifier.height(6.dp))
 
-                    SectionTitle("04 HOW BAD IS IT?")
+                    SectionTitle("04 POTHOLE POSITION IN PHOTO")
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Tap the lane where the pothole sits — it helps the analyzer focus on the right area.",
+                        fontSize = 10.sp,
+                        color = Color.DarkGray,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        PositionTile(Modifier.weight(1f), PotholePosition.LEFT, selectedPosition) { selectedPosition = it }
+                        PositionTile(Modifier.weight(1f), PotholePosition.MIDDLE, selectedPosition) { selectedPosition = it }
+                        PositionTile(Modifier.weight(1f), PotholePosition.RIGHT, selectedPosition) { selectedPosition = it }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    SectionTitle("05 HOW BAD IS IT?")
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         SeverityTile(Modifier.weight(1f), PotholeSeverity.MINOR, selectedSeverity) { selectedSeverity = it }
@@ -623,9 +676,17 @@ fun NewReportScreen(
                         SeverityTile(Modifier.weight(1f), PotholeSeverity.CRITICAL, selectedSeverity) { selectedSeverity = it }
                     }
 
+                    aiRiskInsight?.let { insight ->
+                        Spacer(Modifier.height(6.dp))
+                        AiRiskSuggestionCard(
+                            insight = insight,
+                            onUseSuggested = { selectedSeverity = insight.suggestedSeverity },
+                        )
+                    }
+
                     Spacer(Modifier.height(6.dp))
 
-                    SectionTitle("05 NOTE (OPTIONAL)")
+                    SectionTitle("06 NOTE (OPTIONAL)")
                     OutlinedTextField(
                         value = note,
                         onValueChange = { if (it.length <= noteMax) note = it },
@@ -713,6 +774,61 @@ fun NewReportScreen(
                     .fillMaxHeight()
                     .background(YellowAccent)
             )
+        }
+    }
+}
+
+@Composable
+private fun AiRiskSuggestionCard(
+    insight: PotholeRiskInsight,
+    onUseSuggested: () -> Unit,
+) {
+    val severityColor = when (insight.suggestedSeverity) {
+        PotholeSeverity.MINOR -> Color(0xFF1B5E20)
+        PotholeSeverity.MODERATE -> Color(0xFFEF6C00)
+        PotholeSeverity.SEVERE -> Color(0xFFC62828)
+        PotholeSeverity.CRITICAL -> Color(0xFF8E0000)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(BorderStroke(1.dp, severityColor))
+            .background(Color.White)
+            .padding(6.dp),
+    ) {
+        Text(
+            "AI ROAD RISK ADVISORY",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Black,
+            color = severityColor,
+            fontFamily = FontFamily.Monospace,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            insight.advisoryLine,
+            fontSize = 9.sp,
+            color = Color(0xFF2A2A2A),
+            lineHeight = 11.sp,
+        )
+        Text(
+            "Criticality: ${insight.criticalityLabel} · Suggested severity: ${insight.suggestedSeverity.displayLabel}",
+            fontSize = 9.sp,
+            color = Color(0xFF2A2A2A),
+            lineHeight = 11.sp,
+        )
+        Text(
+            "Rider advice: keep speed below ${insight.suggestedSpeedLimitKmph} km/h near this pothole.",
+            fontSize = 9.sp,
+            color = severityColor,
+            fontWeight = FontWeight.Bold,
+            lineHeight = 11.sp,
+        )
+        Spacer(Modifier.height(4.dp))
+        TextButton(
+            onClick = onUseSuggested,
+            modifier = Modifier.align(Alignment.End),
+        ) {
+            Text("Use AI suggested severity", fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -882,9 +998,121 @@ private fun SeverityTile(
     }
 }
 
+@Composable
+private fun PositionTile(
+    modifier: Modifier,
+    position: PotholePosition,
+    selected: PotholePosition,
+    onSelect: (PotholePosition) -> Unit,
+) {
+    val sel = position == selected
+    Box(
+        modifier = modifier
+            .height(40.dp)
+            .border(BorderStroke(1.dp, DarkBlue))
+            .background(if (sel) OrangeSelect else Color.White.copy(alpha = 0.85f))
+            .clickable { onSelect(position) }
+            .padding(4.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                position.displayLabel.uppercase(),
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 11.sp,
+                color = if (sel) Color.White else DarkBlue,
+            )
+        }
+    }
+}
+
 private fun createImageFile(context: Context): File {
     val time = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
     return File.createTempFile("JPEG_${time}_", ".jpg", context.cacheDir)
+}
+
+private fun locationQualityScore(location: Location): Float {
+    val ageSec = ((System.currentTimeMillis() - location.time).coerceAtLeast(0L) / 1000f)
+        .coerceAtMost(180f)
+    // Lower is better: prioritize accuracy, then freshness.
+    return location.accuracy.coerceAtLeast(1f) + ageSec * 0.35f
+}
+
+private fun pickBetterLocation(current: Location?, candidate: Location?): Location? {
+    if (candidate == null) return current
+    if (current == null) return candidate
+    return if (locationQualityScore(candidate) < locationQualityScore(current)) candidate else current
+}
+
+@SuppressLint("MissingPermission")
+private suspend fun requestSingleUpdate(
+    context: Context,
+    locationManager: LocationManager,
+    provider: String,
+    timeoutMs: Long,
+): Location? {
+    return withTimeoutOrNull(timeoutMs) {
+        suspendCancellableCoroutine { cont ->
+            val cancellationSignal = CancellationSignal()
+            try {
+                LocationManagerCompat.getCurrentLocation(
+                    locationManager,
+                    provider,
+                    cancellationSignal,
+                    ContextCompat.getMainExecutor(context),
+                ) { location ->
+                    if (!cont.isCompleted) cont.resume(location)
+                }
+            } catch (_: Exception) {
+                if (!cont.isCompleted) cont.resume(null)
+            }
+            cont.invokeOnCancellation {
+                runCatching { cancellationSignal.cancel() }
+            }
+        }
+    }
+}
+
+@SuppressLint("MissingPermission")
+private suspend fun fetchBestCalibratedLocation(context: Context): Location? {
+    val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    var best: Location? = null
+    val providers = listOf(
+        LocationManager.GPS_PROVIDER,
+        LocationManager.NETWORK_PROVIDER,
+        LocationManager.PASSIVE_PROVIDER,
+    )
+
+    for (provider in providers) {
+        val last = runCatching { lm.getLastKnownLocation(provider) }.getOrNull()
+        best = pickBetterLocation(best, last)
+    }
+
+    if (runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)) {
+        val gpsFresh = requestSingleUpdate(
+            context = context,
+            locationManager = lm,
+            provider = LocationManager.GPS_PROVIDER,
+            timeoutMs = 6500L,
+        )
+        best = pickBetterLocation(best, gpsFresh)
+    }
+
+    if (runCatching { lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)) {
+        val networkFresh = requestSingleUpdate(
+            context = context,
+            locationManager = lm,
+            provider = LocationManager.NETWORK_PROVIDER,
+            timeoutMs = 3500L,
+        )
+        best = pickBetterLocation(best, networkFresh)
+    }
+
+    return best
 }
 
 private fun parseMapsInput(url: String, lngExtra: String): Pair<Double, Double>? {

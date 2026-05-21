@@ -3,6 +3,7 @@
 package com.example.potholereport.ui.home
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -123,6 +124,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -131,9 +133,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
+import androidx.core.os.CancellationSignal
 import com.example.potholereport.data.CityWeatherForecast
 import com.example.potholereport.data.CityWeatherRepository
 import com.example.potholereport.data.PersistedPotholeReport
+import com.example.potholereport.data.PotholeSeverity
 import com.example.potholereport.data.PotholeReportStatus
 import com.example.potholereport.data.RainCriticality
 import com.example.potholereport.data.RecentReportsRepository
@@ -165,7 +170,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 
 @Composable
 fun HomeScreen(
@@ -204,7 +212,7 @@ fun HomeScreen(
     var showGpsEnableDialog by remember { mutableStateOf(false) }
 
     suspend fun applyLocationFromDevice() {
-        val location = withContext(Dispatchers.IO) { fetchLocation(context) } ?: return
+        val location = fetchCalibratedLocation(context) ?: return
         val addresses = withContext(Dispatchers.IO) {
             runCatching {
                 @Suppress("DEPRECATION")
@@ -378,20 +386,30 @@ fun HomeScreen(
                                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                                     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
                                 ) {
-                                    val fresh = fetchLocation(context)
-                                    val gps = when {
-                                        fresh != null -> Location(fresh).also { lastGpsLocation = Location(it) }
-                                        lastGpsLocation != null -> Location(lastGpsLocation!!)
-                                        else -> null
-                                    }
-                                    if (gps != null) {
-                                        userLocation = Location(gps)
-                                        gpsMetroCity = cityForLocation(gps)
-                                        val gpsCity = gpsMetroCity
-                                        if (gpsCity != null && gpsCity != selectedCity) {
-                                            selectedCity = gpsCity
+                                    coroutineScope.launch {
+                                        // Immediate feedback: snap to last known GPS first, then refine with calibrated fix.
+                                        lastGpsLocation?.let { last ->
+                                            userLocation = Location(last)
+                                            val city = cityForLocation(last)
+                                            gpsMetroCity = city
+                                            if (city != null && city != selectedCity) selectedCity = city
+                                            mapLocateEpoch++
                                         }
-                                        mapLocateEpoch++
+                                        val fresh = fetchCalibratedLocation(context)
+                                        val gps = when {
+                                            fresh != null -> Location(fresh).also { lastGpsLocation = Location(it) }
+                                            lastGpsLocation != null -> Location(lastGpsLocation!!)
+                                            else -> null
+                                        }
+                                        if (gps != null) {
+                                            userLocation = Location(gps)
+                                            gpsMetroCity = cityForLocation(gps)
+                                            val gpsCity = gpsMetroCity
+                                            if (gpsCity != null && gpsCity != selectedCity) {
+                                                selectedCity = gpsCity
+                                            }
+                                            mapLocateEpoch++
+                                        }
                                     }
                                 } else {
                                     permissionLauncher.launch(
@@ -654,6 +672,7 @@ private fun ReportAndTrackSection(
     gpsPinLocation: Location?,
     recentReportsEpoch: Int,
 ) {
+    val context = LocalContext.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -698,10 +717,25 @@ private fun ReportAndTrackSection(
     Spacer(Modifier.height(24.dp))
 
     var expanded by remember { mutableStateOf(false) }
-    val indianCities = listOf(
-        "BENGALURU", "MUMBAI", "DELHI", "CHENNAI", "HYDERABAD", 
-        "KOLKATA", "PUNE", "AHMEDABAD", "JAIPUR", "LUCKNOW"
-    )
+    var showCriticalActiveClusters by rememberSaveable { mutableStateOf(false) }
+    var citySearchQuery by rememberSaveable { mutableStateOf("") }
+    var searchedPlaces by remember { mutableStateOf<List<Pair<String, GeoPoint>>>(emptyList()) }
+    LaunchedEffect(expanded, citySearchQuery) {
+        if (!expanded) return@LaunchedEffect
+        val q = citySearchQuery.trim()
+        if (q.length < 2) {
+            searchedPlaces = emptyList()
+            return@LaunchedEffect
+        }
+        delay(220)
+        searchedPlaces = withContext(Dispatchers.IO) {
+            searchIndianPlaces(context, q, limit = 40)
+        }
+    }
+    val filteredPopularPlaces = remember(citySearchQuery) {
+        if (citySearchQuery.isBlank()) indiaPopularPlaces
+        else indiaPopularPlaces.filter { it.contains(citySearchQuery.trim(), ignoreCase = true) }
+    }
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -723,7 +757,11 @@ private fun ReportAndTrackSection(
 
         Box {
             AssistChip(
-                onClick = { expanded = true },
+                onClick = {
+                    citySearchQuery = ""
+                    searchedPlaces = emptyList()
+                    expanded = true
+                },
                 label = { Text("CHANGE CITY", fontSize = 10.sp) },
                 shape = RoundedCornerShape(0.dp),
                 border = BorderStroke(cityChipBorderWidth, cityChipBorderColor),
@@ -732,13 +770,36 @@ private fun ReportAndTrackSection(
             
             DropdownMenu(
                 expanded = expanded,
-                onDismissRequest = { expanded = false }
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.width(300.dp),
             ) {
-                indianCities.forEach { city ->
+                OutlinedTextField(
+                    value = citySearchQuery,
+                    onValueChange = { citySearchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp),
+                    singleLine = true,
+                    placeholder = { Text("Search any city/town in India", fontSize = 10.sp) },
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp),
+                )
+                Spacer(Modifier.height(4.dp))
+
+                val options = if (searchedPlaces.isNotEmpty()) {
+                    searchedPlaces.take(60).map { it.first to it.second }
+                } else {
+                    filteredPopularPlaces.take(120).map { it to null }
+                }
+                options.forEach { (cityLabel, geoPoint) ->
                     DropdownMenuItem(
-                        text = { Text(city) },
+                        text = { Text(cityLabel) },
                         onClick = {
-                            onCitySelected(city)
+                            val cityKey = normalizePlaceKey(cityLabel)
+                            if (geoPoint != null) {
+                                registerDynamicCityCenter(cityKey, geoPoint.latitude, geoPoint.longitude)
+                            }
+                            onCitySelected(cityKey)
+                            showCriticalActiveClusters = false
                             expanded = false
                         }
                     )
@@ -749,12 +810,56 @@ private fun ReportAndTrackSection(
 
     Spacer(Modifier.height(8.dp))
 
-    Text(
-        "HOT ZONES 5/126  WORST CELL 1 REPORTS",
-        modifier = Modifier.padding(horizontal = 16.dp),
-        fontSize = 12.sp,
-        color = Color.Gray
-    )
+    val gpsAccuracyText = remember(gpsPinLocation?.accuracy, gpsPinLocation?.time) {
+        val loc = gpsPinLocation
+        if (loc != null && loc.hasAccuracy()) {
+            "GPS accuracy: ±${loc.accuracy.toInt().coerceAtLeast(1)}m"
+        } else {
+            "GPS accuracy: searching..."
+        }
+    }
+    val activeCriticalSummaryText = remember(selectedCity, recentReportsEpoch) {
+        val bbox = cityMetroBounds[selectedCity]
+        val cityReports = if (bbox != null) {
+            RecentReportsRepository.reportsForMapInMetro(selectedCity, bbox)
+        } else {
+            emptyList()
+        }
+        val activeReports = cityReports.filter {
+            it.status == PotholeReportStatus.OPEN || it.status == PotholeReportStatus.IN_PROGRESS
+        }
+        val criticalActiveCount = activeReports.count { it.severity == PotholeSeverity.CRITICAL }
+        "ACTIVE CRITICAL REPORTS $criticalActiveCount/${activeReports.size}"
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(
+            onClick = { showCriticalActiveClusters = !showCriticalActiveClusters },
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Text(
+                activeCriticalSummaryText,
+                fontSize = 12.sp,
+                color = if (showCriticalActiveClusters) Color(0xFFB91C1C) else Color.Gray,
+                fontWeight = if (showCriticalActiveClusters) FontWeight.Bold else FontWeight.Medium,
+                textDecoration = TextDecoration.Underline,
+                maxLines = 1,
+            )
+        }
+        Text(
+            gpsAccuracyText,
+            fontSize = 11.sp,
+            color = Color(0xFF4B5563),
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            textAlign = TextAlign.End,
+        )
+    }
 
     Spacer(Modifier.height(8.dp))
 
@@ -768,11 +873,18 @@ private fun ReportAndTrackSection(
         OsmDensityMap(
             selectedCity = selectedCity,
             userLocation = userLocation,
-            onLocateMe = onLocateMe,
+            onLocateMe = {
+                if (showCriticalActiveClusters) showCriticalActiveClusters = false
+                onLocateMe()
+            },
+            onMapViewControlUsed = {
+                if (showCriticalActiveClusters) showCriticalActiveClusters = false
+            },
             onMapTouchChanged = onMapTouchChanged,
             onMapPanEndedAtCenter = onMapPanEndedAtCenter,
             mapLocateEpoch = mapLocateEpoch,
             gpsPinLocation = gpsPinLocation,
+            showCriticalActiveClusters = showCriticalActiveClusters,
             recentReportsEpoch = recentReportsEpoch,
             modifier = Modifier.fillMaxSize()
         )
@@ -953,6 +1065,60 @@ private val cityCenter = mapOf(
     "JAIPUR" to GeoPoint(26.9124, 75.7873),
     "LUCKNOW" to GeoPoint(26.8467, 80.9462),
 )
+private val dynamicCityCenters: MutableMap<String, GeoPoint> = mutableMapOf()
+
+private fun registerDynamicCityCenter(cityKey: String, lat: Double, lon: Double) {
+    if (lat.isNaN() || lon.isNaN()) return
+    dynamicCityCenters[cityKey] = GeoPoint(lat, lon)
+}
+
+private fun cityCenterForKey(cityKey: String): GeoPoint =
+    dynamicCityCenters[cityKey] ?: cityCenter[cityKey] ?: cityCenter.getValue("BENGALURU")
+
+private fun normalizePlaceKey(raw: String): String =
+    raw.trim().replace(Regex("\\s+"), " ").uppercase(Locale.US)
+
+private fun resolvePlaceLabelFromAddress(address: android.location.Address): String {
+    val preferred = listOf(
+        address.locality,
+        address.subAdminArea,
+        address.adminArea,
+        address.subLocality,
+        address.featureName,
+    ).firstOrNull { !it.isNullOrBlank() } ?: "UNKNOWN"
+    return preferred.trim()
+}
+
+private fun searchIndianPlaces(context: Context, query: String, limit: Int = 40): List<Pair<String, GeoPoint>> {
+    if (query.trim().length < 2) return emptyList()
+    return runCatching {
+        val geocoder = Geocoder(context, Locale.Builder().setLanguage("en").setRegion("IN").build())
+        @Suppress("DEPRECATION")
+        val addresses = geocoder.getFromLocationName("${query.trim()}, India", limit) ?: emptyList()
+        val out = linkedMapOf<String, GeoPoint>()
+        for (address in addresses) {
+            val label = normalizePlaceKey(resolvePlaceLabelFromAddress(address))
+            val lat = address.latitude
+            val lon = address.longitude
+            if (label.length < 2) continue
+            out.putIfAbsent(label, GeoPoint(lat, lon))
+        }
+        out.entries.map { it.key to it.value }
+    }.getOrDefault(emptyList())
+}
+
+private val indiaPopularPlaces = listOf(
+    "BENGALURU", "MUMBAI", "DELHI", "CHENNAI", "HYDERABAD", "KOLKATA", "PUNE", "AHMEDABAD", "JAIPUR",
+    "LUCKNOW", "SURAT", "KANPUR", "NAGPUR", "INDORE", "BHOPAL", "PATNA", "VISAKHAPATNAM", "VADODARA",
+    "LUDHIANA", "AGRA", "NASHIK", "FARIDABAD", "MEERUT", "RAJKOT", "VARANASI", "SRINAGAR", "AURANGABAD",
+    "DHANBAD", "AMRITSAR", "ALLAHABAD", "RANCHI", "HOWRAH", "COIMBATORE", "JABALPUR", "GWALIOR", "VIJAYAWADA",
+    "JODHPUR", "MADURAI", "RAIPUR", "KOTA", "GUWAHATI", "CHANDIGARH", "THIRUVANANTHAPURAM", "MYSURU", "MANGALURU",
+    "HUBBALLI", "BELAGAVI", "SHIVAMOGGA", "KALABURAGI", "UJJAIN", "DEHRADUN", "NOIDA", "GURUGRAM", "PUDUCHERRY",
+    "TIRUCHIRAPPALLI", "SALEM", "ERODE", "TIRUPPUR", "KANNUR", "KOCHI", "KOTTAYAM", "KOZHIKODE", "ALAPPUZHA",
+    "BHUBANESWAR", "CUTTACK", "SILIGURI", "ASANSOL", "JAMNAGAR", "JUNAGADH", "BHAVNAGAR", "ANAND", "VAPI",
+    "UDAIPUR", "AJMER", "BIKANER", "SIKAR", "JHANSI", "ALIGARH", "MORADABAD", "GHAZIABAD", "BAREILLY", "GORAKHPUR",
+    "AMRAVATI", "SOLAPUR", "KOLHAPUR", "NANDED", "AKOLA", "SANGALI", "WARANGAL", "NELLORE", "GUNTUR", "KAKINADA",
+)
 
 /** Metro bounding boxes (north, east, south, west) — pan is clamped inside; min zoom keeps view city-sized. */
 private val cityMetroBounds: Map<String, BoundingBox> = mapOf(
@@ -1118,7 +1284,7 @@ private fun visualOutlineCentroidForCity(city: String): GeoPoint {
             verts.map { it.longitude }.average(),
         )
     }
-    return cityCenter[city] ?: cityCenter.getValue("BENGALURU")
+    return cityCenterForKey(city)
 }
 
 private fun cityOverviewBoundingBox(selectedCity: String): BoundingBox? {
@@ -1140,6 +1306,7 @@ private fun cityOverviewBoundingBox(selectedCity: String): BoundingBox? {
 }
 
 private data class ReportGeoCluster(val lat: Double, val lon: Double, val count: Int)
+private const val ACTIVE_CRITICAL_CLUSTER_RADIUS_METERS = 500.0
 
 private fun buildReportGridClusters(
     reports: List<PersistedPotholeReport>,
@@ -1166,24 +1333,66 @@ private fun buildReportGridClusters(
     }
 }
 
+private fun geoDistanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val earthRadiusM = 6_371_000.0
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
+        kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
+        kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
+    val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+    return earthRadiusM * c
+}
+
+private fun buildReportRadiusClusters(
+    reports: List<PersistedPotholeReport>,
+    radiusMeters: Double,
+): List<ReportGeoCluster> {
+    if (reports.isEmpty()) return emptyList()
+    data class MutableCluster(var lat: Double, var lon: Double, var count: Int)
+    val clusters = mutableListOf<MutableCluster>()
+    for (report in reports) {
+        var bestIdx = -1
+        var bestDist = Double.MAX_VALUE
+        for (i in clusters.indices) {
+            val dist = geoDistanceMeters(report.latitude, report.longitude, clusters[i].lat, clusters[i].lon)
+            if (dist <= radiusMeters && dist < bestDist) {
+                bestDist = dist
+                bestIdx = i
+            }
+        }
+        if (bestIdx < 0) {
+            clusters.add(MutableCluster(report.latitude, report.longitude, 1))
+        } else {
+            val c = clusters[bestIdx]
+            val n = c.count + 1
+            c.lat = (c.lat * c.count + report.latitude) / n
+            c.lon = (c.lon * c.count + report.longitude) / n
+            c.count = n
+        }
+    }
+    return clusters.map { ReportGeoCluster(lat = it.lat, lon = it.lon, count = it.count) }
+}
+
 /** Light translucent red disks with white counts (density / not solid blobs). */
 private class ReportClusterMarkersOverlay(
     private val mapView: MapView,
     private val clusters: List<ReportGeoCluster>,
+    criticalMode: Boolean = false,
 ) : Overlay() {
 
     private val circleFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = AndroidColor.argb(115, 252, 165, 165)
+        color = if (criticalMode) AndroidColor.argb(155, 220, 38, 38) else AndroidColor.argb(115, 252, 165, 165)
         style = Paint.Style.FILL
     }
 
     private val circleStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = AndroidColor.argb(200, 200, 70, 70)
+        color = if (criticalMode) AndroidColor.argb(230, 153, 27, 27) else AndroidColor.argb(200, 200, 70, 70)
         style = Paint.Style.STROKE
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = AndroidColor.parseColor("#5C1010")
+        color = if (criticalMode) AndroidColor.parseColor("#FFFFFF") else AndroidColor.parseColor("#5C1010")
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         textAlign = Paint.Align.CENTER
     }
@@ -1206,21 +1415,39 @@ private class ReportClusterMarkersOverlay(
     }
 }
 
-private fun attachReportClusterOverlay(map: MapView, selectedCity: String, decor: CityOutlineDecor) {
+private fun attachReportClusterOverlay(
+    map: MapView,
+    selectedCity: String,
+    decor: CityOutlineDecor,
+    showCriticalActiveClusters: Boolean,
+) {
     decor.clusters?.let { map.overlays.remove(it) }
     decor.clusters = null
     val bbox = cityMetroBounds[selectedCity] ?: return
-    val reports = RecentReportsRepository.reportsForMapInMetro(selectedCity, bbox)
+    val reports = RecentReportsRepository.reportsForMapInMetro(selectedCity, bbox).filter {
+        if (!showCriticalActiveClusters) return@filter true
+        (it.status == PotholeReportStatus.OPEN || it.status == PotholeReportStatus.IN_PROGRESS) &&
+            it.severity == PotholeSeverity.CRITICAL
+    }
     if (reports.isEmpty()) return
-    val clusters = buildReportGridClusters(reports, bbox, gridRows = 6, gridCols = 6)
+    val clusters = if (showCriticalActiveClusters) {
+        buildReportRadiusClusters(reports, radiusMeters = ACTIVE_CRITICAL_CLUSTER_RADIUS_METERS)
+    } else {
+        buildReportGridClusters(reports, bbox, gridRows = 6, gridCols = 6)
+    }
     if (clusters.isEmpty()) return
-    val overlay = ReportClusterMarkersOverlay(map, clusters)
+    val overlay = ReportClusterMarkersOverlay(map, clusters, criticalMode = showCriticalActiveClusters)
     decor.clusters = overlay
     map.overlays.add(overlay)
 }
 
-private fun refreshReportClusterOverlayOnly(map: MapView, selectedCity: String, decor: CityOutlineDecor) {
-    attachReportClusterOverlay(map, selectedCity, decor)
+private fun refreshReportClusterOverlayOnly(
+    map: MapView,
+    selectedCity: String,
+    decor: CityOutlineDecor,
+    showCriticalActiveClusters: Boolean,
+) {
+    attachReportClusterOverlay(map, selectedCity, decor, showCriticalActiveClusters = showCriticalActiveClusters)
     map.invalidate()
 }
 
@@ -2087,7 +2314,12 @@ private fun regionLabelSpecsForCity(city: String): List<RegionLabelSpec> = when 
 }
 
 /** Dim outside city + semi-dark red perimeter (no black stroke). */
-private fun syncCityOutlineDecorations(map: MapView, selectedCity: String, decor: CityOutlineDecor) {
+private fun syncCityOutlineDecorations(
+    map: MapView,
+    selectedCity: String,
+    decor: CityOutlineDecor,
+    showCriticalActiveClusters: Boolean,
+) {
     decor.regionLabels?.let { map.overlays.remove(it) }
     decor.regionLabels = null
     decor.cityName?.let { map.overlays.remove(it) }
@@ -2144,7 +2376,7 @@ private fun syncCityOutlineDecorations(map: MapView, selectedCity: String, decor
     )
     decor.cityName = cityLabel
     map.overlays.add(3, cityLabel)
-    attachReportClusterOverlay(map, selectedCity, decor)
+    attachReportClusterOverlay(map, selectedCity, decor, showCriticalActiveClusters = showCriticalActiveClusters)
     applyCityMapChromeVisibility(decor, visible = false)
     map.invalidate()
 }
@@ -2173,7 +2405,7 @@ private fun cityForLocation(location: Location): String? {
 
 private fun metroRegionForCity(selectedCity: String, userLocation: Location?): MetroMapRegion {
     val bbox = cityMetroBounds[selectedCity]
-    val fallbackCenter = cityCenter[selectedCity] ?: cityCenter.getValue("BENGALURU")
+    val fallbackCenter = cityCenterForKey(selectedCity)
     if (bbox == null) {
         return MetroMapRegion(
             bbox = null,
@@ -2243,7 +2475,11 @@ private fun MapView.scheduleApplyMetroRegion(
 
 /** Zoom/frame so the city outline fills the map tile (tight margins). */
 private fun MapView.fitMetroBoundingBoxOverview(selectedCity: String, restoreSlot: Array<Runnable?>, attempt: Int = 0) {
-    val bbox = cityOverviewBoundingBox(selectedCity) ?: return
+    val bbox = cityOverviewBoundingBox(selectedCity)
+    if (bbox == null) {
+        scheduleApplyMetroRegion(selectedCity, userLocation = null, preserveZoom = false)
+        return
+    }
     restoreSlot[0]?.let { removeCallbacks(it) }
     restoreSlot[0] = null
     val maxAttempts = 15
@@ -2410,7 +2646,7 @@ private fun scheduleGpsPinAutoHide(
         hideRunnableSlot[0] = null
     }
     hideRunnableSlot[0] = r
-    map.postDelayed(r, 5000L)
+    map.postDelayed(r, 10_000L)
 }
 
 @Composable
@@ -2418,7 +2654,9 @@ private fun OsmDensityMap(
     selectedCity: String,
     userLocation: Location?,
     gpsPinLocation: Location?,
+    showCriticalActiveClusters: Boolean,
     onLocateMe: () -> Unit,
+    onMapViewControlUsed: () -> Unit,
     onMapTouchChanged: (Boolean) -> Unit,
     onMapPanEndedAtCenter: (Double, Double) -> Unit,
     mapLocateEpoch: Int,
@@ -2437,6 +2675,7 @@ private fun OsmDensityMap(
     val mapTouchIdleRunnables = remember { arrayOfNulls<Runnable>(2) }
     val lastOutlineCity = remember { mutableStateOf<String?>(null) }
     val lastSyncedReportEpoch = remember { mutableIntStateOf(-1) }
+    val lastCriticalClusterMode = remember { mutableStateOf<Boolean?>(null) }
     val gpsMarkerRef = remember { arrayOfNulls<Marker>(1) }
     val gpsPinHideRunnable = remember { arrayOfNulls<Runnable>(1) }
     /** Latest GPS fix for map touch hit-test (factory listener reads this each frame). */
@@ -2504,9 +2743,25 @@ private fun OsmDensityMap(
     val scheduleHideZoomControls: () -> Unit = {
         zoomHideJob.job?.cancel()
         zoomHideJob.job = coroutineScope.launch {
-            delay(3200)
+            delay(2400)
             showZoomControls = false
         }
+    }
+    val runFastMapAction: ((MapView) -> Unit) -> Unit = fun(action: (MapView) -> Unit) {
+        val map = mapHolder.map ?: return
+        // Temporarily suppress heavier overlays to make map-control taps feel snappier.
+        cityOutlineDecor.regionLabels?.isEnabled = false
+        cityOutlineDecor.cityName?.drawSuppressed = true
+        labelOverlayRef[0]?.drawSuppressed = true
+        action(map)
+        map.invalidate()
+        map.postDelayed({
+            val chrome = cityMapChromeVisibleRef[0]
+            cityOutlineDecor.regionLabels?.isEnabled = chrome
+            cityOutlineDecor.cityName?.drawSuppressed = false
+            labelOverlayRef[0]?.drawSuppressed = false
+            map.invalidate()
+        }, 72L)
     }
     touchCallbacks.onMapTouchChanged = { active ->
         mapUserInteracting = active
@@ -2519,6 +2774,7 @@ private fun OsmDensityMap(
         }
     }
     touchCallbacks.onMapPanEndedAtCenter = panEnd@{ lat, lng ->
+        onMapViewControlUsed()
         val map = mapHolder.map
         if (map != null && map.isAtCityOverviewZoom()) {
             if (map.needsCityOverviewReframe(selectedCity)) {
@@ -2618,7 +2874,6 @@ private fun OsmDensityMap(
         val mapFabGap = 8.dp
         val mapFabShape = RoundedCornerShape(10.dp)
         val mapFabIcon = 16.dp
-
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -2828,12 +3083,27 @@ private fun OsmDensityMap(
             },
             update = { view ->
                 if (lastOutlineCity.value != selectedCity) {
-                    syncCityOutlineDecorations(view, selectedCity, cityOutlineDecor)
+                    syncCityOutlineDecorations(
+                        map = view,
+                        selectedCity = selectedCity,
+                        decor = cityOutlineDecor,
+                        showCriticalActiveClusters = showCriticalActiveClusters,
+                    )
                     lastOutlineCity.value = selectedCity
                     lastSyncedReportEpoch.intValue = recentReportsEpoch
-                } else if (lastSyncedReportEpoch.intValue != recentReportsEpoch) {
-                    refreshReportClusterOverlayOnly(view, selectedCity, cityOutlineDecor)
+                    lastCriticalClusterMode.value = showCriticalActiveClusters
+                } else if (
+                    lastSyncedReportEpoch.intValue != recentReportsEpoch ||
+                    lastCriticalClusterMode.value != showCriticalActiveClusters
+                ) {
+                    refreshReportClusterOverlayOnly(
+                        map = view,
+                        selectedCity = selectedCity,
+                        decor = cityOutlineDecor,
+                        showCriticalActiveClusters = showCriticalActiveClusters,
+                    )
                     lastSyncedReportEpoch.intValue = recentReportsEpoch
+                    lastCriticalClusterMode.value = showCriticalActiveClusters
                 }
                 labelOverlayRef[0] = cityOutlineDecor.regionLabels
                 cityOutlineDecor.cityName?.let { cityLabel ->
@@ -2985,7 +3255,8 @@ private fun OsmDensityMap(
             ) {
                 SmallFloatingActionButton(
                     onClick = {
-                        mapHolder.map?.controller?.zoomIn()
+                        onMapViewControlUsed()
+                        runFastMapAction { it.controller.zoomIn() }
                         scheduleHideZoomControls()
                     },
                     containerColor = Color.White,
@@ -3000,7 +3271,8 @@ private fun OsmDensityMap(
                 }
                 SmallFloatingActionButton(
                     onClick = {
-                        mapHolder.map?.zoomOutWithinCityView()
+                        onMapViewControlUsed()
+                        runFastMapAction { it.zoomOutWithinCityView() }
                         scheduleHideZoomControls()
                     },
                     containerColor = Color.White,
@@ -3015,7 +3287,8 @@ private fun OsmDensityMap(
                 }
                 SmallFloatingActionButton(
                     onClick = {
-                        mapHolder.map?.scheduleFitCityOverview(selectedCity, overviewRestore)
+                        onMapViewControlUsed()
+                        runFastMapAction { it.scheduleFitCityOverview(selectedCity, overviewRestore) }
                         scheduleHideZoomControls()
                     },
                     containerColor = Color.White,
@@ -3030,12 +3303,20 @@ private fun OsmDensityMap(
                 }
                 SmallFloatingActionButton(
                     onClick = {
+                        onMapViewControlUsed()
                         val map = mapHolder.map
                         if (map == null || zoomOutMapUsedSinceMax || !map.isAtMaxZoom()) {
                             scheduleHideZoomControls()
                             return@SmallFloatingActionButton
                         }
-                        if (map.applyMetroDefaultZoom()) {
+                        if (run {
+                                var applied = false
+                                runFastMapAction {
+                                    applied = it.applyMetroDefaultZoom()
+                                }
+                                applied
+                            }
+                        ) {
                             zoomOutMapUsedSinceMax = true
                         }
                         scheduleHideZoomControls()
@@ -3767,19 +4048,115 @@ private fun openLocationSettings(context: Context) {
     )
 }
 
-private fun fetchLocation(context: Context): Location? {
+private fun locationQualityScore(location: Location): Float {
+    val ageSec = ((System.currentTimeMillis() - location.time).coerceAtLeast(0L) / 1000f)
+        .coerceAtMost(240f)
+    // Lower score is better: prioritize accuracy, then freshness.
+    return location.accuracy.coerceAtLeast(1f) + ageSec * 0.30f
+}
+
+private fun shouldSeekMorePrecision(location: Location?): Boolean {
+    if (location == null) return true
+    val ageMs = (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
+    return location.accuracy > 16f || ageMs > 15_000L
+}
+
+private fun chooseBetterLocation(current: Location?, candidate: Location?): Location? {
+    if (candidate == null) return current
+    if (current == null) return candidate
+    return if (locationQualityScore(candidate) < locationQualityScore(current)) candidate else current
+}
+
+@SuppressLint("MissingPermission")
+private suspend fun requestOneFreshLocation(
+    context: Context,
+    locationManager: LocationManager,
+    provider: String,
+    timeoutMs: Long,
+): Location? {
+    return withTimeoutOrNull(timeoutMs) {
+        suspendCancellableCoroutine { cont ->
+            val cancellationSignal = CancellationSignal()
+            try {
+                LocationManagerCompat.getCurrentLocation(
+                    locationManager,
+                    provider,
+                    cancellationSignal,
+                    ContextCompat.getMainExecutor(context),
+                ) { location ->
+                    if (!cont.isCompleted) cont.resume(location)
+                }
+            } catch (_: Exception) {
+                if (!cont.isCompleted) cont.resume(null)
+            }
+            cont.invokeOnCancellation {
+                runCatching { cancellationSignal.cancel() }
+            }
+        }
+    }
+}
+
+@SuppressLint("MissingPermission")
+private suspend fun fetchCalibratedLocation(context: Context): Location? = withContext(Dispatchers.Default) {
     try {
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            return null
+        val hasPermission =
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!hasPermission) return@withContext null
+
+        var best: Location? = null
+        val providers = listOf(
+            LocationManager.GPS_PROVIDER,
+            LocationManager.NETWORK_PROVIDER,
+            LocationManager.PASSIVE_PROVIDER,
+        )
+        for (provider in providers) {
+            val last = runCatching { lm.getLastKnownLocation(provider) }.getOrNull()
+            best = chooseBetterLocation(best, last)
         }
-        return lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            ?: lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
-    } catch (e: Exception) {
-        e.printStackTrace()
+
+        if (runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)) {
+            best = chooseBetterLocation(
+                best,
+                requestOneFreshLocation(
+                    context = context,
+                    locationManager = lm,
+                    provider = LocationManager.GPS_PROVIDER,
+                    timeoutMs = 6500L,
+                ),
+            )
+        }
+        if (runCatching { lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)) {
+            best = chooseBetterLocation(
+                best,
+                requestOneFreshLocation(
+                    context = context,
+                    locationManager = lm,
+                    provider = LocationManager.NETWORK_PROVIDER,
+                    timeoutMs = 3000L,
+                ),
+            )
+        }
+
+        // If still coarse/stale, take one extra GPS refinement pass.
+        if (shouldSeekMorePrecision(best) &&
+            runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
+        ) {
+            best = chooseBetterLocation(
+                best,
+                requestOneFreshLocation(
+                    context = context,
+                    locationManager = lm,
+                    provider = LocationManager.GPS_PROVIDER,
+                    timeoutMs = 2800L,
+                ),
+            )
+        }
+        best
+    } catch (_: Exception) {
+        null
     }
-    return null
 }
 
 @Preview(showBackground = true)
