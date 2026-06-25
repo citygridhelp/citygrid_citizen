@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="map_tag_city_view_sync" type="id" />
+    <item name="map_tag_city_view_last" type="id" />
+</resources>

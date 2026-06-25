@@ -1,0 +1,18 @@
+# YOLOv8 dataset descriptor (used by train_yolov8.py).
+#
+# Once you have labelled images (via Roboflow or manually with Ultralytics
+# label format), `images/train` and `images/val` should contain the photos,
+# and `labels/train` / `labels/val` should contain matching `.txt` label
+# files (one per image, same basename).
+#
+# A single .txt label line follows the YOLO format:
+#   <class_id> <x_center> <y_center> <width> <height>
+# All coordinates are normalised to [0, 1].
+# class_id is 0 for "pothole" (single-class detection model).
+
+path: .
+train: images/train
+val: images/val
+
+names:
+  0: pothole

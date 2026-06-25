@@ -1,0 +1,189 @@
+[
+  {
+    "email": "commissioner.bengaluru@bbmp.gov.in",
+    "displayName": "Municipal Commissioner",
+    "role": "COMMISSIONER",
+    "cityKey": "BENGALURU",
+    "position": "Municipal Commissioner",
+    "corporation": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
+    "zoneLabel": "All zones",
+    "assigneeKey": "",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "admin.bengaluru@bbmp.gov.in",
+    "displayName": "BBMP City Administrator",
+    "role": "COMMISSIONER",
+    "cityKey": "BENGALURU",
+    "position": "City Administrator",
+    "corporation": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
+    "zoneLabel": "All zones",
+    "assigneeKey": "",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "saroja.east@bbmp.gov.in",
+    "displayName": "Smt. Saroja B B, K.A.S",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "Joint Commissioner (Zone Head)",
+    "corporation": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
+    "zoneLabel": "East Zone",
+    "assigneeKey": "BENGALURU:EAST",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "sangappa.west@bbmp.gov.in",
+    "displayName": "Sri. Sangappa",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "Joint Commissioner (Zone Head)",
+    "corporation": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
+    "zoneLabel": "West Zone",
+    "assigneeKey": "BENGALURU:WEST",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "shivakumar.south@bbmp.gov.in",
+    "displayName": "Shri. HR Shivakumar, K.A.S",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "Joint Commissioner (Zone Head)",
+    "corporation": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
+    "zoneLabel": "South Zone",
+    "assigneeKey": "BENGALURU:SOUTH",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "dakshayini.mahadevapura@bbmp.gov.in",
+    "displayName": "Dr. Dakshayini, K.A.S",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "Joint Commissioner (Zone Head)",
+    "corporation": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
+    "zoneLabel": "Mahadevapura Zone",
+    "assigneeKey": "BENGALURU:MAHADEVAPURA",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "ajith.bommanahalli@bbmp.gov.in",
+    "displayName": "Shri. Ajith M, K.A.S",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "Joint Commissioner (Zone Head)",
+    "corporation": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
+    "zoneLabel": "Bommanahalli Zone",
+    "assigneeKey": "BENGALURU:BOMMANAHALLI",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "arathi.rrnagar@bbmp.gov.in",
+    "displayName": "Smt. Arathi Anand, K.A.S",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "Joint Commissioner (Zone Head)",
+    "corporation": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
+    "zoneLabel": "Rajarajeshwari Nagar Zone",
+    "assigneeKey": "BENGALURU:RR_NAGAR",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "preetham.dasarahalli@bbmp.gov.in",
+    "displayName": "Sri. Preetham Nasalapure",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "Joint Commissioner (Zone Head)",
+    "corporation": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
+    "zoneLabel": "Dasarahalli Zone",
+    "assigneeKey": "BENGALURU:DASARAHALLI",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "naeem.yelahanka@bbmp.gov.in",
+    "displayName": "Sri Mohammed Naeem Momin",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "Joint Commissioner (Zone Head)",
+    "corporation": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
+    "zoneLabel": "Yelahanka Zone",
+    "assigneeKey": "BENGALURU:YELAHANKA",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "mumbai.island@mcgm.gov.in",
+    "displayName": "Assistant Municipal Commissioner (Ward A – Fort)",
+    "role": "ZONE_HEAD",
+    "cityKey": "MUMBAI",
+    "position": "Zone Head — Island City",
+    "corporation": "Brihanmumbai Municipal Corporation (BMC)",
+    "zoneLabel": "City Ward Cluster (A–E)",
+    "assigneeKey": "MUMBAI:ISLAND_CITY",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "mumbai.central@mcgm.gov.in",
+    "displayName": "Assistant Municipal Commissioner (Ward F/North)",
+    "role": "ZONE_HEAD",
+    "cityKey": "MUMBAI",
+    "position": "Zone Head — Central",
+    "corporation": "Brihanmumbai Municipal Corporation (BMC)",
+    "zoneLabel": "Central Ward Cluster (F–N)",
+    "assigneeKey": "MUMBAI:CENTRAL",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "ramesh.east@bbmp.gov.in",
+    "displayName": "Shri. Ramesh Kumar",
+    "role": "FIELD_OFFICER",
+    "cityKey": "BENGALURU",
+    "position": "Assistant Executive Engineer (Roads)",
+    "corporation": "BBMP East Zone",
+    "zoneLabel": "East Zone",
+    "assigneeKey": "BENGALURU:EAST",
+    "fieldOfficerKey": "BENGALURU:EAST:ENG_01"
+  },
+  {
+    "email": "venkatesh.west@bbmp.gov.in",
+    "displayName": "Shri. Venkatesh Rao",
+    "role": "FIELD_OFFICER",
+    "cityKey": "BENGALURU",
+    "position": "Assistant Executive Engineer (Roads)",
+    "corporation": "BBMP West Zone",
+    "zoneLabel": "West Zone",
+    "assigneeKey": "BENGALURU:WEST",
+    "fieldOfficerKey": "BENGALURU:WEST:ENG_01"
+  },
+  {
+    "email": "arun.south@bbmp.gov.in",
+    "displayName": "Shri. Arun Prakash",
+    "role": "FIELD_OFFICER",
+    "cityKey": "BENGALURU",
+    "position": "Assistant Executive Engineer (Roads)",
+    "corporation": "BBMP South Zone",
+    "zoneLabel": "South Zone",
+    "assigneeKey": "BENGALURU:SOUTH",
+    "fieldOfficerKey": "BENGALURU:SOUTH:ENG_01"
+  },
+  {
+    "email": "karthik.mahadevapura@bbmp.gov.in",
+    "displayName": "Shri. Karthik N",
+    "role": "FIELD_OFFICER",
+    "cityKey": "BENGALURU",
+    "position": "Junior Engineer (Maintenance)",
+    "corporation": "BBMP Mahadevapura Zone",
+    "zoneLabel": "Mahadevapura Zone",
+    "assigneeKey": "BENGALURU:MAHADEVAPURA",
+    "fieldOfficerKey": "BENGALURU:MAHADEVAPURA:ENG_01"
+  },
+  {
+    "email": "anitha.yelahanka@bbmp.gov.in",
+    "displayName": "Smt. Anitha Reddy",
+    "role": "FIELD_OFFICER",
+    "cityKey": "BENGALURU",
+    "position": "Assistant Executive Engineer (Roads)",
+    "corporation": "BBMP Yelahanka Zone",
+    "zoneLabel": "Yelahanka Zone",
+    "assigneeKey": "BENGALURU:YELAHANKA",
+    "fieldOfficerKey": "BENGALURU:YELAHANKA:ENG_01"
+  }
+]
