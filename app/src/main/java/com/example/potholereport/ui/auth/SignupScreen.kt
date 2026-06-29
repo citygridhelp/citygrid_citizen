@@ -210,7 +210,7 @@ fun SignupScreen(
                         }
                     }
                     SignupStartResult.EMAIL_ALREADY_REGISTERED -> {
-                        emailError = "Email already registered. Please log in."
+                        emailError = "An account with this email already exists. Sign in instead."
                     }
                     SignupStartResult.FAILED -> {
                         infoMessage = "Could not start verification. Try again."

@@ -35,6 +35,7 @@ object SupabaseAuthRepository {
         val client = SupabaseClientProvider.client ?: return SignupStartResult.FAILED
         val normalized = email.trim().lowercase()
         val cleanName = name.trim()
+        if (emailExists(normalized) == true) return SignupStartResult.EMAIL_ALREADY_REGISTERED
         return try {
             client.auth.signUpWith(Email) {
                 this.email = normalized
@@ -175,6 +176,7 @@ object SupabaseAuthRepository {
         if (emailExists(normalized) == true) return EmailChangeStartResult.EMAIL_ALREADY_REGISTERED
         return try {
             client.auth.updateUser { email = normalized }
+            runCatching { client.auth.resendEmail(OtpType.Email.EMAIL_CHANGE, normalized) }
             EmailChangeStartResult.CODE_SENT
         } catch (e: Exception) {
             val msg = (e.message ?: "").lowercase()

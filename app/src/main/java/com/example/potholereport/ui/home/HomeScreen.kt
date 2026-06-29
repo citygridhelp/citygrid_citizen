@@ -361,6 +361,7 @@ fun HomeScreen(
                     ) {
                         Spacer(Modifier.height(12.dp))
                         MyReportsSection(
+                            reporterUserId = anonymousUserId,
                             recentReportsEpoch = recentReportsEpoch,
                             onReportsMutated = onRecentReportsMutated,
                         )
@@ -3380,6 +3381,7 @@ private fun PersistedPotholeReport.matchesMyReportsFilter(filter: MyReportsStatF
 
 @Composable
 private fun MyReportsSection(
+    reporterUserId: String,
     recentReportsEpoch: Int,
     onReportsMutated: () -> Unit,
 ) {
@@ -3387,8 +3389,8 @@ private fun MyReportsSection(
     var deleteTarget by remember { mutableStateOf<PersistedPotholeReport?>(null) }
     var detailReport by remember { mutableStateOf<PersistedPotholeReport?>(null) }
     var statFilter by rememberSaveable { mutableStateOf(MyReportsStatFilter.TOTAL) }
-    val myReports = remember(recentReportsEpoch) {
-        RecentReportsRepository.signedInReportsOrdered()
+    val myReports = remember(recentReportsEpoch, reporterUserId) {
+        RecentReportsRepository.signedInReportsOrdered(reporterUserId)
     }
     val total = myReports.size
     val completedCount = myReports.count { it.status == PotholeReportStatus.COMPLETED }
@@ -3424,7 +3426,7 @@ private fun MyReportsSection(
                         deleteTarget = null
                         scope.launch {
                             val ok = withContext(Dispatchers.IO) {
-                                RecentReportsRepository.deleteSignedInReport(id)
+                                RecentReportsRepository.deleteSignedInReport(id, reporterUserId)
                             }
                             if (ok) onReportsMutated()
                         }

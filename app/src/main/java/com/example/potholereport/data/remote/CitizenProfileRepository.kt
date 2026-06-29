@@ -5,7 +5,6 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /**
@@ -55,5 +54,14 @@ object CitizenProfileRepository {
             Log.w(TAG, "syncEmail failed: ${e.message}")
             false
         }
+    }
+
+    /** Best-effort mirror of auth.users.email into citizen_profiles (safety net on sign-in). */
+    suspend fun syncEmailFromAuthSession(): Boolean {
+        val client = SupabaseClientProvider.client ?: return false
+        runCatching { client.auth.awaitInitialization() }
+        val liveEmail = client.auth.currentUserOrNull()?.email?.trim()?.lowercase()
+            ?: return false
+        return syncEmail(liveEmail)
     }
 }

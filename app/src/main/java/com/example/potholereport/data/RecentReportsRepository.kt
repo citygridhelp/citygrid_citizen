@@ -144,12 +144,14 @@ object RecentReportsRepository {
         }
     }
 
-    /** Reports submitted while the user was signed in (MY REPORTS tab), newest first. */
-    fun signedInReportsOrdered(limit: Int = 80): List<PersistedPotholeReport> {
+    /** Reports for the signed-in citizen ([reporterUserId] = PW-xxx), newest first. */
+    fun signedInReportsOrdered(reporterUserId: String, limit: Int = 80): List<PersistedPotholeReport> {
+        val ownerId = reporterUserId.trim()
+        if (ownerId.isBlank()) return emptyList()
         synchronized(lock) {
             return cache
                 .asSequence()
-                .filter { it.submittedSignedIn }
+                .filter { it.submittedSignedIn && it.reporterUserId == ownerId }
                 .sortedByDescending { it.createdAtMs }
                 .take(limit)
                 .toList()
@@ -217,7 +219,7 @@ object RecentReportsRepository {
         }
     }
 
-    /** Pulls signed-in reports from Supabase and merges status locally. */
+    /** Pulls the signed-in citizen's reports from Supabase and merges them locally. */
     suspend fun syncSignedInReportsFromSupabase(): Boolean {
         val ctx = appContext ?: return false
         if (!com.example.potholereport.data.remote.SupabaseClientProvider.isConfigured) return false
@@ -229,10 +231,42 @@ object RecentReportsRepository {
         return synchronized(lock) {
             var changed = false
             for (row in rows) {
+                val ownerId = row.reporterUserId.trim()
+                if (ownerId.isBlank()) continue
                 val visibleStatus = PotholeReportStatus.fromStored(row.citizenVisibleStatus)
-                val idx = cache.indexOfFirst { it.id == row.id && it.submittedSignedIn }
-                if (idx < 0) continue
+                val idx = cache.indexOfFirst { it.id == row.id }
+                if (idx < 0) {
+                    val lat = row.latitude ?: Double.NaN
+                    val lon = row.longitude ?: Double.NaN
+                    var entry = PersistedPotholeReport(
+                        id = row.id,
+                        cityKey = row.cityKey,
+                        createdAtMs = row.createdAtMs,
+                        photoPath = "",
+                        latitude = lat,
+                        longitude = lon,
+                        areaLabel = row.areaLabel,
+                        severity = PotholeSeverity.fromStored(row.severity),
+                        note = row.citizenNote,
+                        submittedSignedIn = true,
+                        status = visibleStatus,
+                        reporterUserId = ownerId,
+                        assigneeKey = row.assigneeKey,
+                        assigneeCorporation = row.assigneeCorp,
+                        assigneeZone = row.assigneeZone,
+                        assigneeName = row.assigneeName,
+                        assigneePosition = row.assigneeRole,
+                        assigneeOfficeAddress = row.assigneeAddr,
+                    )
+                    if (row.assigneeName.isBlank()) {
+                        entry = entry.withAssignee(MunicipalAssignmentResolver.resolve(row.cityKey, lat, lon))
+                    }
+                    cache.add(entry)
+                    changed = true
+                    continue
+                }
                 val existing = cache[idx]
+                if (!existing.submittedSignedIn || existing.reporterUserId != ownerId) continue
                 val merged = existing.copy(
                     status = visibleStatus,
                     assigneeKey = row.assigneeKey.ifBlank { existing.assigneeKey },
@@ -247,7 +281,14 @@ object RecentReportsRepository {
                     changed = true
                 }
             }
-            if (changed) saveToDisk(ctx)
+            if (changed) {
+                cache.sortByDescending { it.createdAtMs }
+                while (cache.size > MAX_STORED) {
+                    val removed = cache.removeAt(cache.lastIndex)
+                    deleteReportFiles(removed)
+                }
+                saveToDisk(ctx)
+            }
             changed
         }
     }
@@ -314,10 +355,18 @@ object RecentReportsRepository {
      * Reserved for the government response application to sync status updates.
      * Not exposed in the citizen app UI.
      */
-    fun updateSignedInReportStatus(reportId: Long, status: PotholeReportStatus): Boolean {
+    fun updateSignedInReportStatus(
+        reportId: Long,
+        reporterUserId: String,
+        status: PotholeReportStatus,
+    ): Boolean {
+        val ownerId = reporterUserId.trim()
+        if (ownerId.isBlank()) return false
         val ctx = appContext ?: return false
         return synchronized(lock) {
-            val idx = cache.indexOfFirst { it.id == reportId && it.submittedSignedIn }
+            val idx = cache.indexOfFirst {
+                it.id == reportId && it.submittedSignedIn && it.reporterUserId == ownerId
+            }
             if (idx < 0) return@synchronized false
             cache[idx] = cache[idx].copy(status = status)
             saveToDisk(ctx)
@@ -325,10 +374,14 @@ object RecentReportsRepository {
         }
     }
 
-    fun deleteSignedInReport(reportId: Long): Boolean {
+    fun deleteSignedInReport(reportId: Long, reporterUserId: String): Boolean {
+        val ownerId = reporterUserId.trim()
+        if (ownerId.isBlank()) return false
         val ctx = appContext ?: return false
         return synchronized(lock) {
-            val idx = cache.indexOfFirst { it.id == reportId && it.submittedSignedIn }
+            val idx = cache.indexOfFirst {
+                it.id == reportId && it.submittedSignedIn && it.reporterUserId == ownerId
+            }
             if (idx < 0) return@synchronized false
             val removed = cache.removeAt(idx)
             deleteReportFiles(removed)
@@ -372,7 +425,10 @@ object RecentReportsRepository {
                         )
                     )
                 }
-            }.filter { File(it.photoPath).exists() }
+            }.filter { r ->
+                // Keep signed-in rows synced from Supabase even before photos are cached locally.
+                r.submittedSignedIn || File(r.photoPath).exists()
+            }
         } catch (_: Exception) {
             emptyList()
         }

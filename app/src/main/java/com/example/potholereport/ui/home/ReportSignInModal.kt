@@ -430,7 +430,7 @@ fun ReportSignInModal(
                                             }
                                             SignupStartResult.EMAIL_ALREADY_REGISTERED -> {
                                                 infoMessage = null
-                                                emailError = "Email already registered. Please sign in."
+                                                emailError = "An account with this email already exists. Sign in instead."
                                             }
                                             SignupStartResult.FAILED ->
                                                 infoMessage = "Could not send the code. Please try again."

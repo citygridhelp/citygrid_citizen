@@ -98,6 +98,9 @@ fun AuthNavHost(
             val stableId = withContext(Dispatchers.IO) {
                 CitizenProfileRepository.resolveReporterUserId(profile.anonymousUserId)
             }
+            withContext(Dispatchers.IO) {
+                CitizenProfileRepository.syncEmailFromAuthSession()
+            }
             if (stableId != anonymousUserId &&
                 UserProfileRepository.updateAnonymousUserId(profile.email, stableId)
             ) {
