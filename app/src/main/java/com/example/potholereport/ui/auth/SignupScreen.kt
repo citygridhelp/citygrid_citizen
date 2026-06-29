@@ -45,7 +45,7 @@ fun SignupScreen(
     onNavigateBackToLogin: () -> Unit,
     onStartSignupVerification: (String, String, String) -> Pair<SignupStartResult, String?>,
     onVerifySignupCode: (String, String) -> SignupVerifyResult,
-    onSignupSuccess: () -> Unit,
+    onSignupSuccess: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var name by rememberSaveable { mutableStateOf("") }
@@ -246,7 +246,7 @@ fun SignupScreen(
                         return@Button
                     }
                     when (onVerifySignupCode(email.trim(), code.trim())) {
-                        SignupVerifyResult.SUCCESS -> onSignupSuccess()
+                        SignupVerifyResult.SUCCESS -> onSignupSuccess(email.trim())
                         SignupVerifyResult.INVALID_CODE -> codeError = "Invalid verification code"
                         SignupVerifyResult.EXPIRED -> codeError = "Code expired. Request a new code."
                         SignupVerifyResult.FAILED -> codeError = "Could not verify code. Try again."
@@ -296,7 +296,7 @@ private fun SignupScreenPreview() {
             onNavigateBackToLogin = {},
             onStartSignupVerification = { _, _, _ -> SignupStartResult.CODE_SENT to "123456" },
             onVerifySignupCode = { _, _ -> SignupVerifyResult.SUCCESS },
-            onSignupSuccess = {},
+            onSignupSuccess = { _ -> },
         )
     }
 }

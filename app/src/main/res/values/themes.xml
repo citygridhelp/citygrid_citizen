@@ -1,5 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.PotholeReport" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.PotholeReport" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/new_app_icon_launcher_background</item>
+    </style>
+
+    <!-- Splash bitmap in the window during cold start (API 24–30). -->
+    <style name="Theme.PotholeReport.Launch" parent="Theme.PotholeReport">
+        <item name="android:windowBackground">@drawable/splash_window_background</item>
+        <item name="android:windowDisablePreview">true</item>
+    </style>
+
+    <!-- After the system splash exits on API 31+; keeps splash art until Compose draws. -->
+    <style name="Theme.PotholeReport.SplashHost" parent="Theme.PotholeReport">
+        <item name="android:windowBackground">@drawable/splash_window_background</item>
+    </style>
 </resources>

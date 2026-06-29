@@ -87,6 +87,21 @@ object UserProfileRepository {
         }
     }
 
+    /** Replaces the privacy-safe reporter id after Supabase reconciliation. */
+    fun updateAnonymousUserId(email: String, anonymousUserId: String): Boolean {
+        val key = email.trim().lowercase(Locale.US)
+        val id = anonymousUserId.trim()
+        if (id.isBlank()) return false
+        synchronized(lock) {
+            val map = loadProfilesMap().toMutableMap()
+            val profile = map[key] ?: return false
+            if (profile.anonymousUserId == id) return true
+            map[key] = profile.copy(anonymousUserId = id)
+            saveProfilesMap(map)
+            return true
+        }
+    }
+
     fun maskEmail(email: String): String {
         val trimmed = email.trim()
         val at = trimmed.indexOf('@')

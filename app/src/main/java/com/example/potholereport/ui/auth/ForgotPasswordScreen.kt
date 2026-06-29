@@ -38,6 +38,7 @@ fun ForgotPasswordScreen(
     onRequestResetCode: (String) -> Pair<PasswordResetCodeResult, String?>,
     onResetPassword: (String, String, String) -> PasswordResetResult,
     onResetSuccess: () -> Unit,
+    supabaseLinkReset: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var email by rememberSaveable { mutableStateOf("") }
@@ -76,7 +77,11 @@ fun ForgotPasswordScreen(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Enter your email to receive a reset code and set a new password.",
+            text = if (supabaseLinkReset) {
+                "Enter your email and we will send a password reset link."
+            } else {
+                "Enter your email to receive a reset code and set a new password."
+            },
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.fillMaxWidth(),
@@ -110,7 +115,9 @@ fun ForgotPasswordScreen(
                     when (status) {
                         PasswordResetCodeResult.CODE_SENT -> {
                             codeSent = true
-                            infoMessage = if (debugCode != null) {
+                            infoMessage = if (supabaseLinkReset) {
+                                "Reset link sent. Open the email on this device to set a new password, then return here to log in."
+                            } else if (debugCode != null) {
                                 "Reset code sent. Use code: $debugCode"
                             } else {
                                 "Reset code sent. Check your email."
@@ -130,7 +137,7 @@ fun ForgotPasswordScreen(
             Text(if (codeSent) "Resend reset code" else "Send reset code")
         }
 
-        if (codeSent) {
+        if (codeSent && !supabaseLinkReset) {
             Spacer(Modifier.height(14.dp))
             OutlinedTextField(
                 value = code,

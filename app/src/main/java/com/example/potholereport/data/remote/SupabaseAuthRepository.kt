@@ -1,6 +1,9 @@
 package com.example.potholereport.data.remote
 
+import com.example.potholereport.data.EmailChangeStartResult
+import com.example.potholereport.data.EmailChangeVerifyResult
 import com.example.potholereport.data.LoginResult
+import com.example.potholereport.data.PasswordResetCodeResult
 import com.example.potholereport.data.SignupStartResult
 import com.example.potholereport.data.SignupVerifyResult
 import io.github.jan.supabase.auth.OtpType
@@ -156,4 +159,87 @@ object SupabaseAuthRepository {
     }
 
     suspend fun hasLiveSession(): Boolean = restoreSignedInEmail() != null
+
+    /**
+     * Starts a signed-in email change. Supabase emails a verification code to the new
+     * address (and, when secure email change is enabled, to the current address after
+     * the first code is confirmed).
+     */
+    suspend fun startEmailChange(newEmail: String): EmailChangeStartResult {
+        val client = SupabaseClientProvider.client ?: return EmailChangeStartResult.NOT_SIGNED_IN
+        runCatching { client.auth.awaitInitialization() }
+        if (client.auth.currentUserOrNull()?.id == null) return EmailChangeStartResult.NOT_SIGNED_IN
+        val normalized = newEmail.trim().lowercase()
+        val current = client.auth.currentUserOrNull()?.email?.trim()?.lowercase().orEmpty()
+        if (normalized == current) return EmailChangeStartResult.SAME_EMAIL
+        if (emailExists(normalized) == true) return EmailChangeStartResult.EMAIL_ALREADY_REGISTERED
+        return try {
+            client.auth.updateUser { email = normalized }
+            EmailChangeStartResult.CODE_SENT
+        } catch (e: Exception) {
+            val msg = (e.message ?: "").lowercase()
+            when {
+                msg.contains("already") || msg.contains("registered") || msg.contains("exists") ->
+                    EmailChangeStartResult.EMAIL_ALREADY_REGISTERED
+                else -> EmailChangeStartResult.FAILED
+            }
+        }
+    }
+
+    /**
+     * Confirms an email-change OTP. [otpEmail] is the inbox the code was sent to
+     * (new address first, then current address when secure email change is on).
+     * [targetNewEmail] is the address the user requested.
+     */
+    suspend fun verifyEmailChangeOtp(
+        otpEmail: String,
+        token: String,
+        targetNewEmail: String,
+    ): EmailChangeVerifyResult {
+        val client = SupabaseClientProvider.client ?: return EmailChangeVerifyResult.FAILED
+        val otpTarget = otpEmail.trim().lowercase()
+        val desired = targetNewEmail.trim().lowercase()
+        val cleanToken = token.trim()
+        return try {
+            client.auth.verifyEmailOtp(
+                type = OtpType.Email.EMAIL_CHANGE,
+                email = otpTarget,
+                token = cleanToken,
+            )
+            runCatching { client.auth.awaitInitialization() }
+            val active = client.auth.currentUserOrNull()?.email?.trim()?.lowercase().orEmpty()
+            when {
+                active == desired -> {
+                    CitizenProfileRepository.syncEmail(desired)
+                    EmailChangeVerifyResult.SUCCESS
+                }
+                else -> EmailChangeVerifyResult.NEED_CURRENT_EMAIL
+            }
+        } catch (e: Exception) {
+            val msg = (e.message ?: "").lowercase()
+            when {
+                msg.contains("expired") -> EmailChangeVerifyResult.EXPIRED
+                msg.contains("invalid") || msg.contains("token") -> EmailChangeVerifyResult.INVALID_CODE
+                else -> EmailChangeVerifyResult.FAILED
+            }
+        }
+    }
+
+    /** Sends Supabase's password-recovery email (link-based reset). */
+    suspend fun requestPasswordReset(email: String): PasswordResetCodeResult {
+        val client = SupabaseClientProvider.client ?: return PasswordResetCodeResult.FAILED
+        val normalized = email.trim().lowercase()
+        return try {
+            client.auth.resetPasswordForEmail(normalized)
+            PasswordResetCodeResult.CODE_SENT
+        } catch (e: Exception) {
+            val msg = (e.message ?: "").lowercase()
+            when {
+                msg.contains("not found") || msg.contains("no user") -> PasswordResetCodeResult.ACCOUNT_NOT_FOUND
+                msg.contains("not confirmed") || msg.contains("not verified") ->
+                    PasswordResetCodeResult.EMAIL_NOT_VERIFIED
+                else -> PasswordResetCodeResult.FAILED
+            }
+        }
+    }
 }

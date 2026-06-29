@@ -27,6 +27,24 @@ enum class SignupVerifyResult {
     FAILED,
 }
 
+enum class EmailChangeStartResult {
+    CODE_SENT,
+    EMAIL_ALREADY_REGISTERED,
+    SAME_EMAIL,
+    NOT_SIGNED_IN,
+    FAILED,
+}
+
+enum class EmailChangeVerifyResult {
+    /** New address is active on the Supabase session. */
+    SUCCESS,
+    /** Secure email change: new address confirmed; code also sent to current email. */
+    NEED_CURRENT_EMAIL,
+    INVALID_CODE,
+    EXPIRED,
+    FAILED,
+}
+
 enum class LoginResult {
     SUCCESS,
     NO_ACCOUNT,

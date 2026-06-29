@@ -7,8 +7,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
@@ -56,3 +58,22 @@ fun PotholeReportTheme(
         content = content
     )
 }
+
+/** Light-surface text fields (sign-in modal) — avoids grey-on-pale in dark system theme. */
+@Composable
+fun citizenLightSurfaceFieldColors(
+    textColor: Color = Color(0xFF101828),
+    borderColor: Color = Color(0xFF374151),
+    placeholderColor: Color = Color(0xFF6B7280),
+) = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = textColor,
+    unfocusedTextColor = textColor,
+    disabledTextColor = textColor.copy(alpha = 0.45f),
+    focusedPlaceholderColor = placeholderColor,
+    unfocusedPlaceholderColor = placeholderColor,
+    focusedBorderColor = borderColor,
+    unfocusedBorderColor = borderColor,
+    cursorColor = textColor,
+    focusedSupportingTextColor = placeholderColor,
+    unfocusedSupportingTextColor = placeholderColor,
+)

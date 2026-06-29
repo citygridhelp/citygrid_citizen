@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -32,6 +33,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,8 +43,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.potholereport.data.EmailChangeStartResult
+import com.example.potholereport.data.EmailChangeVerifyResult
 import com.example.potholereport.data.ProfileAvatarIds
 import com.example.potholereport.data.UserProfileRepository
+import kotlinx.coroutines.launch
 
 @Composable
 fun ProfileDialog(
@@ -52,17 +57,21 @@ fun ProfileDialog(
     onDismiss: () -> Unit,
     onSignOut: () -> Unit,
     onSave: (avatarId: String, verifiedNewEmail: String?) -> Unit,
+    onStartEmailChange: suspend (String) -> EmailChangeStartResult,
+    onVerifyEmailChange: suspend (otpEmail: String, code: String, targetNewEmail: String) -> EmailChangeVerifyResult,
 ) {
+    val scope = rememberCoroutineScope()
     var editMode by rememberSaveable { mutableStateOf(false) }
     var draftAvatarId by rememberSaveable(avatarId) { mutableStateOf(avatarId) }
 
     var newEmailInput by rememberSaveable { mutableStateOf("") }
     var verificationCodeInput by rememberSaveable { mutableStateOf("") }
     var codeSent by rememberSaveable { mutableStateOf(false) }
-    var demoCodeHint by rememberSaveable { mutableStateOf<String?>(null) }
+    var awaitingCurrentEmailCode by rememberSaveable { mutableStateOf(false) }
     var emailVerified by rememberSaveable { mutableStateOf(false) }
     var verifiedNewEmail by rememberSaveable { mutableStateOf<String?>(null) }
     var emailError by rememberSaveable { mutableStateOf<String?>(null) }
+    var emailBusy by rememberSaveable { mutableStateOf(false) }
 
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
     val valueColor = MaterialTheme.colorScheme.onSurface
@@ -88,11 +97,11 @@ fun ProfileDialog(
         newEmailInput = ""
         verificationCodeInput = ""
         codeSent = false
-        demoCodeHint = null
+        awaitingCurrentEmailCode = false
         emailVerified = false
         verifiedNewEmail = null
         emailError = null
-        UserProfileRepository.clearEmailVerification()
+        emailBusy = false
     }
 
     fun exitEditMode() {
@@ -100,10 +109,7 @@ fun ProfileDialog(
         editMode = false
     }
 
-    Dialog(onDismissRequest = {
-        UserProfileRepository.clearEmailVerification()
-        onDismiss()
-    }) {
+    Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(4.dp),
             color = MaterialTheme.colorScheme.surface,
@@ -216,92 +222,154 @@ fun ProfileDialog(
                         color = labelColor,
                     )
                     Text(
-                        "A 4-digit code will be sent to your new email. Enter it to confirm.",
+                        if (awaitingCurrentEmailCode) {
+                            "Enter the code sent to your current email (${UserProfileRepository.maskEmail(email)})."
+                        } else {
+                            "A verification code will be sent to your new email. Enter it to confirm."
+                        },
                         fontSize = 11.sp,
                         color = labelColor,
                         modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
                     )
-                    OutlinedTextField(
-                        value = newEmailInput,
-                        onValueChange = {
-                            newEmailInput = it
-                            emailError = null
-                            emailVerified = false
-                            verifiedNewEmail = null
-                            codeSent = false
-                            demoCodeHint = null
-                            verificationCodeInput = ""
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("New email") },
-                        singleLine = true,
-                        enabled = !emailVerified,
-                        isError = emailError != null,
-                        supportingText = emailError?.let { err -> { Text(err, color = MaterialTheme.colorScheme.error) } },
-                        colors = fieldColors,
-                    )
-                    if (!emailVerified) {
-                        TextButton(
-                            onClick = {
-                                val trimmed = newEmailInput.trim().lowercase()
-                                if (!Patterns.EMAIL_ADDRESS.matcher(trimmed).matches()) {
-                                    emailError = "Enter a valid email"
-                                    return@TextButton
-                                }
-                                if (trimmed == email.lowercase()) {
-                                    emailError = "This is already your email"
-                                    return@TextButton
-                                }
-                                val code = UserProfileRepository.requestEmailVerificationCode(trimmed)
-                                if (code == null) {
-                                    emailError = "Could not send code"
-                                    return@TextButton
-                                }
-                                codeSent = true
-                                demoCodeHint = code
+                    if (!awaitingCurrentEmailCode) {
+                        OutlinedTextField(
+                            value = newEmailInput,
+                            onValueChange = {
+                                newEmailInput = it
                                 emailError = null
+                                emailVerified = false
+                                verifiedNewEmail = null
+                                codeSent = false
+                                verificationCodeInput = ""
                             },
-                            enabled = newEmailInput.isNotBlank(),
-                        ) {
-                            Text("Send verification code", fontWeight = FontWeight.Bold)
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("New email") },
+                            singleLine = true,
+                            enabled = !emailVerified && !emailBusy,
+                            isError = emailError != null,
+                            supportingText = emailError?.let { err -> { Text(err, color = MaterialTheme.colorScheme.error) } },
+                            colors = fieldColors,
+                        )
+                    }
+                    if (!emailVerified) {
+                        if (!awaitingCurrentEmailCode) {
+                            TextButton(
+                                onClick = {
+                                    val trimmed = newEmailInput.trim().lowercase()
+                                    if (!Patterns.EMAIL_ADDRESS.matcher(trimmed).matches()) {
+                                        emailError = "Enter a valid email"
+                                        return@TextButton
+                                    }
+                                    if (trimmed == email.lowercase()) {
+                                        emailError = "This is already your email"
+                                        return@TextButton
+                                    }
+                                    emailBusy = true
+                                    scope.launch {
+                                        when (onStartEmailChange(trimmed)) {
+                                            EmailChangeStartResult.CODE_SENT -> {
+                                                codeSent = true
+                                                awaitingCurrentEmailCode = false
+                                                emailError = null
+                                            }
+                                            EmailChangeStartResult.EMAIL_ALREADY_REGISTERED ->
+                                                emailError = "That email is already registered"
+                                            EmailChangeStartResult.SAME_EMAIL ->
+                                                emailError = "This is already your email"
+                                            EmailChangeStartResult.NOT_SIGNED_IN ->
+                                                emailError = "Sign in again to change email"
+                                            EmailChangeStartResult.FAILED ->
+                                                emailError = "Could not send code. Try again."
+                                        }
+                                        emailBusy = false
+                                    }
+                                },
+                                enabled = newEmailInput.isNotBlank() && !emailBusy,
+                            ) {
+                                if (emailBusy) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                } else {
+                                    Text("Send verification code", fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
-                        if (codeSent && demoCodeHint != null) {
-                            Text(
-                                "Code sent to ${UserProfileRepository.maskEmail(newEmailInput.trim())}. " +
-                                    "Demo: use $demoCodeHint",
-                                fontSize = 11.sp,
-                                color = labelColor,
-                                modifier = Modifier.padding(bottom = 6.dp),
-                            )
+                        if (codeSent || awaitingCurrentEmailCode) {
+                            if (codeSent && !awaitingCurrentEmailCode) {
+                                Text(
+                                    "Code sent to ${UserProfileRepository.maskEmail(newEmailInput.trim())}.",
+                                    fontSize = 11.sp,
+                                    color = labelColor,
+                                    modifier = Modifier.padding(bottom = 6.dp),
+                                )
+                            }
                             OutlinedTextField(
                                 value = verificationCodeInput,
                                 onValueChange = {
-                                    verificationCodeInput = it.filter { ch -> ch.isDigit() }.take(4)
+                                    verificationCodeInput = it.filter { ch -> ch.isDigit() }.take(8)
                                     emailError = null
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                label = { Text("4-digit code") },
+                                label = {
+                                    Text(
+                                        if (awaitingCurrentEmailCode) "Code from current email" else "Verification code",
+                                    )
+                                },
                                 singleLine = true,
+                                enabled = !emailBusy,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                                 colors = fieldColors,
                             )
                             TextButton(
                                 onClick = {
                                     val target = newEmailInput.trim().lowercase()
-                                    if (verificationCodeInput.length != 4) {
-                                        emailError = "Enter the 4-digit code"
+                                    if (verificationCodeInput.length < 4) {
+                                        emailError = "Enter the verification code"
                                         return@TextButton
                                     }
-                                    if (!UserProfileRepository.verifyEmailChangeCode(target, verificationCodeInput)) {
-                                        emailError = "Invalid verification code"
-                                        return@TextButton
+                                    val otpEmail = if (awaitingCurrentEmailCode) {
+                                        email.trim().lowercase()
+                                    } else {
+                                        target
                                     }
-                                    emailVerified = true
-                                    verifiedNewEmail = target
-                                    emailError = null
+                                    emailBusy = true
+                                    scope.launch {
+                                        when (
+                                            onVerifyEmailChange(otpEmail, verificationCodeInput, target)
+                                        ) {
+                                            EmailChangeVerifyResult.SUCCESS -> {
+                                                emailVerified = true
+                                                verifiedNewEmail = target
+                                                awaitingCurrentEmailCode = false
+                                                emailError = null
+                                            }
+                                            EmailChangeVerifyResult.NEED_CURRENT_EMAIL -> {
+                                                awaitingCurrentEmailCode = true
+                                                verificationCodeInput = ""
+                                                emailError = null
+                                            }
+                                            EmailChangeVerifyResult.INVALID_CODE ->
+                                                emailError = "Invalid verification code"
+                                            EmailChangeVerifyResult.EXPIRED ->
+                                                emailError = "Code expired. Request a new code."
+                                            EmailChangeVerifyResult.FAILED ->
+                                                emailError = "Could not verify code. Try again."
+                                        }
+                                        emailBusy = false
+                                    }
                                 },
+                                enabled = !emailBusy,
                             ) {
-                                Text("Verify email", fontWeight = FontWeight.Bold)
+                                if (emailBusy) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                } else {
+                                    Text("Verify email", fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     } else {
@@ -337,7 +405,6 @@ fun ProfileDialog(
                             onClick = {
                                 val newMail = if (emailChanged) verifiedNewEmail else null
                                 onSave(draftAvatarId, newMail)
-                                UserProfileRepository.clearEmailVerification()
                                 onDismiss()
                             },
                             modifier = Modifier.weight(1f),

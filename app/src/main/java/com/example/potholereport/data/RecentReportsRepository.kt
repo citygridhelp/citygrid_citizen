@@ -2,6 +2,7 @@ package com.example.potholereport.data
 
 import android.content.Context
 import android.net.Uri
+import io.github.jan.supabase.auth.auth
 import org.json.JSONArray
 import org.json.JSONObject
 import org.osmdroid.util.BoundingBox
@@ -57,7 +58,7 @@ data class PersistedPotholeReport(
  * Map clusters and "recent" strip filter by metro [BoundingBox] when coordinates exist.
  */
 sealed class AddReportResult {
-    data object Success : AddReportResult()
+    data class Success(val report: PersistedPotholeReport) : AddReportResult()
     data object Failed : AddReportResult()
     data class DuplicateActive(val existing: PersistedPotholeReport) : AddReportResult()
 }
@@ -212,14 +213,103 @@ object RecentReportsRepository {
                 deleteReportFiles(removed)
             }
             saveToDisk(ctx)
-            AddReportResult.Success
+            AddReportResult.Success(entry)
         }
     }
 
-    /**
-     * Permanently removes a report that was submitted while signed in (MY REPORTS).
-     * Deletes the stored photo file. Thread-safe; call from a background dispatcher.
-     */
+    /** Pulls signed-in reports from Supabase and merges status locally. */
+    suspend fun syncSignedInReportsFromSupabase(): Boolean {
+        val ctx = appContext ?: return false
+        if (!com.example.potholereport.data.remote.SupabaseClientProvider.isConfigured) return false
+        val client = com.example.potholereport.data.remote.SupabaseClientProvider.client ?: return false
+        runCatching { client.auth.awaitInitialization() }
+        if (client.auth.currentUserOrNull()?.id == null) return false
+        val rows = com.example.potholereport.data.remote.ReportSyncRepository.fetchMyReports()
+        if (rows.isEmpty()) return false
+        return synchronized(lock) {
+            var changed = false
+            for (row in rows) {
+                val visibleStatus = PotholeReportStatus.fromStored(row.citizenVisibleStatus)
+                val idx = cache.indexOfFirst { it.id == row.id && it.submittedSignedIn }
+                if (idx < 0) continue
+                val existing = cache[idx]
+                val merged = existing.copy(
+                    status = visibleStatus,
+                    assigneeKey = row.assigneeKey.ifBlank { existing.assigneeKey },
+                    assigneeCorporation = row.assigneeCorp.ifBlank { existing.assigneeCorporation },
+                    assigneeZone = row.assigneeZone.ifBlank { existing.assigneeZone },
+                    assigneeName = row.assigneeName.ifBlank { existing.assigneeName },
+                    assigneePosition = row.assigneeRole.ifBlank { existing.assigneePosition },
+                    assigneeOfficeAddress = row.assigneeAddr.ifBlank { existing.assigneeOfficeAddress },
+                )
+                if (merged != existing) {
+                    cache[idx] = merged
+                    changed = true
+                }
+            }
+            if (changed) saveToDisk(ctx)
+            changed
+        }
+    }
+
+    /** Pulls recent city reports from Supabase for guests and fresh installs. */
+    suspend fun syncPublicCityReportsFromSupabase(cityKey: String): Boolean {
+        if (cityKey.isBlank()) return false
+        val ctx = appContext ?: return false
+        if (!com.example.potholereport.data.remote.SupabaseClientProvider.isConfigured) return false
+        val canonicalCity = CityMetroKeys.canonical(cityKey)
+        val rows = com.example.potholereport.data.remote.ReportSyncRepository
+            .fetchRecentCityReports(canonicalCity, MAX_STORED)
+        if (rows.isEmpty()) return false
+        return synchronized(lock) {
+            var changed = false
+            for (row in rows) {
+                if (cache.any { it.id == row.id }) continue
+                val lat = row.latitude ?: Double.NaN
+                val lon = row.longitude ?: Double.NaN
+                val assignee = if (row.assigneeName.isNotBlank()) {
+                    null
+                } else {
+                    MunicipalAssignmentResolver.resolve(row.cityKey, lat, lon)
+                }
+                var entry = PersistedPotholeReport(
+                    id = row.id,
+                    cityKey = row.cityKey,
+                    createdAtMs = row.createdAtMs,
+                    photoPath = "",
+                    latitude = lat,
+                    longitude = lon,
+                    areaLabel = row.areaLabel,
+                    severity = PotholeSeverity.fromStored(row.severity),
+                    note = row.citizenNote,
+                    submittedSignedIn = false,
+                    status = PotholeReportStatus.fromStored(row.citizenVisibleStatus),
+                    reporterUserId = row.reporterUserId,
+                    assigneeKey = row.assigneeKey,
+                    assigneeCorporation = row.assigneeCorp,
+                    assigneeZone = row.assigneeZone,
+                    assigneeName = row.assigneeName,
+                    assigneePosition = row.assigneeRole,
+                    assigneeOfficeAddress = row.assigneeAddr,
+                )
+                if (assignee != null && row.assigneeName.isBlank()) {
+                    entry = entry.withAssignee(assignee)
+                }
+                cache.add(entry)
+                changed = true
+            }
+            if (changed) {
+                cache.sortByDescending { it.createdAtMs }
+                while (cache.size > MAX_STORED) {
+                    val removed = cache.removeAt(cache.lastIndex)
+                    deleteReportFiles(removed)
+                }
+                saveToDisk(ctx)
+            }
+            changed
+        }
+    }
+
     /**
      * Reserved for the government response application to sync status updates.
      * Not exposed in the citizen app UI.

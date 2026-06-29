@@ -44,9 +44,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -135,6 +137,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import androidx.core.os.CancellationSignal
+import com.example.potholereport.data.EmailChangeStartResult
+import com.example.potholereport.data.EmailChangeVerifyResult
+import com.example.potholereport.data.LoginResult
 import com.example.potholereport.data.CityWeatherForecast
 import com.example.potholereport.data.CityWeatherRepository
 import com.example.potholereport.data.PersistedPotholeReport
@@ -145,6 +150,8 @@ import com.example.potholereport.data.RecentReportsRepository
 import com.example.potholereport.data.formatRecentReportCaption
 import com.example.potholereport.data.isMeaningfulAreaName
 import com.example.potholereport.data.resolveAreaLabel
+import com.example.potholereport.data.SignupStartResult
+import com.example.potholereport.data.SignupVerifyResult
 import com.example.potholereport.ui.profile.CartoonAvatar
 import com.example.potholereport.ui.profile.ProfileDialog
 import com.example.potholereport.ui.theme.PotholeReportTheme
@@ -184,9 +191,15 @@ fun HomeScreen(
     anonymousUserId: String,
     avatarId: String,
     onSignOut: () -> Unit,
-    onAuthSuccessFromReportModal: (String) -> Unit,
+    onReportModalSignIn: suspend (String, String) -> LoginResult,
+    onReportModalAuthSuccess: (String, String) -> Unit,
+    onReportModalStartSignup: suspend (String, String, String) -> SignupStartResult,
+    onReportModalVerifyCode: suspend (String, String) -> SignupVerifyResult,
     onProfileSaved: (avatarId: String, verifiedNewEmail: String?) -> Unit,
+    onProfileStartEmailChange: suspend (String) -> EmailChangeStartResult,
+    onProfileVerifyEmailChange: suspend (otpEmail: String, code: String, targetNewEmail: String) -> EmailChangeVerifyResult,
     recentReportsEpoch: Int = 0,
+    uiRefreshEpoch: Int = 0,
     /** Bumps when reports are added or removed so map / lists refresh. */
     onRecentReportsMutated: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -270,7 +283,7 @@ fun HomeScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "POTHOLE WATCH",
+                text = "CITY GRID",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.onBackground
@@ -296,10 +309,12 @@ fun HomeScreen(
 
                 Button(
                     onClick = onEmergencyClick,
-                    modifier = Modifier.height(44.dp),
+                    modifier = Modifier
+                        .heightIn(min = 40.dp)
+                        .defaultMinSize(minWidth = 56.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB74233)),
                     shape = RoundedCornerShape(0.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp)
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Call,
@@ -308,23 +323,13 @@ fun HomeScreen(
                         tint = Color.White
                     )
                     Spacer(Modifier.width(4.dp))
-                    Column(verticalArrangement = Arrangement.Center) {
-                        Text(
-                            "EMERGENCY",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            lineHeight = 12.sp,
-                            softWrap = false,
-                            color = Color.White
-                        )
-                        Text(
-                            "Helpline",
-                            fontSize = 9.sp,
-                            lineHeight = 10.sp,
-                            softWrap = false,
-                            color = Color.White
-                        )
-                    }
+                    Text(
+                        "SOS",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        color = Color.White,
+                    )
                 }
             }
         }
@@ -444,10 +449,13 @@ fun HomeScreen(
     if (showReportSignInModal) {
         ReportSignInModal(
             onDismiss = { showReportSignInModal = false },
+            onSignIn = onReportModalSignIn,
             onAuthSuccess = { email ->
-                onAuthSuccessFromReportModal(email)
+                onReportModalAuthSuccess(email, selectedCity)
                 showReportSignInModal = false
-            }
+            },
+            onStartSignup = onReportModalStartSignup,
+            onVerifyCode = onReportModalVerifyCode,
         )
     }
 
@@ -457,7 +465,7 @@ fun HomeScreen(
             title = { Text("Turn on location", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
             text = {
                 Text(
-                    "Pothole Watch needs GPS so we can show your position on the map and tag reports with the right place. Allow location access and turn on GPS in your device settings.",
+                    "City Grid needs GPS so we can show your position on the map and tag reports with the right place. Allow location access and turn on GPS in your device settings.",
                     fontSize = 14.sp,
                     color = Color(0xFF5A5A5A),
                 )
@@ -504,16 +512,18 @@ fun HomeScreen(
             onSave = { savedAvatar, verifiedNewEmail ->
                 onProfileSaved(savedAvatar, verifiedNewEmail)
             },
+            onStartEmailChange = onProfileStartEmailChange,
+            onVerifyEmailChange = onProfileVerifyEmailChange,
         )
     }
 
     if (showAboutDialog) {
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
-            title = { Text("About Pothole Watch", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            title = { Text("About City Grid", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
             text = {
                 Text(
-                    "Pothole Watch helps citizens report road hazards and track their own submissions when signed in. Reports stay anonymous to other users.\n\nv0.1.0 • Civic reporting prototype",
+                    "City Grid helps citizens report road hazards and track their own submissions when signed in. Reports stay anonymous to other users.\n\nv0.1.0 • Civic reporting prototype",
                     fontSize = 14.sp,
                     color = Color(0xFF5A5A5A),
                 )
@@ -3352,272 +3362,6 @@ private fun OsmDensityMap(
     }
 }
 
-private val ModalDark = Color(0xFF0F172A)
-private val ModalFieldBorder = Color(0xFF101828)
-
-@Composable
-private fun ReportSignInModal(
-    onDismiss: () -> Unit,
-    onAuthSuccess: (String) -> Unit,
-) {
-    var modalTab by rememberSaveable { mutableIntStateOf(0) }
-    var email by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    var confirmPassword by rememberSaveable { mutableStateOf("") }
-    var emailError by rememberSaveable { mutableStateOf<String?>(null) }
-    var passwordError by rememberSaveable { mutableStateOf<String?>(null) }
-    var confirmError by rememberSaveable { mutableStateOf<String?>(null) }
-    var passwordVisible by remember { mutableStateOf(false) }
-    var confirmPasswordVisible by remember { mutableStateOf(false) }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(0.dp),
-            color = Color.White,
-            border = BorderStroke(1.dp, ModalDark)
-        ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(ModalDark)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Outlined.Shield,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "SIGN IN",
-                            color = Color.White,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 14.sp
-                        )
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Outlined.Close, contentDescription = "Close", tint = Color.White)
-                    }
-                }
-
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    ModalAuthTab(
-                        title = "SIGN IN",
-                        selected = modalTab == 0,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            modalTab = 0
-                            emailError = null
-                            passwordError = null
-                            confirmError = null
-                        }
-                    )
-                    ModalAuthTab(
-                        title = "SIGN UP",
-                        selected = modalTab == 1,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            modalTab = 1
-                            emailError = null
-                            passwordError = null
-                            confirmError = null
-                        }
-                    )
-                }
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp)
-                ) {
-                    Text(
-                        text = if (modalTab == 0) {
-                            "Sign in to see your own report history and resolution rate. Your reports remain anonymous to other users."
-                        } else {
-                            "Create an account to submit reports and track them. Your reports remain anonymous to other users."
-                        },
-                        color = Color(0xFF6B7280),
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    )
-                    Spacer(Modifier.height(14.dp))
-
-                    Text("EMAIL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
-                    Spacer(Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = email,
-                        onValueChange = {
-                            email = it
-                            emailError = null
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("you@example.com", color = Color(0xFF9CA3AF)) },
-                        singleLine = true,
-                        isError = emailError != null,
-                        supportingText = emailError?.let { { Text(it, color = Color(0xFFB91C1C)) } },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                        shape = RoundedCornerShape(0.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = ModalFieldBorder,
-                            unfocusedBorderColor = ModalFieldBorder,
-                            cursorColor = ModalDark,
-                            focusedTextColor = ModalDark,
-                            unfocusedTextColor = ModalDark,
-                        )
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        "PASSWORD (min 6 chars)",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF6B7280)
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = {
-                            password = it
-                            passwordError = null
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                Icon(
-                                    imageVector = if (passwordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                                    contentDescription = if (passwordVisible) "Hide password" else "Show password",
-                                    tint = Color(0xFF6B7280),
-                                )
-                            }
-                        },
-                        isError = passwordError != null,
-                        supportingText = passwordError?.let { { Text(it, color = Color(0xFFB91C1C)) } },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        shape = RoundedCornerShape(0.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = ModalFieldBorder,
-                            unfocusedBorderColor = ModalFieldBorder,
-                            cursorColor = ModalDark,
-                            focusedTextColor = ModalDark,
-                            unfocusedTextColor = ModalDark,
-                        )
-                    )
-
-                    if (modalTab == 1) {
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            "CONFIRM PASSWORD",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF6B7280)
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        OutlinedTextField(
-                            value = confirmPassword,
-                            onValueChange = {
-                                confirmPassword = it
-                                confirmError = null
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                            trailingIcon = {
-                                IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
-                                    Icon(
-                                        imageVector = if (confirmPasswordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                                        contentDescription = if (confirmPasswordVisible) "Hide password" else "Show password",
-                                        tint = Color(0xFF6B7280),
-                                    )
-                                }
-                            },
-                            isError = confirmError != null,
-                            supportingText = confirmError?.let { { Text(it, color = Color(0xFFB91C1C)) } },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                            shape = RoundedCornerShape(0.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = ModalFieldBorder,
-                                unfocusedBorderColor = ModalFieldBorder,
-                                cursorColor = ModalDark,
-                                focusedTextColor = ModalDark,
-                                unfocusedTextColor = ModalDark,
-                            )
-                        )
-                    }
-
-                    Spacer(Modifier.height(16.dp))
-                    Button(
-                        onClick = {
-                            var ok = true
-                            if (email.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()) {
-                                emailError = "Enter a valid email"
-                                ok = false
-                            }
-                            if (password.length < 6) {
-                                passwordError = "Password must be at least 6 characters"
-                                ok = false
-                            }
-                            if (modalTab == 1 && password != confirmPassword) {
-                                confirmError = "Passwords do not match"
-                                ok = false
-                            }
-                            if (ok) onAuthSuccess(email.trim())
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(0.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = ModalDark, contentColor = Color.White)
-                    ) {
-                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (modalTab == 0) "SIGN IN" else "CREATE ACCOUNT", fontWeight = FontWeight.Black)
-                    }
-
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "DEMO AUTH • IN-MEMORY • LOST ON RELOAD",
-                        modifier = Modifier.fillMaxWidth(),
-                        color = Color(0xFF9CA3AF),
-                        fontSize = 10.sp
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ModalAuthTab(
-    title: String,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier = modifier.clickable { onClick() },
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            Text(
-                title,
-                fontWeight = FontWeight.Bold,
-                color = if (selected) ModalDark else Color.Gray
-            )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(2.dp)
-                .background(if (selected) ModalDark else Color.Transparent)
-        )
-    }
-}
 
 private enum class MyReportsStatFilter {
     TOTAL,
@@ -4013,7 +3757,7 @@ private fun MyReportsTabFooter() {
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                "POTHOLE WATCH • CIVIC REPORTING PROTOTYPE",
+                "CITY GRID • CIVIC REPORTING",
                 fontSize = 10.sp,
                 lineHeight = 13.sp,
                 color = Color(0xFF7B7B7B),
@@ -4171,8 +3915,13 @@ fun HomeScreenPreview() {
             anonymousUserId = "",
             avatarId = "neutral",
             onSignOut = {},
-            onAuthSuccessFromReportModal = {},
+            onReportModalSignIn = { _, _ -> LoginResult.NO_ACCOUNT },
+            onReportModalAuthSuccess = { _, _ -> },
+            onReportModalStartSignup = { _, _, _ -> SignupStartResult.FAILED },
+            onReportModalVerifyCode = { _, _ -> SignupVerifyResult.FAILED },
             onProfileSaved = { _, _ -> },
+            onProfileStartEmailChange = { EmailChangeStartResult.FAILED },
+            onProfileVerifyEmailChange = { _, _, _ -> EmailChangeVerifyResult.FAILED },
         )
     }
 }

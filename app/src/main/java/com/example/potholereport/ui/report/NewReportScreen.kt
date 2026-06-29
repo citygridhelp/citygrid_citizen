@@ -74,6 +74,8 @@ import com.example.potholereport.data.PersistedPotholeReport
 import com.example.potholereport.data.PotholePosition
 import com.example.potholereport.data.PotholeSeverity
 import com.example.potholereport.data.RecentReportsRepository
+import com.example.potholereport.data.remote.ReportSyncRepository
+import com.example.potholereport.data.remote.SupabaseClientProvider
 import com.example.potholereport.ml.PhotoCaptureKind
 import com.example.potholereport.ml.PhotoValidationResult
 import com.example.potholereport.ml.PotholePhotoValidator
@@ -90,7 +92,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
-private val YellowAccent = Color(0xFFFFD700)
+private val AccentRed = Color(0xFFB74233)
 private val DarkBlue = Color(0xFF1A1A2E)
 private val OffWhite = Color(0xFFF5F2E8)
 private val OrangeSelect = Color(0xFFF58220)
@@ -103,6 +105,7 @@ fun NewReportScreen(
     reporterUserId: String,
     onClose: () -> Unit,
     onReportPersisted: () -> Unit = {},
+    onSyncMessage: (String) -> Unit = {},
     submittedWhileSignedIn: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
@@ -464,7 +467,7 @@ fun NewReportScreen(
                     ) {
                         Text(
                             "NEW REPORT",
-                            color = YellowAccent,
+                            color = AccentRed,
                             fontWeight = FontWeight.Black,
                             fontSize = 16.sp,
                             fontFamily = FontFamily.Monospace
@@ -472,7 +475,7 @@ fun NewReportScreen(
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
-                                .background(YellowAccent)
+                                .background(AccentRed)
                                 .clickable { onClose() },
                             contentAlignment = Alignment.Center
                         ) {
@@ -638,7 +641,7 @@ fun NewReportScreen(
                                     locationBlockedReason = null
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = DarkBlue, contentColor = YellowAccent),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkBlue, contentColor = Color.White),
                             shape = RoundedCornerShape(0.dp),
                             modifier = Modifier.align(Alignment.End)
                         ) {
@@ -731,7 +734,28 @@ fun NewReportScreen(
                                     )
                                 }
                                 when (result) {
-                                    AddReportResult.Success -> {
+                                    is AddReportResult.Success -> {
+                                        if (submittedWhileSignedIn) {
+                                            if (!SupabaseClientProvider.isConfigured) {
+                                                onSyncMessage(
+                                                    "Report saved on this device only. " +
+                                                        "Rebuild with SUPABASE_URL and SUPABASE_ANON_KEY in local.properties.",
+                                                )
+                                            } else {
+                                                val pushed = withContext(Dispatchers.IO) {
+                                                    ReportSyncRepository.pushReport(result.report)
+                                                }
+                                                if (pushed) {
+                                                    onSyncMessage("Report submitted to the municipality.")
+                                                } else {
+                                                    ReportSyncRepository.enqueuePush(result.report)
+                                                    onSyncMessage(
+                                                        "Report saved on device. Cloud upload failed — " +
+                                                            "sign in with your Supabase account and try again.",
+                                                    )
+                                                }
+                                            }
+                                        }
                                         onReportPersisted()
                                         onClose()
                                     }
@@ -747,7 +771,7 @@ fun NewReportScreen(
                         enabled = readyToSubmit,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (readyToSubmit) DarkBlue else GrayButton,
-                            contentColor = if (readyToSubmit) YellowAccent else Color.White.copy(alpha = 0.85f),
+                            contentColor = if (readyToSubmit) Color.White else Color.White.copy(alpha = 0.85f),
                             disabledContainerColor = GrayButton,
                             disabledContentColor = Color.White.copy(alpha = 0.85f)
                         ),
@@ -772,7 +796,7 @@ fun NewReportScreen(
                 modifier = Modifier
                     .width(8.dp)
                     .fillMaxHeight()
-                    .background(YellowAccent)
+                    .background(AccentRed)
             )
         }
     }
@@ -949,7 +973,7 @@ private fun LocationBlock(
             Column {
                 Button(
                     onClick = onRetryGps,
-                    colors = ButtonDefaults.buttonColors(containerColor = YellowAccent, contentColor = DarkBlue),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentRed, contentColor = DarkBlue),
                     shape = RoundedCornerShape(0.dp),
                     contentPadding = ButtonDefaults.TextButtonContentPadding
                 ) {
