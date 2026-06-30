@@ -12,6 +12,13 @@ supabase/
     0003_officer_workflow_sync.sql  # GRANTs + officer_sync_report_workflow RPC
     0004_status_history_rpc.sql     # status_history insert inside RPC (required)
     0005_officer_completion.sql     # completion proofs + commissioner publish RPC
+    0006_protect_citizen_completion.sql
+    0007_citizen_profiles.sql
+    0008_citizen_public_feed.sql
+    0009_citizen_profile_email_sync.sql
+    0010_report_email_log.sql       # confirmation email idempotency log
+  functions/
+    notify-citizen-report-created/   # Brevo mail on reports INSERT (webhook)
   seed/
     officers.json        # the 14-officer roster (mirrors GovAuthRepository)
     seed_officers.mjs    # admin script: creates Auth users + gov_officers rows
@@ -70,6 +77,23 @@ Configure **Authentication → Email Templates** so **Confirm signup** and
 **Secure email change** should be **off** (Authentication → Sign In / Providers →
 Email) so profile email change uses a **single code** to the new address. Details:
 [`docs/supabase_email_templates.md`](../docs/supabase_email_templates.md).
+
+## 5. Report confirmation email
+
+Code and migration are in the repo. After a signed-in `reports` INSERT, the
+`notify-citizen-report-created` Edge Function emails the citizen (ticket
+`CG-` + last 8 digits of `id`, user `reporter_user_id`, location, severity,
+note, IST timestamp) via **Brevo**.
+
+**You still need to:** run `0010_report_email_log.sql`, set Brevo secrets, deploy
+the function, and create the Database Webhook. Step-by-step:
+[`docs/report_confirmation_email.md`](../docs/report_confirmation_email.md).
+
+```
+supabase/
+  migrations/0010_report_email_log.sql
+  functions/notify-citizen-report-created/index.ts
+```
 
 ## Field mapping (single source of truth)
 

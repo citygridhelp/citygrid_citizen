@@ -55,14 +55,10 @@ There is **no account linking**. A person who signs up with `a@gmail.com` and la
 
 ### 4. Download report photos from Supabase on sync
 
-**Status:** Not implemented.
+**Status:** Shipped (report photo cache + sync in citizen app).
 
-Signed-in sync today merges **metadata** (status, assignee) from Supabase. Rows pulled from the server may have empty local `photoPath` until photos are downloaded from the `evidence` bucket.
-
-**Scope:**
-
-- [ ] After `fetchMyReports`, download `close.jpg` / `wide.jpg` into app storage
-- [ ] Update local cache paths so My Reports thumbnails work on a fresh install
+Signed-in and public feed sync download evidence photos into app storage via
+`ReportPhotoCache`. See `ReportSyncRepository` / `RecentReportsRepository`.
 
 ---
 
@@ -92,9 +88,27 @@ Signup and profile email change rely on Supabase email templates using `{{ .Toke
 
 ---
 
+### 8. Report submission confirmation email
+
+**Status:** Implemented in repo — **deploy** migration `0010`, Brevo secrets, Edge Function, and Database Webhook.
+
+After a **signed-in** citizen’s report is inserted into `public.reports`, a webhook
+calls `notify-citizen-report-created` to email the citizen via Brevo.
+
+| Item | Decision |
+|------|----------|
+| Ticket in email | `CG-` + last 8 digits of `reports.id` |
+| User ID in email | Raw `reporter_user_id` (`PW-xxx`) |
+| Timestamp | IST |
+| Idempotency | `report_email_log` |
+
+Deploy guide: [`docs/report_confirmation_email.md`](report_confirmation_email.md).
+
+---
+
 ## Government / cross-app
 
-### 8. Deeper two-way sync with CG GOVT app
+### 9. Deeper two-way sync with CG GOVT app
 
 **Status:** Ongoing / handover.
 
@@ -106,9 +120,10 @@ Citizen push to `reports` + `evidence` is implemented. Full round-trip (all stat
 
 | Priority | Suggested order |
 |----------|-----------------|
-| High (product) | #4 photo download, #5 city match |
+| High (product) | Deploy #8 confirmation email (Brevo + webhook), #5 city match |
 | Medium | #6 notifications bell |
 | Low / strategic | #2 account linking, #3 email history |
 | Reference only | #1 (document current design) |
+| Shipped | #4 photo download |
 
 When an item ships, move it to the release guide or handover doc and mark it **Shipped** here with the migration/app version.

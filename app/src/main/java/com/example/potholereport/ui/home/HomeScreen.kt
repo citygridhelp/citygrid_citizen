@@ -137,6 +137,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import androidx.core.os.CancellationSignal
+import com.example.potholereport.BuildConfig
 import com.example.potholereport.data.EmailChangeStartResult
 import com.example.potholereport.data.EmailChangeVerifyResult
 import com.example.potholereport.data.LoginResult
@@ -525,7 +526,10 @@ fun HomeScreen(
             title = { Text("About City Grid", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
             text = {
                 Text(
-                    "City Grid helps citizens report road hazards and track their own submissions when signed in. Reports stay anonymous to other users.\n\nv0.1.0 • Civic reporting prototype",
+                    "City Grid helps citizens report potholes and other road hazards with photos and location. " +
+                        "When you are signed in, you can track your submissions in My Reports. " +
+                        "Your reporter identity stays private on public maps and recent reports.\n\n" +
+                        "Version ${BuildConfig.VERSION_NAME}",
                     fontSize = 14.sp,
                     color = Color(0xFF5A5A5A),
                 )
@@ -3800,7 +3804,7 @@ private fun MyReportsTabFooter() {
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "v0.1.0 • FIRST DRAFT",
+                "Version ${BuildConfig.VERSION_NAME}",
                 fontSize = 10.sp,
                 lineHeight = 13.sp,
                 color = Color(0xFF7B7B7B),
