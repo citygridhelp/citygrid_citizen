@@ -388,6 +388,7 @@ fun HomeScreen(
                             gpsMetroCity = gpsMetroCity,
                             userLocation = userLocation,
                             recentReportsEpoch = recentReportsEpoch,
+                            onReportsMutated = onRecentReportsMutated,
                             onLocateMe = {
                                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                                     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -682,6 +683,7 @@ private fun ReportAndTrackSection(
     mapLocateEpoch: Int,
     gpsPinLocation: Location?,
     recentReportsEpoch: Int,
+    onReportsMutated: () -> Unit = {},
 ) {
     val context = LocalContext.current
     Card(
@@ -904,6 +906,7 @@ private fun ReportAndTrackSection(
     RecentReportsStrip(
         selectedCity = selectedCity,
         recentReportsEpoch = recentReportsEpoch,
+        onReportsMutated = onReportsMutated,
     )
 }
 
@@ -911,9 +914,16 @@ private fun ReportAndTrackSection(
 private fun RecentReportsStrip(
     selectedCity: String,
     recentReportsEpoch: Int,
+    onReportsMutated: () -> Unit = {},
 ) {
     var detailReport by remember { mutableStateOf<PersistedPotholeReport?>(null) }
     val bbox = cityMetroBounds[selectedCity]
+    LaunchedEffect(selectedCity, recentReportsEpoch) {
+        val changed = withContext(Dispatchers.IO) {
+            RecentReportsRepository.syncPublicCityReportsFromSupabase(selectedCity)
+        }
+        if (changed) onReportsMutated()
+    }
     val reports = remember(selectedCity, recentReportsEpoch) {
         RecentReportsRepository.recentForCityInMetro(selectedCity, bbox, 5)
     }
@@ -995,15 +1005,14 @@ private fun RecentReportThumbnail(
     onClick: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    var bitmap by remember(report.photoPath) { mutableStateOf<Bitmap?>(null) }
+    var bitmap by remember(report.id, report.photoPath, report.storageClosePath) {
+        mutableStateOf<Bitmap?>(null)
+    }
     var areaLabel by remember(report.id) {
         mutableStateOf(report.areaLabel.takeIf { isMeaningfulAreaName(it) }.orEmpty())
     }
-    LaunchedEffect(report.photoPath) {
-        bitmap = withContext(Dispatchers.IO) {
-            val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
-            BitmapFactory.decodeFile(report.photoPath, opts)
-        }
+    LaunchedEffect(report.id, report.photoPath, report.storageClosePath, report.storageWidePath) {
+        bitmap = com.example.potholereport.data.remote.ReportPhotoCache.loadCloseBitmap(context, report)
     }
     LaunchedEffect(report.id, report.areaLabel, report.latitude, report.longitude) {
         if (isMeaningfulAreaName(areaLabel)) return@LaunchedEffect
@@ -3389,8 +3398,32 @@ private fun MyReportsSection(
     var deleteTarget by remember { mutableStateOf<PersistedPotholeReport?>(null) }
     var detailReport by remember { mutableStateOf<PersistedPotholeReport?>(null) }
     var statFilter by rememberSaveable { mutableStateOf(MyReportsStatFilter.TOTAL) }
-    val myReports = remember(recentReportsEpoch, reporterUserId) {
-        RecentReportsRepository.signedInReportsOrdered(reporterUserId)
+    val titleColor = MaterialTheme.colorScheme.onBackground
+    val subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val cardColor = MaterialTheme.colorScheme.surface
+    val cardBorder = MaterialTheme.colorScheme.outlineVariant
+    val emptyCardColor = MaterialTheme.colorScheme.surfaceVariant
+    var resolvedReporterId by remember(reporterUserId) { mutableStateOf(reporterUserId) }
+
+    LaunchedEffect(reporterUserId) {
+        if (reporterUserId.isBlank()) return@LaunchedEffect
+        val stableId = withContext(Dispatchers.IO) {
+            val stable = com.example.potholereport.data.remote.CitizenProfileRepository
+                .resolveReporterUserId(reporterUserId)
+            if (stable != reporterUserId) {
+                RecentReportsRepository.migrateReporterUserId(reporterUserId, stable)
+            }
+            stable
+        }
+        resolvedReporterId = stableId
+        val changed = withContext(Dispatchers.IO) {
+            RecentReportsRepository.syncSignedInReportsFromSupabase(stableId)
+        }
+        if (changed) onReportsMutated()
+    }
+
+    val myReports = remember(recentReportsEpoch, resolvedReporterId) {
+        RecentReportsRepository.signedInReportsOrdered(resolvedReporterId)
     }
     val total = myReports.size
     val completedCount = myReports.count { it.status == PotholeReportStatus.COMPLETED }
@@ -3414,9 +3447,10 @@ private fun MyReportsSection(
             title = { Text("Delete this report?", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
             text = {
                 Text(
-                    "This removes the photo and report from your device. This cannot be undone.",
+                    "This removes the photo and report from your device only. " +
+                        "It stays in the municipality system if it was already uploaded.",
                     fontSize = 13.sp,
-                    color = Color(0xFF5A5A5A),
+                    color = subtitleColor,
                 )
             },
             confirmButton = {
@@ -3426,7 +3460,7 @@ private fun MyReportsSection(
                         deleteTarget = null
                         scope.launch {
                             val ok = withContext(Dispatchers.IO) {
-                                RecentReportsRepository.deleteSignedInReport(id, reporterUserId)
+                                RecentReportsRepository.deleteSignedInReport(id, resolvedReporterId)
                             }
                             if (ok) onReportsMutated()
                         }
@@ -3490,23 +3524,23 @@ private fun MyReportsSection(
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
         shape = RoundedCornerShape(0.dp),
-        border = BorderStroke(1.dp, Color(0xFFD8D8D8)),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        border = BorderStroke(1.dp, cardBorder),
+        colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("RESOLUTION RATE", fontWeight = FontWeight.Medium, color = Color(0xFF6D6D6D), fontSize = 11.sp)
+            Text("RESOLUTION RATE", fontWeight = FontWeight.Medium, color = subtitleColor, fontSize = 11.sp)
             Spacer(Modifier.width(12.dp))
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .height(8.dp)
-                    .background(Color(0xFFF0EEE6))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
             )
             Spacer(Modifier.width(10.dp))
-            Text("$resolutionPct%", fontWeight = FontWeight.Bold, color = Color(0xFF101828), fontSize = 11.sp)
+            Text("$resolutionPct%", fontWeight = FontWeight.Bold, color = titleColor, fontSize = 11.sp)
         }
     }
 
@@ -3517,7 +3551,7 @@ private fun MyReportsSection(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("YOUR REPORTS", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Color(0xFF101828))
+        Text("YOUR REPORTS", fontSize = 18.sp, fontWeight = FontWeight.Black, color = titleColor)
         Text(
             when {
                 total == 0 -> "NONE YET"
@@ -3525,10 +3559,10 @@ private fun MyReportsSection(
                 else -> "${filteredReports.size} SHOWN"
             },
             fontSize = 12.sp,
-            color = Color.Gray
+            color = subtitleColor
         )
     }
-    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color(0xFFE2E2E2))
+    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = cardBorder)
     Spacer(Modifier.height(12.dp))
 
     if (myReports.isEmpty()) {
@@ -3537,19 +3571,19 @@ private fun MyReportsSection(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
             shape = RoundedCornerShape(0.dp),
-            border = BorderStroke(1.dp, Color(0xFFDCDCDC)),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFFBFBFB))
+            border = BorderStroke(1.dp, cardBorder),
+            colors = CardDefaults.cardColors(containerColor = emptyCardColor)
         ) {
             Column(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(Icons.Outlined.Image, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(34.dp))
+                Icon(Icons.Outlined.Image, contentDescription = null, tint = subtitleColor, modifier = Modifier.size(34.dp))
                 Spacer(Modifier.height(12.dp))
-                Text("You haven't reported any potholes yet.", color = Color(0xFF5A5A5A), fontSize = 14.sp)
+                Text("You haven't reported any potholes yet.", color = titleColor, fontSize = 14.sp)
                 Text(
                     "Reports submitted while signed in will appear here.",
-                    color = Color(0xFF7B7B7B),
+                    color = subtitleColor,
                     fontSize = 12.sp
                 )
             }
@@ -3560,8 +3594,8 @@ private fun MyReportsSection(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
             shape = RoundedCornerShape(0.dp),
-            border = BorderStroke(1.dp, Color(0xFFDCDCDC)),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFFBFBFB))
+            border = BorderStroke(1.dp, cardBorder),
+            colors = CardDefaults.cardColors(containerColor = emptyCardColor)
         ) {
             Column(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
@@ -3569,12 +3603,12 @@ private fun MyReportsSection(
             ) {
                 Text(
                     "No reports in this category.",
-                    color = Color(0xFF5A5A5A),
+                    color = titleColor,
                     fontSize = 14.sp,
                 )
                 Text(
                     "Tap another stat box to view other reports.",
-                    color = Color(0xFF7B7B7B),
+                    color = subtitleColor,
                     fontSize = 12.sp,
                 )
             }

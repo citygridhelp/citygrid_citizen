@@ -23,7 +23,7 @@ object AppAutoRefresh {
      * Pulls remote report status, checks for app-update notifications, and reloads local caches.
      * Call from a background dispatcher during the splash window.
      */
-    suspend fun refreshSignedInData(cityKey: String? = null): Boolean {
+    suspend fun refreshSignedInData(cityKey: String? = null, reporterUserId: String = ""): Boolean {
         if (!SupabaseClientProvider.isConfigured) {
             withContext(Dispatchers.IO) {
                 CitizenNotificationsRepository.checkAppVersion(BuildConfig.VERSION_NAME)
@@ -35,7 +35,11 @@ object AppAutoRefresh {
             if (!cityKey.isNullOrBlank()) {
                 RecentReportsRepository.syncPublicCityReportsFromSupabase(cityKey)
             }
-            RecentReportsRepository.syncSignedInReportsFromSupabase()
+            if (reporterUserId.isNotBlank()) {
+                RecentReportsRepository.syncSignedInReportsFromSupabase(reporterUserId)
+            } else {
+                false
+            }
         }
     }
 

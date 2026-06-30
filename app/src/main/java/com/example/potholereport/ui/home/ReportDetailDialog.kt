@@ -82,14 +82,9 @@ fun ReportDetailDialog(
         config.userAgentValue = context.packageName
     }
 
-    LaunchedEffect(report.id, report.photoPath, report.widePhotoPath) {
-        closeBitmap = withContext(Dispatchers.IO) {
-            decodeReportBitmap(report.photoPath)
-        }
-        wideBitmap = withContext(Dispatchers.IO) {
-            val path = report.widePhotoPath
-            if (path.isNotBlank()) decodeReportBitmap(path) else null
-        }
+    LaunchedEffect(report.id, report.photoPath, report.widePhotoPath, report.storageClosePath, report.storageWidePath) {
+        closeBitmap = com.example.potholereport.data.remote.ReportPhotoCache.loadCloseBitmap(context, report)
+        wideBitmap = com.example.potholereport.data.remote.ReportPhotoCache.loadWideBitmap(context, report)
     }
     LaunchedEffect(report.id, report.areaLabel, report.latitude, report.longitude) {
         if (isMeaningfulAreaName(areaLabel)) return@LaunchedEffect

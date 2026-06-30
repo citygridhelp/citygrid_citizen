@@ -7,13 +7,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Edit
@@ -119,6 +122,8 @@ fun ProfileDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState())
                     .padding(20.dp),
             ) {
                 Row(
@@ -297,9 +302,18 @@ fun ProfileDialog(
                             }
                         }
                         if (codeSent || awaitingCurrentEmailCode) {
-                            if (codeSent && !awaitingCurrentEmailCode) {
+                            if (awaitingCurrentEmailCode) {
                                 Text(
-                                    "Code sent to ${UserProfileRepository.maskEmail(newEmailInput.trim())}.",
+                                    "New address confirmed. Enter the code sent to your current email " +
+                                        "(${UserProfileRepository.maskEmail(email)}).",
+                                    fontSize = 11.sp,
+                                    color = labelColor,
+                                    modifier = Modifier.padding(bottom = 6.dp),
+                                )
+                            } else if (codeSent) {
+                                Text(
+                                    "Code sent to ${UserProfileRepository.maskEmail(newEmailInput.trim())}. " +
+                                        "Enter the numeric code from the email (not the confirmation link).",
                                     fontSize = 11.sp,
                                     color = labelColor,
                                     modifier = Modifier.padding(bottom = 6.dp),
@@ -322,12 +336,13 @@ fun ProfileDialog(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                                 colors = fieldColors,
                             )
-                            TextButton(
+                            Spacer(Modifier.height(8.dp))
+                            Button(
                                 onClick = {
                                     val target = newEmailInput.trim().lowercase()
                                     if (verificationCodeInput.length < 4) {
                                         emailError = "Enter the verification code"
-                                        return@TextButton
+                                        return@Button
                                     }
                                     val otpEmail = if (awaitingCurrentEmailCode) {
                                         email.trim().lowercase()
@@ -340,15 +355,16 @@ fun ProfileDialog(
                                             onVerifyEmailChange(otpEmail, verificationCodeInput, target)
                                         ) {
                                             EmailChangeVerifyResult.SUCCESS -> {
-                                                emailVerified = true
-                                                verifiedNewEmail = target
                                                 awaitingCurrentEmailCode = false
                                                 emailError = null
+                                                onSave(draftAvatarId, target)
+                                                exitEditMode()
                                             }
                                             EmailChangeVerifyResult.NEED_CURRENT_EMAIL -> {
                                                 awaitingCurrentEmailCode = true
                                                 verificationCodeInput = ""
                                                 emailError = null
+                                                codeSent = true
                                             }
                                             EmailChangeVerifyResult.INVALID_CODE ->
                                                 emailError = "Invalid verification code"
@@ -360,15 +376,21 @@ fun ProfileDialog(
                                         emailBusy = false
                                     }
                                 },
-                                enabled = !emailBusy,
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = verificationCodeInput.length >= 4 && !emailBusy,
+                                shape = RoundedCornerShape(0.dp),
                             ) {
                                 if (emailBusy) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(16.dp),
                                         strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary,
                                     )
                                 } else {
-                                    Text("Verify email", fontWeight = FontWeight.Bold)
+                                    Text(
+                                        if (awaitingCurrentEmailCode) "Confirm current email code" else "Confirm verification code",
+                                        fontWeight = FontWeight.Bold,
+                                    )
                                 }
                             }
                         }

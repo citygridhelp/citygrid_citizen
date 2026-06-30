@@ -95,11 +95,16 @@ fun AuthNavHost(
         if (!SupabaseClientProvider.isConfigured) return
         scope.launch {
             if (deferBackgroundSync) delay(900)
+            val localId = profile.anonymousUserId
             val stableId = withContext(Dispatchers.IO) {
-                CitizenProfileRepository.resolveReporterUserId(profile.anonymousUserId)
+                CitizenProfileRepository.resolveReporterUserId(localId)
             }
             withContext(Dispatchers.IO) {
+                if (stableId != localId) {
+                    RecentReportsRepository.migrateReporterUserId(localId, stableId)
+                }
                 CitizenProfileRepository.syncEmailFromAuthSession()
+                RecentReportsRepository.syncSignedInReportsFromSupabase(stableId)
             }
             if (stableId != anonymousUserId &&
                 UserProfileRepository.updateAnonymousUserId(profile.email, stableId)
@@ -107,9 +112,6 @@ fun AuthNavHost(
                 anonymousUserId = stableId
             }
             if (pullRemoteReports) {
-                withContext(Dispatchers.IO) {
-                    RecentReportsRepository.syncSignedInReportsFromSupabase()
-                }
                 bumpUiRefresh()
             }
         }
@@ -117,8 +119,9 @@ fun AuthNavHost(
 
     fun refreshAfterSignIn(cityKey: String?) {
         scope.launch {
+            val reporterId = anonymousUserId
             withContext(Dispatchers.IO) {
-                AppAutoRefresh.refreshSignedInData(cityKey)
+                AppAutoRefresh.refreshSignedInData(cityKey, reporterId)
             }
             bumpRecentReportsDisplay()
         }
@@ -185,7 +188,7 @@ fun AuthNavHost(
                         scope.launch {
                             withContext(Dispatchers.IO) {
                                 if (isSignedIn) {
-                                    AppAutoRefresh.refreshSignedInData()
+                                    AppAutoRefresh.refreshSignedInData(cityKey = null, reporterUserId = anonymousUserId)
                                 } else {
                                     AppAutoRefresh.refreshLocalData()
                                 }
@@ -262,7 +265,14 @@ fun AuthNavHost(
                         signedInEmail = verifiedNewEmail.trim().lowercase()
                     }
                     scope.launch {
-                        snackbarHostState.showSnackbar("Profile saved")
+                        if (verifiedNewEmail != null) {
+                            withContext(Dispatchers.IO) {
+                                CitizenProfileRepository.syncEmailFromAuthSession()
+                            }
+                            snackbarHostState.showSnackbar("Email updated")
+                        } else {
+                            snackbarHostState.showSnackbar("Profile saved")
+                        }
                     }
                 },
                 onProfileStartEmailChange = { newEmail ->

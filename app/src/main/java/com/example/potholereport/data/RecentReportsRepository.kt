@@ -35,6 +35,12 @@ data class PersistedPotholeReport(
     val assigneeOfficeAddress: String = "",
     /** Stable reporter id ([UserProfile.anonymousUserId] or [DeviceReporterId]). */
     val reporterUserId: String = "",
+    /** True once this row exists in Supabase (successful push or server restore). */
+    val cloudSynced: Boolean = false,
+    /** Supabase Storage object path for the close-up photo (e.g. `{id}/close.jpg`). */
+    val storageClosePath: String = "",
+    /** Supabase Storage object path for the wide context photo. */
+    val storageWidePath: String = "",
 ) {
     fun hasCoordinates(): Boolean = !latitude.isNaN() && !longitude.isNaN()
 
@@ -159,6 +165,29 @@ object RecentReportsRepository {
     }
 
     /**
+     * Re-tags signed-in reports when the canonical PW-xxx id changes after
+     * [CitizenProfileRepository.resolveReporterUserId].
+     */
+    fun migrateReporterUserId(fromId: String, toId: String): Boolean {
+        val from = fromId.trim()
+        val to = toId.trim()
+        if (from.isBlank() || to.isBlank() || from == to) return false
+        val ctx = appContext ?: return false
+        return synchronized(lock) {
+            var changed = false
+            for (i in cache.indices) {
+                val report = cache[i]
+                if (report.submittedSignedIn && report.reporterUserId == from) {
+                    cache[i] = report.copy(reporterUserId = to)
+                    changed = true
+                }
+            }
+            if (changed) saveToDisk(ctx)
+            changed
+        }
+    }
+
+    /**
      * Copies report photos into app storage and prepends to the list.
      * Call from a background dispatcher; does not touch Compose state.
      */
@@ -219,21 +248,129 @@ object RecentReportsRepository {
         }
     }
 
-    /** Pulls the signed-in citizen's reports from Supabase and merges them locally. */
-    suspend fun syncSignedInReportsFromSupabase(): Boolean {
+    /** Marks a report as present in Supabase after a successful cloud push. */
+    fun markCloudSynced(
+        reportId: Long,
+        reporterUserId: String,
+        storageClosePath: String = "",
+        storageWidePath: String = "",
+    ): Boolean {
+        val ownerId = reporterUserId.trim()
+        if (ownerId.isBlank()) return false
+        val ctx = appContext ?: return false
+        return synchronized(lock) {
+            val idx = cache.indexOfFirst {
+                it.id == reportId && it.submittedSignedIn && it.reporterUserId == ownerId
+            }
+            if (idx < 0) return@synchronized false
+            val existing = cache[idx]
+            val closeStorage = storageClosePath.ifBlank { existing.storageClosePath }
+            val wideStorage = storageWidePath.ifBlank { existing.storageWidePath }
+            if (existing.cloudSynced &&
+                existing.storageClosePath == closeStorage &&
+                existing.storageWidePath == wideStorage
+            ) {
+                return@synchronized true
+            }
+            cache[idx] = existing.copy(
+                cloudSynced = true,
+                storageClosePath = closeStorage,
+                storageWidePath = wideStorage,
+            )
+            saveToDisk(ctx)
+            true
+        }
+    }
+
+    private data class PhotoDownloadJob(
+        val reportId: Long,
+        val storageClose: String,
+        val storageWide: String,
+    )
+
+    private suspend fun downloadQueuedPhotos(ctx: Context, jobs: List<PhotoDownloadJob>): Boolean {
+        if (jobs.isEmpty()) return false
+        var changed = false
+        for (job in jobs.distinctBy { it.reportId }) {
+            if (job.storageClose.isBlank()) continue
+            val paths = com.example.potholereport.data.remote.ReportPhotoCache.ensureLocalPhotos(
+                ctx,
+                job.reportId,
+                job.storageClose,
+                job.storageWide,
+            ) ?: continue
+            synchronized(lock) {
+                val idx = cache.indexOfFirst { it.id == job.reportId }
+                if (idx < 0) return@synchronized
+                val existing = cache[idx]
+                val updated = existing.copy(
+                    photoPath = paths.first,
+                    widePhotoPath = paths.second.ifBlank { existing.widePhotoPath },
+                    storageClosePath = job.storageClose,
+                    storageWidePath = job.storageWide,
+                )
+                if (updated != existing) {
+                    cache[idx] = updated
+                    changed = true
+                }
+            }
+        }
+        if (changed) {
+            synchronized(lock) { saveToDisk(ctx) }
+        }
+        return changed
+    }
+
+    private fun needsPhotoDownload(report: PersistedPotholeReport, storageClose: String): Boolean {
+        if (storageClose.isBlank()) return false
+        val local = report.photoPath
+        return local.isBlank() || !File(local).exists()
+    }
+
+    private fun queuePhotoDownload(
+        jobs: MutableList<PhotoDownloadJob>,
+        report: PersistedPotholeReport,
+        storageClose: String,
+        storageWide: String,
+    ) {
+        if (!needsPhotoDownload(report, storageClose)) return
+        jobs += PhotoDownloadJob(report.id, storageClose, storageWide)
+    }
+
+    /**
+     * Merges the signed-in citizen's Supabase reports locally: restores missing rows,
+     * updates status, and removes cloud-synced rows deleted on the server.
+     */
+    suspend fun syncSignedInReportsFromSupabase(reporterUserId: String): Boolean {
         val ctx = appContext ?: return false
         if (!com.example.potholereport.data.remote.SupabaseClientProvider.isConfigured) return false
         val client = com.example.potholereport.data.remote.SupabaseClientProvider.client ?: return false
         runCatching { client.auth.awaitInitialization() }
         if (client.auth.currentUserOrNull()?.id == null) return false
-        val rows = com.example.potholereport.data.remote.ReportSyncRepository.fetchMyReports()
-        if (rows.isEmpty()) return false
-        return synchronized(lock) {
+        val ownerId = reporterUserId.trim()
+        if (ownerId.isBlank()) return false
+        val rows = com.example.potholereport.data.remote.ReportSyncRepository.fetchMyReportsOrNull()
+            ?: return false
+        val remoteIds = rows.map { it.id }.toSet()
+        val photoJobs = mutableListOf<PhotoDownloadJob>()
+        val metadataChanged = synchronized(lock) {
             var changed = false
+            val pruneCandidates = cache.filter { report ->
+                report.submittedSignedIn &&
+                    report.reporterUserId == ownerId &&
+                    report.cloudSynced &&
+                    report.id !in remoteIds
+            }
+            for (report in pruneCandidates) {
+                if (cache.remove(report)) {
+                    deleteReportFiles(report)
+                    changed = true
+                }
+            }
             for (row in rows) {
-                val ownerId = row.reporterUserId.trim()
-                if (ownerId.isBlank()) continue
                 val visibleStatus = PotholeReportStatus.fromStored(row.citizenVisibleStatus)
+                val storageClose = row.photoPath.trim()
+                val storageWide = row.widePhotoPath.trim()
                 val idx = cache.indexOfFirst { it.id == row.id }
                 if (idx < 0) {
                     val lat = row.latitude ?: Double.NaN
@@ -251,6 +388,9 @@ object RecentReportsRepository {
                         submittedSignedIn = true,
                         status = visibleStatus,
                         reporterUserId = ownerId,
+                        cloudSynced = true,
+                        storageClosePath = storageClose,
+                        storageWidePath = storageWide,
                         assigneeKey = row.assigneeKey,
                         assigneeCorporation = row.assigneeCorp,
                         assigneeZone = row.assigneeZone,
@@ -262,13 +402,18 @@ object RecentReportsRepository {
                         entry = entry.withAssignee(MunicipalAssignmentResolver.resolve(row.cityKey, lat, lon))
                     }
                     cache.add(entry)
+                    queuePhotoDownload(photoJobs, entry, storageClose, storageWide)
                     changed = true
                     continue
                 }
                 val existing = cache[idx]
-                if (!existing.submittedSignedIn || existing.reporterUserId != ownerId) continue
                 val merged = existing.copy(
+                    submittedSignedIn = true,
+                    reporterUserId = ownerId,
                     status = visibleStatus,
+                    cloudSynced = true,
+                    storageClosePath = storageClose.ifBlank { existing.storageClosePath },
+                    storageWidePath = storageWide.ifBlank { existing.storageWidePath },
                     assigneeKey = row.assigneeKey.ifBlank { existing.assigneeKey },
                     assigneeCorporation = row.assigneeCorp.ifBlank { existing.assigneeCorporation },
                     assigneeZone = row.assigneeZone.ifBlank { existing.assigneeZone },
@@ -280,6 +425,12 @@ object RecentReportsRepository {
                     cache[idx] = merged
                     changed = true
                 }
+                queuePhotoDownload(
+                    photoJobs,
+                    merged,
+                    merged.storageClosePath,
+                    merged.storageWidePath,
+                )
             }
             if (changed) {
                 cache.sortByDescending { it.createdAtMs }
@@ -291,6 +442,8 @@ object RecentReportsRepository {
             }
             changed
         }
+        val photosChanged = downloadQueuedPhotos(ctx, photoJobs)
+        return metadataChanged || photosChanged
     }
 
     /** Pulls recent city reports from Supabase for guests and fresh installs. */
@@ -300,12 +453,73 @@ object RecentReportsRepository {
         if (!com.example.potholereport.data.remote.SupabaseClientProvider.isConfigured) return false
         val canonicalCity = CityMetroKeys.canonical(cityKey)
         val rows = com.example.potholereport.data.remote.ReportSyncRepository
-            .fetchRecentCityReports(canonicalCity, MAX_STORED)
-        if (rows.isEmpty()) return false
-        return synchronized(lock) {
+            .fetchRecentCityReportsOrNull(canonicalCity, MAX_STORED)
+            ?: return false
+        val remoteIds = rows.map { it.id }.toSet()
+        val photoJobs = mutableListOf<PhotoDownloadJob>()
+        val metadataChanged = synchronized(lock) {
             var changed = false
+            val stalePublic = cache.filter { report ->
+                !report.submittedSignedIn &&
+                    CityMetroKeys.canonical(report.cityKey) == canonicalCity &&
+                    report.id !in remoteIds &&
+                    (report.storageClosePath.isNotBlank() || report.cloudSynced || report.photoPath.isNotBlank())
+            }
+            for (report in stalePublic) {
+                if (cache.remove(report)) {
+                    deleteReportFiles(report)
+                    changed = true
+                }
+            }
             for (row in rows) {
-                if (cache.any { it.id == row.id }) continue
+                val visibleStatus = PotholeReportStatus.fromStored(row.citizenVisibleStatus)
+                val storageClose = row.photoPath.trim()
+                val storageWide = row.widePhotoPath.trim()
+                val idx = cache.indexOfFirst { it.id == row.id }
+                if (idx >= 0) {
+                    val existing = cache[idx]
+                    if (existing.submittedSignedIn) {
+                        val merged = existing.copy(
+                            status = visibleStatus,
+                            storageClosePath = storageClose.ifBlank { existing.storageClosePath },
+                            storageWidePath = storageWide.ifBlank { existing.storageWidePath },
+                        )
+                        if (merged != existing) {
+                            cache[idx] = merged
+                            changed = true
+                        }
+                        queuePhotoDownload(
+                            photoJobs,
+                            merged,
+                            merged.storageClosePath,
+                            merged.storageWidePath,
+                        )
+                        continue
+                    }
+                    val merged = existing.copy(
+                        status = visibleStatus,
+                        areaLabel = row.areaLabel.ifBlank { existing.areaLabel },
+                        storageClosePath = storageClose.ifBlank { existing.storageClosePath },
+                        storageWidePath = storageWide.ifBlank { existing.storageWidePath },
+                        assigneeKey = row.assigneeKey.ifBlank { existing.assigneeKey },
+                        assigneeCorporation = row.assigneeCorp.ifBlank { existing.assigneeCorporation },
+                        assigneeZone = row.assigneeZone.ifBlank { existing.assigneeZone },
+                        assigneeName = row.assigneeName.ifBlank { existing.assigneeName },
+                        assigneePosition = row.assigneeRole.ifBlank { existing.assigneePosition },
+                        assigneeOfficeAddress = row.assigneeAddr.ifBlank { existing.assigneeOfficeAddress },
+                    )
+                    if (merged != existing) {
+                        cache[idx] = merged
+                        changed = true
+                    }
+                    queuePhotoDownload(
+                        photoJobs,
+                        merged,
+                        merged.storageClosePath,
+                        merged.storageWidePath,
+                    )
+                    continue
+                }
                 val lat = row.latitude ?: Double.NaN
                 val lon = row.longitude ?: Double.NaN
                 val assignee = if (row.assigneeName.isNotBlank()) {
@@ -324,8 +538,11 @@ object RecentReportsRepository {
                     severity = PotholeSeverity.fromStored(row.severity),
                     note = row.citizenNote,
                     submittedSignedIn = false,
-                    status = PotholeReportStatus.fromStored(row.citizenVisibleStatus),
+                    status = visibleStatus,
                     reporterUserId = row.reporterUserId,
+                    cloudSynced = true,
+                    storageClosePath = storageClose,
+                    storageWidePath = storageWide,
                     assigneeKey = row.assigneeKey,
                     assigneeCorporation = row.assigneeCorp,
                     assigneeZone = row.assigneeZone,
@@ -337,6 +554,7 @@ object RecentReportsRepository {
                     entry = entry.withAssignee(assignee)
                 }
                 cache.add(entry)
+                queuePhotoDownload(photoJobs, entry, storageClose, storageWide)
                 changed = true
             }
             if (changed) {
@@ -349,6 +567,8 @@ object RecentReportsRepository {
             }
             changed
         }
+        val photosChanged = downloadQueuedPhotos(ctx, photoJobs)
+        return metadataChanged || photosChanged
     }
 
     /**
@@ -422,12 +642,17 @@ object RecentReportsRepository {
                             assigneePosition = o.optString("assigneeRole", ""),
                             assigneeOfficeAddress = o.optString("assigneeAddr", ""),
                             reporterUserId = o.optString("reporterId", ""),
+                            cloudSynced = o.optBoolean("cloudSynced", false),
+                            storageClosePath = o.optString("storageClose", ""),
+                            storageWidePath = o.optString("storageWide", ""),
                         )
                     )
                 }
             }.filter { r ->
-                // Keep signed-in rows synced from Supabase even before photos are cached locally.
-                r.submittedSignedIn || File(r.photoPath).exists()
+                r.submittedSignedIn ||
+                    r.cloudSynced ||
+                    r.storageClosePath.isNotBlank() ||
+                    (r.photoPath.isNotBlank() && File(r.photoPath).exists())
             }
         } catch (_: Exception) {
             emptyList()
@@ -471,6 +696,15 @@ object RecentReportsRepository {
                     }
                     if (r.reporterUserId.isNotBlank()) {
                         put("reporterId", r.reporterUserId)
+                    }
+                    if (r.cloudSynced) {
+                        put("cloudSynced", true)
+                    }
+                    if (r.storageClosePath.isNotBlank()) {
+                        put("storageClose", r.storageClosePath)
+                    }
+                    if (r.storageWidePath.isNotBlank()) {
+                        put("storageWide", r.storageWidePath)
                     }
                 }
             )

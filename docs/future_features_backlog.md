@@ -88,7 +88,7 @@ Header bell for citizen notifications (e.g. app update prompts, report status me
 
 **Status:** Partially deferred.
 
-Signup and profile email change rely on Supabase email templates using `{{ .Token }}` (Confirm signup, Change email address). A dedicated in-app “verification settings” or template checklist for operators may be documented separately in Supabase dashboard runbooks.
+Signup and profile email change rely on Supabase email templates using `{{ .Token }}` (Confirm signup, Change email address) and **Secure email change off** for a single-code profile update. Operator checklist: [`docs/supabase_email_templates.md`](supabase_email_templates.md).
 
 ---
 

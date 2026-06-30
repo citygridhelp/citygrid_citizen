@@ -1,5 +1,6 @@
 package com.example.potholereport.data.remote
 
+import android.util.Log
 import com.example.potholereport.data.EmailChangeStartResult
 import com.example.potholereport.data.EmailChangeVerifyResult
 import com.example.potholereport.data.LoginResult
@@ -7,8 +8,10 @@ import com.example.potholereport.data.PasswordResetCodeResult
 import com.example.potholereport.data.SignupStartResult
 import com.example.potholereport.data.SignupVerifyResult
 import io.github.jan.supabase.auth.OtpType
+import io.github.jan.supabase.auth.OtpVerifyResult
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -21,6 +24,8 @@ import kotlinx.serialization.json.put
  * Results are mapped to the app's existing enums so the auth screens are unchanged.
  */
 object SupabaseAuthRepository {
+
+    private const val TAG = "SupabaseAuth"
 
     fun currentUserId(): String? =
         SupabaseClientProvider.client?.auth?.currentUserOrNull()?.id
@@ -175,8 +180,8 @@ object SupabaseAuthRepository {
         if (normalized == current) return EmailChangeStartResult.SAME_EMAIL
         if (emailExists(normalized) == true) return EmailChangeStartResult.EMAIL_ALREADY_REGISTERED
         return try {
+            // updateUser sends the change-email OTP; a second resend here can invalidate the first code.
             client.auth.updateUser { email = normalized }
-            runCatching { client.auth.resendEmail(OtpType.Email.EMAIL_CHANGE, normalized) }
             EmailChangeStartResult.CODE_SENT
         } catch (e: Exception) {
             val msg = (e.message ?: "").lowercase()
@@ -199,31 +204,94 @@ object SupabaseAuthRepository {
         targetNewEmail: String,
     ): EmailChangeVerifyResult {
         val client = SupabaseClientProvider.client ?: return EmailChangeVerifyResult.FAILED
+        runCatching { client.auth.awaitInitialization() }
         val otpTarget = otpEmail.trim().lowercase()
         val desired = targetNewEmail.trim().lowercase()
         val cleanToken = token.trim()
-        return try {
-            client.auth.verifyEmailOtp(
-                type = OtpType.Email.EMAIL_CHANGE,
-                email = otpTarget,
-                token = cleanToken,
-            )
-            runCatching { client.auth.awaitInitialization() }
-            val active = client.auth.currentUserOrNull()?.email?.trim()?.lowercase().orEmpty()
-            when {
-                active == desired -> {
-                    CitizenProfileRepository.syncEmail(desired)
-                    EmailChangeVerifyResult.SUCCESS
+        if (cleanToken.length < 4 || desired.isBlank()) return EmailChangeVerifyResult.INVALID_CODE
+
+        suspend fun reloadUser(): UserInfo? = runCatching {
+            client.auth.retrieveUserForCurrentSession(updateSession = true)
+        }.getOrNull()
+
+        fun isEmailFullyChanged(user: UserInfo?): Boolean {
+            if (user == null) return false
+            val active = user.email?.trim()?.lowercase().orEmpty()
+            val pending = user.newEmail?.trim()?.lowercase().orEmpty()
+            return active == desired && pending.isBlank()
+        }
+
+        fun needsCurrentEmailStep(user: UserInfo?): Boolean {
+            if (user == null) return false
+            val active = user.email?.trim()?.lowercase().orEmpty()
+            val pending = user.newEmail?.trim()?.lowercase().orEmpty()
+            return pending == desired && active != desired
+        }
+
+        suspend fun finishSuccess(): EmailChangeVerifyResult {
+            CitizenProfileRepository.syncEmailFromAuthSession()
+            Log.i(TAG, "Email change applied in auth session: $desired")
+            return EmailChangeVerifyResult.SUCCESS
+        }
+
+        suspend fun evaluateUser(user: UserInfo?): EmailChangeVerifyResult? {
+            if (isEmailFullyChanged(user)) return finishSuccess()
+            if (needsCurrentEmailStep(user)) return EmailChangeVerifyResult.NEED_CURRENT_EMAIL
+            return null
+        }
+
+        suspend fun verifyOnce(email: String): EmailChangeVerifyResult? {
+            return try {
+                when (
+                    val result = client.auth.verifyEmailOtp(
+                        type = OtpType.Email.EMAIL_CHANGE,
+                        email = email,
+                        token = cleanToken,
+                    )
+                ) {
+                    is OtpVerifyResult.Authenticated -> {
+                        Log.d(TAG, "verifyEmailOtp authenticated for $email")
+                        evaluateUser(result.session.user) ?: evaluateUser(reloadUser())
+                    }
+                    OtpVerifyResult.VerifiedNoSession -> {
+                        Log.d(TAG, "verifyEmailOtp verified without session for $email")
+                        evaluateUser(reloadUser())
+                    }
                 }
-                else -> EmailChangeVerifyResult.NEED_CURRENT_EMAIL
+            } catch (e: Exception) {
+                Log.w(TAG, "verifyEmailOtp failed for $email: ${e.message}")
+                mapEmailChangeVerifyError(e)
             }
-        } catch (e: Exception) {
-            val msg = (e.message ?: "").lowercase()
-            when {
-                msg.contains("expired") -> EmailChangeVerifyResult.EXPIRED
-                msg.contains("invalid") || msg.contains("token") -> EmailChangeVerifyResult.INVALID_CODE
-                else -> EmailChangeVerifyResult.FAILED
+        }
+
+        verifyOnce(otpTarget)?.let { return it }
+
+        // Secure email change: Supabase may accept the new-address OTP but keep email
+        // unchanged until a second step; retrying the same new-address OTP can finish it.
+        if (otpTarget == desired) {
+            verifyOnce(desired)?.let { return it }
+            reloadUser()?.let { user ->
+                if (needsCurrentEmailStep(user)) {
+                    return EmailChangeVerifyResult.NEED_CURRENT_EMAIL
+                }
             }
+            return EmailChangeVerifyResult.NEED_CURRENT_EMAIL
+        }
+
+        reloadUser()?.let { user ->
+            if (needsCurrentEmailStep(user)) {
+                return EmailChangeVerifyResult.NEED_CURRENT_EMAIL
+            }
+        }
+        return EmailChangeVerifyResult.FAILED
+    }
+
+    private fun mapEmailChangeVerifyError(error: Exception): EmailChangeVerifyResult {
+        val msg = (error.message ?: "").lowercase()
+        return when {
+            msg.contains("expired") -> EmailChangeVerifyResult.EXPIRED
+            msg.contains("invalid") || msg.contains("token") -> EmailChangeVerifyResult.INVALID_CODE
+            else -> EmailChangeVerifyResult.FAILED
         }
     }
 

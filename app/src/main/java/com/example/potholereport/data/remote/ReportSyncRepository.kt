@@ -2,6 +2,7 @@ package com.example.potholereport.data.remote
 
 import android.util.Log
 import com.example.potholereport.data.PersistedPotholeReport
+import com.example.potholereport.data.RecentReportsRepository
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
@@ -114,11 +115,23 @@ object ReportSyncRepository {
                 val msg = (insertError.message ?: "").lowercase()
                 if (msg.contains("duplicate") || msg.contains("unique") || msg.contains("23505")) {
                     Log.i(TAG, "Report ${report.id} already exists in Supabase")
+                    RecentReportsRepository.markCloudSynced(
+                        report.id,
+                        report.reporterUserId,
+                        closeObjectPath,
+                        wideObjectPath,
+                    )
                 } else {
                     throw insertError
                 }
             }
             Log.i(TAG, "Pushed report ${report.id} to Supabase")
+            RecentReportsRepository.markCloudSynced(
+                report.id,
+                report.reporterUserId,
+                closeObjectPath,
+                wideObjectPath,
+            )
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to push report ${report.id}: ${e.message}", e)
@@ -131,8 +144,13 @@ object ReportSyncRepository {
      * Powers the home "Recent reports" strip, map clusters, and accountability tab.
      */
     suspend fun fetchRecentCityReports(cityKey: String, limit: Int = 80): List<RemoteReportRow> {
-        if (!SupabaseClientProvider.isConfigured) return emptyList()
-        val client = SupabaseClientProvider.client ?: return emptyList()
+        return fetchRecentCityReportsOrNull(cityKey, limit) ?: emptyList()
+    }
+
+    /** Null when Supabase is unavailable or the fetch failed (do not prune local cache). */
+    suspend fun fetchRecentCityReportsOrNull(cityKey: String, limit: Int = 80): List<RemoteReportRow>? {
+        if (!SupabaseClientProvider.isConfigured) return null
+        val client = SupabaseClientProvider.client ?: return null
         val canonicalCity = com.example.potholereport.data.CityMetroKeys.canonical(cityKey)
         return try {
             client.from(REPORTS_TABLE)
@@ -144,15 +162,20 @@ object ReportSyncRepository {
                 .decodeList<RemoteReportRow>()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch city reports for $canonicalCity: ${e.message}", e)
-            emptyList()
+            null
         }
     }
 
     /** Reads the signed-in citizen's reports back from Supabase (status round-trip). */
     suspend fun fetchMyReports(): List<RemoteReportRow> {
-        val client = SupabaseClientProvider.client ?: return emptyList()
+        return fetchMyReportsOrNull() ?: emptyList()
+    }
+
+    /** Null when Supabase is unavailable or the fetch failed (do not prune local cache). */
+    suspend fun fetchMyReportsOrNull(): List<RemoteReportRow>? {
+        val client = SupabaseClientProvider.client ?: return null
         runCatching { client.auth.awaitInitialization() }
-        val authId = client.auth.currentUserOrNull()?.id ?: return emptyList()
+        val authId = client.auth.currentUserOrNull()?.id ?: return null
         return try {
             client.from(REPORTS_TABLE)
                 .select(Columns.raw(RemoteReportRow.SELECTED_COLUMNS)) {
@@ -161,7 +184,7 @@ object ReportSyncRepository {
                 .decodeList<RemoteReportRow>()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch reports: ${e.message}", e)
-            emptyList()
+            null
         }
     }
 }

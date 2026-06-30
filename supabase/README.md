@@ -61,6 +61,16 @@ Android apps via `BuildConfig`/`local.properties`. See the integration plan for
 the per-app code steps (SDK setup, insert on report submit, status updates,
 realtime subscriptions).
 
+## 4. Email templates (OTP)
+
+Signup and profile email change expect **numeric codes** in email, not links.
+Configure **Authentication → Email Templates** so **Confirm signup** and
+**Change email address** include `{{ .Token }}`.
+
+**Secure email change** should be **off** (Authentication → Sign In / Providers →
+Email) so profile email change uses a **single code** to the new address. Details:
+[`docs/supabase_email_templates.md`](../docs/supabase_email_templates.md).
+
 ## Field mapping (single source of truth)
 
 | Citizen JSON | `reports` column | Govt JSON |

@@ -705,6 +705,11 @@ fun NewReportScreen(
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = DarkBlue,
                             unfocusedBorderColor = DarkBlue,
+                            focusedTextColor = DarkBlue,
+                            unfocusedTextColor = DarkBlue,
+                            cursorColor = DarkBlue,
+                            focusedPlaceholderColor = Color(0xFF757575),
+                            unfocusedPlaceholderColor = Color(0xFF757575),
                         )
                     )
                 }
