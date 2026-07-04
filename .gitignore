@@ -9,7 +9,14 @@
 /.idea/assetWizardSettings.xml
 .DS_Store
 /build
+app/build/
+app/release/
+*.apk
+*.aab
 /captures
 .externalNativeBuild
 .cxx
 local.properties
+
+# ML calibration photos (large; keep local only)
+tools/train_pothole_model/dataset/
