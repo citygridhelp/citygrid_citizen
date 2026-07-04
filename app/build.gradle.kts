@@ -25,7 +25,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.potholereport"
+        applicationId = "in.citygrid.citizen"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
