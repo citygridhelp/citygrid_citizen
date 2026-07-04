@@ -64,6 +64,14 @@ https://citygridhelp.github.io/citygrid_citizen/privacy_policy
 
 Use the same URL in **Data safety** if asked for a policy link.
 
+**Delete account URL** (Data safety → Data collection and security):
+
+```text
+https://citygridhelp.github.io/citygrid_citizen/privacy_policy#7-account-deletion
+```
+
+This anchor opens **Section 7 — Account deletion** on the same page. Verify it in incognito after GitHub Pages is live.
+
 ---
 
 ## Step 4 — Align Data safety (must match the policy)
@@ -108,4 +116,4 @@ Update Play Console when the new URL is live.
 - [ ] Policy URL opens in incognito
 - [ ] URL added in Play Console → Privacy policy
 - [ ] Data safety form completed and consistent with policy
-- [ ] Contact email in policy works (`citygridhelp@gmail.com`)
+- [ ] Delete account URL added in Data safety (`.../privacy_policy#7-account-deletion`)
