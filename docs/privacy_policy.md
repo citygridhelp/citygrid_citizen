@@ -2,7 +2,7 @@
 
 **App:** City Grid (package `in.citygrid.citizen`)  
 **Operator:** City Grid (`citygridhelp@gmail.com`)  
-**Last updated:** July 4, 2026
+**Last updated:** July 5, 2026
 
 This Privacy Policy explains how the **City Grid** citizen mobile app (“App”) collects, uses, and protects information when you report potholes and road hazards.
 
@@ -110,42 +110,89 @@ These providers process data on our behalf under their own privacy terms. We sha
 - **Account data** is kept while your account is active.
 - We may retain limited logs for security and abuse prevention.
 
-To request deletion of your account or personal data, email **citygridhelp@gmail.com**.
+For full steps to delete your account, see **[Section 7 — Account deletion](#7-account-deletion)** below.
 
 ---
 
-## 7. Your choices and rights
+## 7. Account deletion
+
+You can request that your **City Grid** account and associated personal data be deleted. This section describes how to request deletion, what we remove, and what may be kept.
+
+### How to request deletion
+
+1. Send an email to **citygridhelp@gmail.com** from the **same email address** registered on your City Grid account.
+2. Use the subject line: **Delete my City Grid account**
+3. In the message, state that you want your account and associated personal data deleted.
+4. We may reply to confirm your identity before processing the request.
+
+We aim to complete verified deletion requests within **30 days**.
+
+### What we delete
+
+When your account deletion request is approved, we delete or disassociate:
+
+| Data | Action |
+|------|--------|
+| **Email address & auth account** | Deleted from our authentication system (Supabase Auth) |
+| **Password / login credentials** | Removed with the auth account |
+| **Citizen profile** | Deleted (including display name and avatar settings tied to your account) |
+| **Reporter ID link (`PW-xxx`)** | Disassociated from your personal account — you will no longer be able to sign in and view **My Reports** under that identity |
+
+### What may be kept
+
+Some information may **remain** after account deletion:
+
+| Data | Why it may be kept |
+|------|-------------------|
+| **Pothole reports you already submitted** | Retained so municipalities can investigate, repair roads, and maintain audit records |
+| **Photos attached to those reports** | Retained as evidence with the report |
+| **Report location, severity, and status** | Retained as part of the public/civic record |
+| **Anonymous reporter ID on past reports** | May remain on historical reports already visible on the map; it is not linked to your email or name after account deletion |
+| **Security and email logs** | Retained only as long as needed for fraud prevention, legal compliance, or backup recovery |
+
+### Delete account without deleting past reports
+
+City Grid does **not** currently offer an in-app option to delete individual reports while keeping your account. If you need a specific report removed, email **citygridhelp@gmail.com** with the report details and we will review the request.
+
+### Contact
+
+**Email:** citygridhelp@gmail.com  
+**App name on Google Play:** City Grid
+
+---
+
+## 8. Your choices and rights
 
 You can:
 
 - **Revoke permissions** (camera, location) in Android Settings — some features will stop working
 - **Delete the app** from your device (local cache may remain until cleared)
-- **Request account or data deletion** by contacting us
+- **Request account deletion** — see [Section 7 — Account deletion](#7-account-deletion)
 - **Update your email** through the in-app profile flow (verification required)
 
 If you are in India or other regions with privacy laws, you may have additional rights to access, correct, or delete personal data. Contact us to exercise those rights.
 
 ---
 
-## 8. Security
+## 9. Security
 
 We use HTTPS for data in transit to our backend. No method of storage or transmission is 100% secure; we work to protect your information using reasonable technical measures.
 
 ---
 
-## 9. Children
+## 10. Children
 
 The App is **not directed at children under 13**. We do not knowingly collect personal information from children. Contact us if you believe a child has provided data and we will take appropriate steps.
 
 ---
 
-## 10. Changes to this policy
+## 11. Changes to this policy
 
 We may update this Privacy Policy from time to time. We will post the new version at the same URL and update the “Last updated” date. Continued use of the App after changes means you accept the updated policy.
 
 ---
 
-## 11. Contact
+## 12. Contact
 
 **Email:** citygridhelp@gmail.com  
 **App:** City Grid — Citizen (`in.citygrid.citizen`)
