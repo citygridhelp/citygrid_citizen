@@ -56,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -568,6 +569,7 @@ private fun HelplineRow(item: HelplineItem) {
 
 @Composable
 private fun DisclaimerCard() {
+    val uriHandler = LocalUriHandler.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -576,15 +578,35 @@ private fun DisclaimerCard() {
         colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F8F6)),
         border = BorderStroke(1.dp, Color(0xFF3A3A3A))
     ) {
-        Text(
-            text = "Location is used only to choose a relevant emergency number set. " +
-                "If location is unavailable, app falls back to India defaults. " +
-                "Verify regional numbers before use while travelling.",
-            modifier = Modifier.padding(10.dp),
-            fontSize = 10.sp,
-            lineHeight = 14.sp,
-            color = Color(0xFF333333)
-        )
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(
+                text = "Location is used only to choose a relevant emergency number set. " +
+                    "If location is unavailable, app falls back to India defaults. " +
+                    "Verify regional numbers before use while travelling.",
+                fontSize = 10.sp,
+                lineHeight = 14.sp,
+                color = Color(0xFF333333),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Government helpline sources: india.gov.in/directory/helpline · " +
+                    "mha.gov.in (ERSS/112). Roadside 1800 numbers are demo providers, not government.",
+                fontSize = 9.sp,
+                lineHeight = 13.sp,
+                color = Color(0xFF5A5A5A),
+            )
+            Text(
+                text = "Open india.gov.in helpline directory",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFFB74233),
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .clickable {
+                        uriHandler.openUri("https://www.india.gov.in/directory/helpline")
+                    },
+            )
+        }
     }
 }
 

@@ -409,16 +409,79 @@ Same clear happens on **Locate me** and **city view** controls (may be intention
 
 ---
 
+### 20. New report footer copy — “Report anonymously”
+
+**Status:** Not implemented — enhancement backlog (July 2026).
+
+**Problem:** At the bottom of **New report** (`NewReportScreen.kt`), the privacy footer reads:
+
+```text
+NO EMAIL · NO ACCOUNT · NO IP STORED
+```
+
+This is misleading now that **sign-in / accounts** exist, and it does not match store/feature-graphic messaging (“Report potholes - anonymously”).
+
+**Desired copy:** Replace `NO EMAIL · NO ACCOUNT` with **`REPORT ANONYMOUSLY`**, keeping the IP line:
+
+```text
+REPORT ANONYMOUSLY · NO IP STORED
+```
+
+(Use same separator style ` · ` and uppercase if keeping current footer styling.)
+
+**Rough scope:**
+
+- [ ] Update footer `Text` in `NewReportScreen.kt` (~line 791).
+- [ ] Quick check: footer still makes sense for **guest** and **signed-in** users (public map shows `PW-xxx`, not email).
+- [ ] Optional: align wording with feature graphic / Play listing if other screens repeat the old phrase.
+
+**Files:** `app/src/main/java/com/example/potholereport/ui/report/NewReportScreen.kt`
+
+**Acceptance criteria:**
+
+- [ ] Footer shows **REPORT ANONYMOUSLY · NO IP STORED** (or agreed casing).
+- [ ] No reference to “NO EMAIL · NO ACCOUNT” on new report screen.
+- [ ] Copy accurate for both guest submit and signed-in submit flows.
+
+---
+
+### 21. Privacy policy — dedicated Account deletion section (Play Store)
+
+**Status:** Deferred — **remind after first Play review approves** (July 2026).
+
+**Context:** For Data safety, delete-account URL temporarily set to the main policy (no anchor):
+
+```text
+https://citygridhelp.github.io/citygrid_citizen/privacy_policy
+```
+
+The broken anchor `...#7-account-deletion` was removed because **live GitHub Pages** still has Section 7 as “Your choices and rights”, not “Account deletion”.
+
+**Do later:**
+
+- [ ] Add **Section — Account deletion** to `docs/privacy_policy.md` (steps, what is deleted vs kept, `citygridhelp@gmail.com`, 30-day target).
+- [ ] Push to **`master`** on `citygridhelp/citygrid_citizen` → wait for GitHub Pages rebuild.
+- [ ] Verify incognito: `https://citygridhelp.github.io/citygrid_citizen/privacy_policy#account-deletion` (or `#7-account-deletion` if heading matches).
+- [ ] Play Console → **Data safety** → **Delete account URL** → update to anchor URL if desired.
+- [ ] Bump **Last updated** date in policy.
+
+**Guide:** [privacy_policy_hosting.md](privacy_policy_hosting.md)
+
+**Trigger:** After City Grid passes **first Google Play app review** and internal/closed testing is stable.
+
+---
+
 ## How to use this list
 
 | Priority | Suggested order |
 |----------|-----------------|
 | High (product) | **#11** signup OTP interrupt, **#16** critical filter + map pan bug, **#15** unwanted map recenter |
-| High (UX) | **#13** submit loading, **#12** GPS accuracy, **#18** Report a pothole button styling |
+| High (UX) | **#13** submit loading, **#12** GPS accuracy, **#18** Report a pothole button styling, **#20** new report footer copy |
 | Medium | **#6** notifications bell, **#5** city match, **#14** map area labels |
 | Medium (Bengaluru pilot) | **#10** BBMP/GBA zones — [future_govt_bbmp_gba_zones.md](future_govt_bbmp_gba_zones.md) |
 | Major / strategic | **#17** GBA division heat map (after #10 boundaries) |
 | Last (testing polish) | **#19** tap map cluster → view reports |
+| After Play review approves | **#21** privacy policy Account deletion section + delete-account URL anchor |
 | Low / strategic | #2 account linking, #3 email history |
 | Reference only | #1 (document current design) |
 | Shipped | #4 photo download |
@@ -428,4 +491,5 @@ When an item ships, move it to the release guide or handover doc and mark it **S
 **Product thresholds & defaults (duplicate radius, GPS, map clusters, auth, etc.):** see [product_assumptions.md](product_assumptions.md).
 
 **Pothole photo classification (models, features, thresholds, metrics):** see [pothole_classification_model.md](pothole_classification_model.md).  
-**Full ML pipeline & risk analyzer:** see [ml_models_and_evaluation.md](ml_models_and_evaluation.md).
+**Full ML pipeline & risk analyzer:** see [ml_models_and_evaluation.md](ml_models_and_evaluation.md).  
+**Play Store listing assets:** [play_store_feature_graphic.md](play_store_feature_graphic.md) · [play_store_phone_screenshots.md](play_store_phone_screenshots.md).

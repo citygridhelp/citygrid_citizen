@@ -138,6 +138,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import androidx.core.os.CancellationSignal
 import com.example.potholereport.BuildConfig
+import com.example.potholereport.data.CityLaunchConfig
+import com.example.potholereport.data.CityMetroKeys
 import com.example.potholereport.data.EmailChangeStartResult
 import com.example.potholereport.data.EmailChangeVerifyResult
 import com.example.potholereport.data.LoginResult
@@ -210,7 +212,7 @@ fun HomeScreen(
     var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
     var showReportSignInModal by rememberSaveable { mutableStateOf(false) }
 
-    var selectedCity by rememberSaveable { mutableStateOf("BENGALURU") }
+    var selectedCity by rememberSaveable { mutableStateOf(CityLaunchConfig.PRIMARY_CITY) }
     /** Marker / map focus; may be map-picked while browsing. */
     var userLocation by remember { mutableStateOf<Location?>(null) }
     /** Last fix from the device GPS pipeline only — never updated by map drag. */
@@ -241,10 +243,15 @@ fun HomeScreen(
         userLocation = Location(location)
         gpsMetroCity = cityForLocation(location)
         if (!addresses.isNullOrEmpty()) {
-            selectedCity = (addresses[0].locality
-                ?: addresses[0].subAdminArea
-                ?: addresses[0].adminArea
-                ?: "BENGALURU").uppercase()
+            val resolved = CityMetroKeys.canonical(
+                addresses[0].locality
+                    ?: addresses[0].subAdminArea
+                    ?: addresses[0].adminArea
+                    ?: CityLaunchConfig.PRIMARY_CITY,
+            )
+            if (CityLaunchConfig.isCityEnabled(resolved)) {
+                selectedCity = resolved
+            }
         }
     }
 
@@ -261,6 +268,9 @@ fun HomeScreen(
     }
 
     LaunchedEffect(Unit) {
+        if (!CityLaunchConfig.isCityEnabled(selectedCity)) {
+            selectedCity = CityLaunchConfig.PRIMARY_CITY
+        }
         if (!hasLocationPermission(context) || !isDeviceLocationEnabled(context)) {
             showGpsEnableDialog = true
         } else {
@@ -400,7 +410,9 @@ fun HomeScreen(
                                             userLocation = Location(last)
                                             val city = cityForLocation(last)
                                             gpsMetroCity = city
-                                            if (city != null && city != selectedCity) selectedCity = city
+                                            if (city != null && city != selectedCity && CityLaunchConfig.isCityEnabled(city)) {
+                                                selectedCity = city
+                                            }
                                             mapLocateEpoch++
                                         }
                                         val fresh = fetchCalibratedLocation(context)
@@ -413,7 +425,7 @@ fun HomeScreen(
                                             userLocation = Location(gps)
                                             gpsMetroCity = cityForLocation(gps)
                                             val gpsCity = gpsMetroCity
-                                            if (gpsCity != null && gpsCity != selectedCity) {
+                                            if (gpsCity != null && gpsCity != selectedCity && CityLaunchConfig.isCityEnabled(gpsCity)) {
                                                 selectedCity = gpsCity
                                             }
                                             mapLocateEpoch++
@@ -529,6 +541,10 @@ fun HomeScreen(
                     "City Grid helps citizens report potholes and other road hazards with photos and location. " +
                         "When you are signed in, you can track your submissions in My Reports. " +
                         "Your reporter identity stays private on public maps and recent reports.\n\n" +
+                        "City Grid is an independent app — not affiliated with BBMP or any government body. " +
+                        "Reporting and municipal zone officers are available for Bengaluru (BBMP) in this release. " +
+                        "More cities will be added when official directories are verified.\n\n" +
+                        "BBMP directory: https://bbmp.gov.in/\n\n" +
                         "Version ${BuildConfig.VERSION_NAME}",
                     fontSize = 14.sp,
                     color = Color(0xFF5A5A5A),
@@ -797,10 +813,18 @@ private fun ReportAndTrackSection(
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp),
                     singleLine = true,
-                    placeholder = { Text("Search any city/town in India", fontSize = 10.sp) },
+                    placeholder = { Text("Search cities (Bengaluru live now)", fontSize = 10.sp) },
                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp),
                 )
                 Spacer(Modifier.height(4.dp))
+                if (citySearchQuery.isBlank()) {
+                    Text(
+                        "More cities coming soon",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        fontSize = 9.sp,
+                        color = Color(0xFF7B7B7B),
+                    )
+                }
 
                 val options = if (searchedPlaces.isNotEmpty()) {
                     searchedPlaces.take(60).map { it.first to it.second }
@@ -808,17 +832,38 @@ private fun ReportAndTrackSection(
                     filteredPopularPlaces.take(120).map { it to null }
                 }
                 options.forEach { (cityLabel, geoPoint) ->
+                    val cityKey = CityMetroKeys.canonical(normalizePlaceKey(cityLabel))
+                    val cityEnabled = CityLaunchConfig.isCityEnabled(cityKey)
                     DropdownMenuItem(
-                        text = { Text(cityLabel) },
+                        text = {
+                            Column {
+                                Text(
+                                    cityLabel,
+                                    fontSize = 12.sp,
+                                    color = if (cityEnabled) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    },
+                                )
+                                if (!cityEnabled) {
+                                    Text(
+                                        "Coming soon",
+                                        fontSize = 9.sp,
+                                        color = Color(0xFF9E9E9E),
+                                    )
+                                }
+                            }
+                        },
+                        enabled = cityEnabled,
                         onClick = {
-                            val cityKey = normalizePlaceKey(cityLabel)
                             if (geoPoint != null) {
                                 registerDynamicCityCenter(cityKey, geoPoint.latitude, geoPoint.longitude)
                             }
                             onCitySelected(cityKey)
                             showCriticalActiveClusters = false
                             expanded = false
-                        }
+                        },
                     )
                 }
             }

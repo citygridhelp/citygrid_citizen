@@ -2,6 +2,8 @@
 
 How to publish [`privacy_policy.md`](privacy_policy.md) on GitHub and link it in Google Play.
 
+> **REMINDER (after first Play review approves):** Add a dedicated **Account deletion** section to `privacy_policy.md`, push to GitHub `master`, then optionally update Play Console **Delete account URL** to the anchor link. Tracked as backlog **#21** in [future_features_backlog.md](future_features_backlog.md).
+
 ---
 
 ## Step 1 — Commit the policy to your repo
