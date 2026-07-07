@@ -7,10 +7,14 @@ package com.example.potholereport.data
 object MunicipalAssignmentResolver {
 
     fun resolve(cityKey: String, latitude: Double, longitude: Double): MunicipalAssignee {
-        if (latitude.isFinite() && longitude.isFinite()) {
-            MunicipalContactsRegistry.nearestAssignee(cityKey, latitude, longitude)?.let { return it }
+        val metro = CityMetroKeys.canonical(cityKey)
+        if (!CityLaunchConfig.isCityEnabled(metro)) {
+            return MunicipalContactsRegistry.fallbackForCity(CityLaunchConfig.PRIMARY_CITY)
         }
-        return MunicipalContactsRegistry.fallbackForCity(cityKey)
+        if (latitude.isFinite() && longitude.isFinite()) {
+            MunicipalContactsRegistry.nearestAssignee(metro, latitude, longitude)?.let { return it }
+        }
+        return MunicipalContactsRegistry.fallbackForCity(metro)
     }
 
     fun resolveForReport(report: PersistedPotholeReport): MunicipalAssignee =
