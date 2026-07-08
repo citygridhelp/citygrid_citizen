@@ -65,6 +65,17 @@ fun AuthNavHost(
     var lastBackgroundAtMs by rememberSaveable { mutableLongStateOf(0L) }
     var sawBackgroundStop by rememberSaveable { mutableStateOf(false) }
     var blockSessionRestore by rememberSaveable { mutableStateOf(false) }
+    var pendingSignupName by rememberSaveable { mutableStateOf("") }
+    var pendingSignupEmail by rememberSaveable { mutableStateOf("") }
+    var pendingSignupPassword by rememberSaveable { mutableStateOf("") }
+    var pendingSignupVerification by rememberSaveable { mutableStateOf(false) }
+
+    fun clearPendingSignup() {
+        pendingSignupName = ""
+        pendingSignupEmail = ""
+        pendingSignupPassword = ""
+        pendingSignupVerification = false
+    }
 
     fun bumpRecentReportsDisplay() {
         recentReportsEpoch++
@@ -341,6 +352,16 @@ fun AuthNavHost(
         }
         composable(AuthRoute.Signup.route) {
             SignupScreen(
+                initialName = pendingSignupName,
+                initialEmail = pendingSignupEmail,
+                initialPassword = pendingSignupPassword,
+                initialVerificationRequested = pendingSignupVerification,
+                onPendingSignupChanged = { name, email, password, verificationRequested ->
+                    pendingSignupName = name
+                    pendingSignupEmail = email
+                    pendingSignupPassword = password
+                    pendingSignupVerification = verificationRequested
+                },
                 onNavigateBackToLogin = { navController.popBackStack() },
                 onStartSignupVerification = { name, email, password ->
                     val result = runBlocking(Dispatchers.IO) {
@@ -354,6 +375,7 @@ fun AuthNavHost(
                     }
                 },
                 onSignupSuccess = { email ->
+                    clearPendingSignup()
                     navController.popBackStack(AuthRoute.Home.route, inclusive = false)
                     completeSignIn(email, "Email verified. You're signed in.")
                 },

@@ -1,6 +1,7 @@
 package com.example.potholereport.ui.auth
 
 import android.util.Patterns
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -23,9 +25,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,11 +50,16 @@ fun SignupScreen(
     onVerifySignupCode: (String, String) -> SignupVerifyResult,
     onSignupSuccess: (String) -> Unit,
     modifier: Modifier = Modifier,
+    initialName: String = "",
+    initialEmail: String = "",
+    initialPassword: String = "",
+    initialVerificationRequested: Boolean = false,
+    onPendingSignupChanged: (String, String, String, Boolean) -> Unit = { _, _, _, _ -> },
 ) {
-    var name by rememberSaveable { mutableStateOf("") }
-    var email by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    var confirmPassword by rememberSaveable { mutableStateOf("") }
+    var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
+    var email by rememberSaveable(initialEmail) { mutableStateOf(initialEmail) }
+    var password by rememberSaveable(initialPassword) { mutableStateOf(initialPassword) }
+    var confirmPassword by rememberSaveable(initialPassword) { mutableStateOf(initialPassword) }
     var nameError by rememberSaveable { mutableStateOf<String?>(null) }
     var emailError by rememberSaveable { mutableStateOf<String?>(null) }
     var passwordError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -59,9 +67,62 @@ fun SignupScreen(
     var code by rememberSaveable { mutableStateOf("") }
     var codeError by rememberSaveable { mutableStateOf<String?>(null) }
     var infoMessage by rememberSaveable { mutableStateOf<String?>(null) }
-    var verificationRequested by rememberSaveable { mutableStateOf(false) }
+    var verificationRequested by rememberSaveable(initialVerificationRequested) {
+        mutableStateOf(initialVerificationRequested)
+    }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
+    var showLeaveDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(name, email, password, verificationRequested) {
+        onPendingSignupChanged(name, email, password, verificationRequested)
+    }
+
+    LaunchedEffect(initialVerificationRequested) {
+        if (initialVerificationRequested && initialEmail.isNotBlank()) {
+            infoMessage = "Verification pending. Enter the code below or resend."
+        }
+    }
+
+    fun requestLeaveSignup() {
+        if (verificationRequested) {
+            showLeaveDialog = true
+        } else {
+            onNavigateBackToLogin()
+        }
+    }
+
+    BackHandler(enabled = verificationRequested) {
+        showLeaveDialog = true
+    }
+
+    if (showLeaveDialog) {
+        AlertDialog(
+            onDismissRequest = { showLeaveDialog = false },
+            title = { Text("Verification pending") },
+            text = {
+                Text(
+                    "You have not verified your email yet. You can return to finish signup, " +
+                        "or leave and come back later to enter the code.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showLeaveDialog = false }) {
+                    Text("Stay")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showLeaveDialog = false
+                        onNavigateBackToLogin()
+                    },
+                ) {
+                    Text("Leave")
+                }
+            },
+        )
+    }
 
     Column(
         modifier = modifier
@@ -72,7 +133,7 @@ fun SignupScreen(
         horizontalAlignment = Alignment.Start,
     ) {
         TextButton(
-            onClick = onNavigateBackToLogin,
+            onClick = { requestLeaveSignup() },
             modifier = Modifier.align(Alignment.Start),
         ) {
             Text("Back to login")
@@ -199,14 +260,15 @@ fun SignupScreen(
                 }
                 if (!valid) return@Button
 
+                val wasPending = verificationRequested
                 val (result, debugCode) = onStartSignupVerification(name.trim(), email.trim(), password)
                 when (result) {
                     SignupStartResult.CODE_SENT -> {
                         verificationRequested = true
-                        infoMessage = if (debugCode != null) {
-                            "Verification email sent. Use code: $debugCode"
-                        } else {
-                            "Verification email sent. Enter the code to complete signup."
+                        infoMessage = when {
+                            debugCode != null -> "Verification email sent. Use code: $debugCode"
+                            wasPending -> "Verification email sent again. Enter the code below."
+                            else -> "Verification email sent. Enter the code to complete signup."
                         }
                     }
                     SignupStartResult.EMAIL_ALREADY_REGISTERED -> {
@@ -281,7 +343,7 @@ fun SignupScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            TextButton(onClick = onNavigateBackToLogin) {
+            TextButton(onClick = { requestLeaveSignup() }) {
                 Text("Log in")
             }
         }

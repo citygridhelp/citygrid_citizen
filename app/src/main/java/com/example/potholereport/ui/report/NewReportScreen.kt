@@ -788,7 +788,7 @@ fun NewReportScreen(
                     }
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "NO EMAIL · NO ACCOUNT · NO IP STORED",
+                        "REPORT ANONYMOUSLY · NO IP STORED",
                         color = Color.Gray,
                         fontSize = 8.sp,
                         modifier = Modifier.fillMaxWidth(),

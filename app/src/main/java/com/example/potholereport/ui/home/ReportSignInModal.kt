@@ -1,6 +1,7 @@
 package com.example.potholereport.ui.home
 
 import android.util.Patterns
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -34,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,12 +78,18 @@ fun ReportSignInModal(
     onAuthSuccess: (String) -> Unit,
     onStartSignup: suspend (String, String, String) -> SignupStartResult,
     onVerifyCode: suspend (String, String) -> SignupVerifyResult,
+    initialFullName: String = "",
+    initialEmail: String = "",
+    initialPassword: String = "",
+    initialVerificationRequested: Boolean = false,
+    initialModalTab: Int = 0,
+    onPendingSignupChanged: (String, String, String, Boolean) -> Unit = { _, _, _, _ -> },
 ) {
-    var modalTab by rememberSaveable { mutableIntStateOf(0) }
-    var fullName by rememberSaveable { mutableStateOf("") }
-    var email by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    var confirmPassword by rememberSaveable { mutableStateOf("") }
+    var modalTab by rememberSaveable(initialModalTab) { mutableIntStateOf(initialModalTab) }
+    var fullName by rememberSaveable(initialFullName) { mutableStateOf(initialFullName) }
+    var email by rememberSaveable(initialEmail) { mutableStateOf(initialEmail) }
+    var password by rememberSaveable(initialPassword) { mutableStateOf(initialPassword) }
+    var confirmPassword by rememberSaveable(initialPassword) { mutableStateOf(initialPassword) }
     var code by rememberSaveable { mutableStateOf("") }
     var nameError by rememberSaveable { mutableStateOf<String?>(null) }
     var emailError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -88,17 +97,72 @@ fun ReportSignInModal(
     var confirmError by rememberSaveable { mutableStateOf<String?>(null) }
     var codeError by rememberSaveable { mutableStateOf<String?>(null) }
     var infoMessage by rememberSaveable { mutableStateOf<String?>(null) }
-    var verificationRequested by rememberSaveable { mutableStateOf(false) }
+    var verificationRequested by rememberSaveable(initialVerificationRequested) {
+        mutableStateOf(initialVerificationRequested)
+    }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
     var submitting by remember { mutableStateOf(false) }
+    var showLeaveDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val modalFieldColors = citizenLightSurfaceFieldColors(
         textColor = ModalDark,
         borderColor = ModalFieldBorder,
     )
 
-    Dialog(onDismissRequest = onDismiss) {
+    LaunchedEffect(fullName, email, password, verificationRequested) {
+        onPendingSignupChanged(fullName, email, password, verificationRequested)
+    }
+
+    LaunchedEffect(initialVerificationRequested) {
+        if (initialVerificationRequested && initialEmail.isNotBlank()) {
+            infoMessage = "Verification pending. Enter the code below or resend."
+        }
+    }
+
+    val signupOtpPending = modalTab == 1 && verificationRequested
+
+    fun requestDismiss() {
+        if (signupOtpPending) {
+            showLeaveDialog = true
+        } else {
+            onDismiss()
+        }
+    }
+
+    BackHandler(enabled = signupOtpPending) {
+        showLeaveDialog = true
+    }
+
+    if (showLeaveDialog) {
+        AlertDialog(
+            onDismissRequest = { showLeaveDialog = false },
+            title = { Text("Verification pending") },
+            text = {
+                Text(
+                    "You have not verified your email yet. You can return to finish signup, " +
+                        "or close and come back later to enter the code.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showLeaveDialog = false }) {
+                    Text("Stay")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showLeaveDialog = false
+                        onDismiss()
+                    },
+                ) {
+                    Text("Close")
+                }
+            },
+        )
+    }
+
+    Dialog(onDismissRequest = { requestDismiss() }) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(0.dp),
@@ -129,7 +193,7 @@ fun ReportSignInModal(
                             fontSize = 14.sp,
                         )
                     }
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = { requestDismiss() }) {
                         Icon(Icons.Outlined.Close, contentDescription = "Close", tint = Color.White)
                     }
                 }
@@ -420,13 +484,18 @@ fun ReportSignInModal(
                                 if (ok) {
                                     submitting = true
                                     infoMessage = "Sending verification code..."
+                                    val wasPending = verificationRequested
                                     scope.launch {
                                         val result = onStartSignup(fullName.trim(), email.trim(), password)
                                         submitting = false
                                         when (result) {
                                             SignupStartResult.CODE_SENT -> {
                                                 verificationRequested = true
-                                                infoMessage = "We emailed a verification code. Enter it below to finish."
+                                                infoMessage = if (wasPending) {
+                                                    "Verification email sent again. Enter the code below."
+                                                } else {
+                                                    "We emailed a verification code. Enter it below to finish."
+                                                }
                                             }
                                             SignupStartResult.EMAIL_ALREADY_REGISTERED -> {
                                                 infoMessage = null

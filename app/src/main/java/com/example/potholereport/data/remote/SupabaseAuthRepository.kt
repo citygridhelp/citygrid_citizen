@@ -40,7 +40,9 @@ object SupabaseAuthRepository {
         val client = SupabaseClientProvider.client ?: return SignupStartResult.FAILED
         val normalized = email.trim().lowercase()
         val cleanName = name.trim()
-        if (emailExists(normalized) == true) return SignupStartResult.EMAIL_ALREADY_REGISTERED
+        if (emailExists(normalized) == true) {
+            return resendSignupVerification(normalized)
+        }
         return try {
             client.auth.signUpWith(Email) {
                 this.email = normalized
@@ -58,6 +60,28 @@ object SupabaseAuthRepository {
                 SignupStartResult.EMAIL_ALREADY_REGISTERED
             } else {
                 SignupStartResult.FAILED
+            }
+        }
+    }
+
+    /**
+     * Resends the signup confirmation OTP for an existing unconfirmed account.
+     * Confirmed accounts receive [SignupStartResult.EMAIL_ALREADY_REGISTERED].
+     */
+    suspend fun resendSignupVerification(email: String): SignupStartResult {
+        val client = SupabaseClientProvider.client ?: return SignupStartResult.FAILED
+        val normalized = email.trim().lowercase()
+        return try {
+            client.auth.resendEmail(OtpType.Email.SIGNUP, normalized)
+            SignupStartResult.CODE_SENT
+        } catch (e: Exception) {
+            val msg = (e.message ?: "").lowercase()
+            when {
+                msg.contains("already") || msg.contains("registered") || msg.contains("exists") ||
+                    msg.contains("confirmed") ->
+                    SignupStartResult.EMAIL_ALREADY_REGISTERED
+                emailExists(normalized) == true -> SignupStartResult.EMAIL_ALREADY_REGISTERED
+                else -> SignupStartResult.FAILED
             }
         }
     }
