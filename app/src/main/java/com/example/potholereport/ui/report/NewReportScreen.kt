@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -117,6 +118,7 @@ fun NewReportScreen(
     var closeUpVerified by remember { mutableStateOf(false) }
     var wideVerified by remember { mutableStateOf(false) }
     var photoValidating by remember { mutableStateOf(false) }
+    var submitting by remember { mutableStateOf(false) }
     var photoValidationTitle by remember { mutableStateOf<String?>(null) }
     var photoValidationMessage by remember { mutableStateOf<String?>(null) }
     var duplicateBlockingReport by remember { mutableStateOf<PersistedPotholeReport?>(null) }
@@ -399,12 +401,14 @@ fun NewReportScreen(
     }
 
     val duplicateBlock = duplicateBlockingReport != null
+    val formBusy = photoValidating || submitting
 
     val missingClose = closeUpUri == null || !closeUpVerified
     val missingWide = wideUri == null || !wideVerified
     val missingLoc = !gpsOk
 
     val footerLabel = when {
+        submitting -> "SUBMITTING…"
         photoValidating -> "CHECKING PHOTO WITH AI..."
         duplicateBlock -> {
             val status = duplicateBlockingReport?.status?.displayLabel?.uppercase() ?: "OPEN"
@@ -415,7 +419,8 @@ fun NewReportScreen(
         missingLoc -> "ATTACH LOCATION TO CONTINUE"
         else -> "SUBMIT REPORT"
     }
-    val readyToSubmit = !missingClose && !missingWide && !missingLoc && !photoValidating && !duplicateBlock
+    val readyToSubmit = !missingClose && !missingWide && !missingLoc && !formBusy && !duplicateBlock
+    val submitButtonActive = readyToSubmit || submitting
 
     if (showDuplicateDialog) {
         val blocking = duplicateBlockingReport
@@ -476,7 +481,7 @@ fun NewReportScreen(
                             modifier = Modifier
                                 .size(36.dp)
                                 .background(AccentRed)
-                                .clickable { onClose() },
+                                .clickable(enabled = !submitting) { onClose() },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(Icons.Default.Close, contentDescription = "Close", tint = DarkBlue)
@@ -495,7 +500,7 @@ fun NewReportScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     PhotoDropZone(
-                        enabled = !photoValidating,
+                        enabled = !formBusy,
                         label = when {
                             photoValidating && photoChoiceTarget == 1 -> "ANALYZING PHOTO..."
                             closeUpVerified -> "CLOSE-UP VERIFIED · TAP TO RETAKE"
@@ -517,7 +522,7 @@ fun NewReportScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     PhotoDropZone(
-                        enabled = closeUpVerified && !photoValidating,
+                        enabled = closeUpVerified && !formBusy,
                         label = when {
                             !closeUpVerified -> "COMPLETE STEP 01 FIRST"
                             photoValidating && photoChoiceTarget == 2 -> "ANALYZING PHOTO..."
@@ -602,6 +607,7 @@ fun NewReportScreen(
                                     manualCoordLng = null
                                 },
                                 modifier = Modifier.weight(1f),
+                                enabled = !submitting,
                                 placeholder = { Text("Maps URL", fontSize = 10.sp) },
                                 singleLine = true,
                                 textStyle = TextStyle(fontSize = 10.sp),
@@ -620,6 +626,7 @@ fun NewReportScreen(
                                     manualCoordLng = null
                                 },
                                 modifier = Modifier.width(88.dp),
+                                enabled = !submitting,
                                 placeholder = { Text("lng", fontSize = 10.sp) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -641,6 +648,7 @@ fun NewReportScreen(
                                     locationBlockedReason = null
                                 }
                             },
+                            enabled = !submitting,
                             colors = ButtonDefaults.buttonColors(containerColor = DarkBlue, contentColor = Color.White),
                             shape = RoundedCornerShape(0.dp),
                             modifier = Modifier.align(Alignment.End)
@@ -660,9 +668,9 @@ fun NewReportScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        PositionTile(Modifier.weight(1f), PotholePosition.LEFT, selectedPosition) { selectedPosition = it }
-                        PositionTile(Modifier.weight(1f), PotholePosition.MIDDLE, selectedPosition) { selectedPosition = it }
-                        PositionTile(Modifier.weight(1f), PotholePosition.RIGHT, selectedPosition) { selectedPosition = it }
+                        PositionTile(Modifier.weight(1f), PotholePosition.LEFT, selectedPosition, enabled = !submitting) { selectedPosition = it }
+                        PositionTile(Modifier.weight(1f), PotholePosition.MIDDLE, selectedPosition, enabled = !submitting) { selectedPosition = it }
+                        PositionTile(Modifier.weight(1f), PotholePosition.RIGHT, selectedPosition, enabled = !submitting) { selectedPosition = it }
                     }
 
                     Spacer(Modifier.height(6.dp))
@@ -670,19 +678,20 @@ fun NewReportScreen(
                     SectionTitle("05 HOW BAD IS IT?")
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        SeverityTile(Modifier.weight(1f), PotholeSeverity.MINOR, selectedSeverity) { selectedSeverity = it }
-                        SeverityTile(Modifier.weight(1f), PotholeSeverity.MODERATE, selectedSeverity) { selectedSeverity = it }
+                        SeverityTile(Modifier.weight(1f), PotholeSeverity.MINOR, selectedSeverity, enabled = !submitting) { selectedSeverity = it }
+                        SeverityTile(Modifier.weight(1f), PotholeSeverity.MODERATE, selectedSeverity, enabled = !submitting) { selectedSeverity = it }
                     }
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        SeverityTile(Modifier.weight(1f), PotholeSeverity.SEVERE, selectedSeverity) { selectedSeverity = it }
-                        SeverityTile(Modifier.weight(1f), PotholeSeverity.CRITICAL, selectedSeverity) { selectedSeverity = it }
+                        SeverityTile(Modifier.weight(1f), PotholeSeverity.SEVERE, selectedSeverity, enabled = !submitting) { selectedSeverity = it }
+                        SeverityTile(Modifier.weight(1f), PotholeSeverity.CRITICAL, selectedSeverity, enabled = !submitting) { selectedSeverity = it }
                     }
 
                     aiRiskInsight?.let { insight ->
                         Spacer(Modifier.height(6.dp))
                         AiRiskSuggestionCard(
                             insight = insight,
+                            enabled = !submitting,
                             onUseSuggested = { selectedSeverity = insight.suggestedSeverity },
                         )
                     }
@@ -694,6 +703,7 @@ fun NewReportScreen(
                         value = note,
                         onValueChange = { if (it.length <= noteMax) note = it },
                         modifier = Modifier.fillMaxWidth(),
+                        enabled = !submitting,
                         placeholder = { Text("e.g. Near bus stop, gets worse after rain...", fontSize = 10.sp) },
                         maxLines = 2,
                         textStyle = TextStyle(fontSize = 11.sp),
@@ -719,70 +729,85 @@ fun NewReportScreen(
                 ) {
                     Button(
                         onClick = {
-                            if (!readyToSubmit) return@Button
+                            if (!readyToSubmit || submitting) return@Button
                             val closeUri = closeUpUri ?: return@Button
                             val wideShotUri = wideUri ?: return@Button
                             val lat = latEffective ?: return@Button
                             val lng = lngEffective ?: return@Button
+                            submitting = true
                             scope.launch {
-                                val result = withContext(Dispatchers.IO) {
-                                    RecentReportsRepository.addReport(
-                                        cityKey = reportCityKey,
-                                        closeUpUri = closeUri,
-                                        wideUri = wideShotUri,
-                                        latitude = lat,
-                                        longitude = lng,
-                                        severity = selectedSeverity,
-                                        note = note,
-                                        reporterUserId = reporterUserId,
-                                        submittedSignedIn = submittedWhileSignedIn,
-                                    )
-                                }
-                                when (result) {
-                                    is AddReportResult.Success -> {
-                                        if (submittedWhileSignedIn) {
-                                            if (!SupabaseClientProvider.isConfigured) {
-                                                onSyncMessage(
-                                                    "Report saved on this device only. " +
-                                                        "Rebuild with SUPABASE_URL and SUPABASE_ANON_KEY in local.properties.",
-                                                )
-                                            } else {
-                                                val pushed = withContext(Dispatchers.IO) {
-                                                    ReportSyncRepository.pushReport(result.report)
-                                                }
-                                                if (pushed) {
-                                                    onSyncMessage("Report submitted to the municipality.")
-                                                } else {
-                                                    ReportSyncRepository.enqueuePush(result.report)
+                                try {
+                                    val result = withContext(Dispatchers.IO) {
+                                        RecentReportsRepository.addReport(
+                                            cityKey = reportCityKey,
+                                            closeUpUri = closeUri,
+                                            wideUri = wideShotUri,
+                                            latitude = lat,
+                                            longitude = lng,
+                                            severity = selectedSeverity,
+                                            note = note,
+                                            reporterUserId = reporterUserId,
+                                            submittedSignedIn = submittedWhileSignedIn,
+                                        )
+                                    }
+                                    when (result) {
+                                        is AddReportResult.Success -> {
+                                            if (submittedWhileSignedIn) {
+                                                if (!SupabaseClientProvider.isConfigured) {
                                                     onSyncMessage(
-                                                        "Report saved on device. Cloud upload failed — " +
-                                                            "sign in with your Supabase account and try again.",
+                                                        "Report saved on this device only. " +
+                                                            "Rebuild with SUPABASE_URL and SUPABASE_ANON_KEY in local.properties.",
                                                     )
+                                                } else {
+                                                    val pushed = withContext(Dispatchers.IO) {
+                                                        ReportSyncRepository.pushReport(result.report)
+                                                    }
+                                                    if (pushed) {
+                                                        onSyncMessage("Report submitted to the municipality.")
+                                                    } else {
+                                                        ReportSyncRepository.enqueuePush(result.report)
+                                                        onSyncMessage(
+                                                            "Report saved on device. Cloud upload failed — " +
+                                                                "sign in with your Supabase account and try again.",
+                                                        )
+                                                    }
                                                 }
                                             }
+                                            onReportPersisted()
+                                            onClose()
                                         }
-                                        onReportPersisted()
-                                        onClose()
+                                        is AddReportResult.DuplicateActive -> {
+                                            duplicateBlockingReport = result.existing
+                                            showDuplicateDialog = true
+                                        }
+                                        AddReportResult.Failed -> {
+                                            onSyncMessage("Could not save report. Try again.")
+                                        }
                                     }
-                                    is AddReportResult.DuplicateActive -> {
-                                        duplicateBlockingReport = result.existing
-                                        showDuplicateDialog = true
-                                    }
-                                    AddReportResult.Failed -> { /* keep form open */ }
+                                } finally {
+                                    submitting = false
                                 }
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = readyToSubmit,
+                        enabled = readyToSubmit && !submitting,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (readyToSubmit) DarkBlue else GrayButton,
-                            contentColor = if (readyToSubmit) Color.White else Color.White.copy(alpha = 0.85f),
-                            disabledContainerColor = GrayButton,
+                            containerColor = if (submitButtonActive) DarkBlue else GrayButton,
+                            contentColor = if (submitButtonActive) Color.White else Color.White.copy(alpha = 0.85f),
+                            disabledContainerColor = if (submitting) DarkBlue else GrayButton,
                             disabledContentColor = Color.White.copy(alpha = 0.85f)
                         ),
                         shape = RoundedCornerShape(0.dp)
                     ) {
-                        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        if (submitting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        }
                         Spacer(Modifier.width(8.dp))
                         Text(footerLabel, fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 2, textAlign = TextAlign.Center)
                     }
@@ -811,6 +836,7 @@ fun NewReportScreen(
 private fun AiRiskSuggestionCard(
     insight: PotholeRiskInsight,
     onUseSuggested: () -> Unit,
+    enabled: Boolean = true,
 ) {
     val severityColor = when (insight.suggestedSeverity) {
         PotholeSeverity.MINOR -> Color(0xFF1B5E20)
@@ -855,6 +881,7 @@ private fun AiRiskSuggestionCard(
         Spacer(Modifier.height(4.dp))
         TextButton(
             onClick = onUseSuggested,
+            enabled = enabled,
             modifier = Modifier.align(Alignment.End),
         ) {
             Text("Use AI suggested severity", fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -997,6 +1024,7 @@ private fun SeverityTile(
     modifier: Modifier,
     severity: PotholeSeverity,
     selected: PotholeSeverity,
+    enabled: Boolean = true,
     onSelect: (PotholeSeverity) -> Unit,
 ) {
     val sel = severity == selected
@@ -1005,7 +1033,7 @@ private fun SeverityTile(
             .height(52.dp)
             .border(BorderStroke(1.dp, DarkBlue))
             .background(if (sel) OrangeSelect else Color.White.copy(alpha = 0.85f))
-            .clickable { onSelect(severity) }
+            .clickable(enabled = enabled) { onSelect(severity) }
             .padding(4.dp)
     ) {
         Column {
@@ -1032,6 +1060,7 @@ private fun PositionTile(
     modifier: Modifier,
     position: PotholePosition,
     selected: PotholePosition,
+    enabled: Boolean = true,
     onSelect: (PotholePosition) -> Unit,
 ) {
     val sel = position == selected
@@ -1040,7 +1069,7 @@ private fun PositionTile(
             .height(40.dp)
             .border(BorderStroke(1.dp, DarkBlue))
             .background(if (sel) OrangeSelect else Color.White.copy(alpha = 0.85f))
-            .clickable { onSelect(position) }
+            .clickable(enabled = enabled) { onSelect(position) }
             .padding(4.dp)
     ) {
         Column(

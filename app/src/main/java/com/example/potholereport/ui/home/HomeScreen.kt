@@ -733,40 +733,48 @@ private fun ReportAndTrackSection(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .height(56.dp)
             .clickable {
                 if (isSignedIn) onReportPotholeSignedIn()
                 else onReportPotholeGuest()
             },
         colors = CardDefaults.cardColors(containerColor = Color(0xFFB74233)),
-        shape = RoundedCornerShape(0.dp)
+        shape = RoundedCornerShape(12.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
-            Icon(
-                imageVector = Icons.Default.CameraAlt,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(14.dp)
-            )
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "REPORT A POTHOLE", 
-                    color = Color.White, 
-                    fontWeight = FontWeight.Bold, 
-                    fontSize = 14.sp,
-                    lineHeight = 16.sp
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CameraAlt,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp),
                 )
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    "Signed in but report anonymously",
-                    color = Color.White.copy(alpha = 0.8f),
-                    fontSize = 10.sp,
-                    lineHeight = 12.sp
+                    "REPORT A POTHOLE",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    lineHeight = 16.sp,
+                    textAlign = TextAlign.Center,
                 )
             }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Signed in but report anonymously",
+                color = Color.White.copy(alpha = 0.8f),
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 
@@ -776,6 +784,25 @@ private fun ReportAndTrackSection(
     var showCriticalActiveClusters by rememberSaveable { mutableStateOf(false) }
     var citySearchQuery by rememberSaveable { mutableStateOf("") }
     var searchedPlaces by remember { mutableStateOf<List<Pair<String, GeoPoint>>>(emptyList()) }
+    var mapCameraUserPositioned by rememberSaveable { mutableStateOf(false) }
+    var savedMapCenterLat by rememberSaveable { mutableStateOf<Double?>(null) }
+    var savedMapCenterLon by rememberSaveable { mutableStateOf<Double?>(null) }
+    var savedMapZoom by rememberSaveable { mutableStateOf<Double?>(null) }
+    var lastConsumedMapLocateEpoch by rememberSaveable { mutableIntStateOf(0) }
+
+    fun resetMapCameraToDefault() {
+        mapCameraUserPositioned = false
+        savedMapCenterLat = null
+        savedMapCenterLon = null
+        savedMapZoom = null
+    }
+
+    fun snapshotMapCamera(lat: Double, lon: Double, zoom: Double) {
+        mapCameraUserPositioned = true
+        savedMapCenterLat = lat
+        savedMapCenterLon = lon
+        savedMapZoom = zoom
+    }
     LaunchedEffect(expanded, citySearchQuery) {
         if (!expanded) return@LaunchedEffect
         val q = citySearchQuery.trim()
@@ -883,6 +910,7 @@ private fun ReportAndTrackSection(
                             if (geoPoint != null) {
                                 registerDynamicCityCenter(cityKey, geoPoint.latitude, geoPoint.longitude)
                             }
+                            resetMapCameraToDefault()
                             onCitySelected(cityKey)
                             showCriticalActiveClusters = false
                             expanded = false
@@ -960,6 +988,7 @@ private fun ReportAndTrackSection(
             userLocation = userLocation,
             onLocateMe = {
                 if (showCriticalActiveClusters) showCriticalActiveClusters = false
+                resetMapCameraToDefault()
                 onLocateMe()
             },
             onMapViewControlUsed = {
@@ -969,6 +998,14 @@ private fun ReportAndTrackSection(
             onMapTouchChanged = onMapTouchChanged,
             onMapPanEndedAtCenter = onMapPanEndedAtCenter,
             mapLocateEpoch = mapLocateEpoch,
+            lastConsumedMapLocateEpoch = lastConsumedMapLocateEpoch,
+            onMapLocateEpochConsumed = { lastConsumedMapLocateEpoch = it },
+            mapCameraUserPositioned = mapCameraUserPositioned,
+            savedMapCenterLat = savedMapCenterLat,
+            savedMapCenterLon = savedMapCenterLon,
+            savedMapZoom = savedMapZoom,
+            onMapCameraSnapshot = ::snapshotMapCamera,
+            onResetMapCamera = ::resetMapCameraToDefault,
             gpsPinLocation = gpsPinLocation,
             showCriticalActiveClusters = showCriticalActiveClusters,
             recentReportsEpoch = recentReportsEpoch,
@@ -2509,8 +2546,8 @@ private fun metroRegionForCity(selectedCity: String, userLocation: Location?): M
     }
     val loc = userLocation
     val userInside = loc != null && bbox.contains(loc.latitude, loc.longitude)
-    val center = if (userInside) {
-        GeoPoint(loc!!.latitude, loc.longitude)
+    val center = if (loc != null && userInside) {
+        GeoPoint(loc.latitude, loc.longitude)
     } else {
         fallbackCenter
     }
@@ -2753,6 +2790,14 @@ private fun OsmDensityMap(
     onMapTouchChanged: (Boolean) -> Unit,
     onMapPanEndedAtCenter: (Double, Double) -> Unit,
     mapLocateEpoch: Int,
+    lastConsumedMapLocateEpoch: Int,
+    onMapLocateEpochConsumed: (Int) -> Unit,
+    mapCameraUserPositioned: Boolean,
+    savedMapCenterLat: Double?,
+    savedMapCenterLon: Double?,
+    savedMapZoom: Double?,
+    onMapCameraSnapshot: (Double, Double, Double) -> Unit,
+    onResetMapCamera: () -> Unit,
     recentReportsEpoch: Int,
     modifier: Modifier = Modifier,
 ) {
@@ -2762,7 +2807,7 @@ private fun OsmDensityMap(
     val mapViewRef = remember { arrayOfNulls<MapView>(1) }
     val labelOverlayRef = remember { arrayOfNulls<RegionNameLabelsOverlay>(1) }
     val cityOutlineDecor = remember { CityOutlineDecor() }
-    /** Mirrors [atCityOverviewZoom]; touch resume reads this instead of always re-enabling chrome. */
+    /** Mirrors city-overview zoom state; touch resume reads this instead of always re-enabling chrome. */
     val cityMapChromeVisibleRef = remember { booleanArrayOf(false) }
     /** Set in [MapView] factory; used to cancel pending overlay work on dispose. */
     val mapTouchIdleRunnables = remember { arrayOfNulls<Runnable>(2) }
@@ -2811,6 +2856,13 @@ private fun OsmDensityMap(
         }
     }
     val zoomHideJob = remember { object { var job: Job? = null } }
+    val programmaticCameraMoveRef = remember { booleanArrayOf(false) }
+    fun runProgrammaticCamera(action: (MapView) -> Unit) {
+        val map = mapHolder.map ?: return
+        programmaticCameraMoveRef[0] = true
+        action(map)
+        map.post { programmaticCameraMoveRef[0] = false }
+    }
     val touchCallbacks = remember {
         object {
             var onMapTouchChanged: (Boolean) -> Unit = {}
@@ -2868,20 +2920,29 @@ private fun OsmDensityMap(
     }
     touchCallbacks.onMapPanEndedAtCenter = panEnd@{ lat, lng ->
         val map = mapHolder.map
+        if (map != null && !programmaticCameraMoveRef[0]) {
+            onMapCameraSnapshot(map.mapCenter.latitude, map.mapCenter.longitude, map.zoomLevelDouble)
+        }
         if (map != null && map.isAtCityOverviewZoom()) {
-            if (map.needsCityOverviewReframe(selectedCity)) {
-                map.scheduleFitCityOverview(selectedCity, overviewRestore)
+            if (!mapCameraUserPositioned && map.needsCityOverviewReframe(selectedCity)) {
+                runProgrammaticCamera { it.scheduleFitCityOverview(selectedCity, overviewRestore) }
                 return@panEnd
             }
         }
         onMapPanEndedAtCenter(lat, lng)
     }
     touchCallbacks.onCityMapViewIdleCheck = { map ->
-        if (map.isAtCityOverviewZoom()) {
-            map.reframeCityOverviewIfNeeded(selectedCity, overviewRestore)
+        if (!mapCameraUserPositioned &&
+            map.isAtCityOverviewZoom() &&
+            map.needsCityOverviewReframe(selectedCity)
+        ) {
+            runProgrammaticCamera { it.scheduleFitCityOverview(selectedCity, overviewRestore) }
         }
     }
     touchCallbacks.onMapZoomChanged = { map ->
+        if (!programmaticCameraMoveRef[0]) {
+            onMapCameraSnapshot(map.mapCenter.latitude, map.mapCenter.longitude, map.zoomLevelDouble)
+        }
         if (map.isAtMaxZoom()) {
             zoomOutMapUsedSinceMax = false
         }
@@ -2925,26 +2986,23 @@ private fun OsmDensityMap(
         )
     }
 
-    var lastGpsLocateEpoch by remember { mutableIntStateOf(0) }
-
-    /** City picker or GPS metro change → full city bbox view (not street/locate). */
+    /** City picker change → full city bbox view (not street/locate). */
     LaunchedEffect(selectedCity, mapSessionId) {
         zoomOutMapUsedSinceMax = false
         val map = mapHolder.map ?: return@LaunchedEffect
-        // Locate also bumps [mapLocateEpoch]; street view must win when both fire together.
-        if (mapLocateEpoch > lastGpsLocateEpoch) return@LaunchedEffect
-        map.scheduleFitCityOverview(selectedCity, overviewRestore)
+        if (mapLocateEpoch > lastConsumedMapLocateEpoch) return@LaunchedEffect
+        if (mapCameraUserPositioned) return@LaunchedEffect
+        runProgrammaticCamera { it.scheduleFitCityOverview(selectedCity, overviewRestore) }
     }
 
     /** Locate button → street-level track view (no city chrome). */
-    LaunchedEffect(mapLocateEpoch) {
-        if (mapLocateEpoch == 0) return@LaunchedEffect
+    LaunchedEffect(mapLocateEpoch, lastConsumedMapLocateEpoch) {
+        if (mapLocateEpoch <= lastConsumedMapLocateEpoch) return@LaunchedEffect
         val map = mapHolder.map ?: return@LaunchedEffect
-        if (mapLocateEpoch <= lastGpsLocateEpoch) return@LaunchedEffect
+        onMapLocateEpochConsumed(mapLocateEpoch)
         if (!shouldFocusUserGps(selectedCity, userLocation)) return@LaunchedEffect
-        lastGpsLocateEpoch = mapLocateEpoch
         val loc = userLocation ?: return@LaunchedEffect
-        map.scheduleFocusOnGps(loc)
+        runProgrammaticCamera { it.scheduleFocusOnGps(loc) }
     }
 
     /** Map drag pick: keep zoom, only sync center/bounds. */
@@ -2955,7 +3013,10 @@ private fun OsmDensityMap(
     ) {
         val map = mapHolder.map ?: return@LaunchedEffect
         if (!shouldPreserveZoomForMapPick(selectedCity, userLocation)) return@LaunchedEffect
-        map.scheduleApplyMetroRegion(selectedCity, userLocation, preserveZoom = true)
+        if (mapCameraUserPositioned) return@LaunchedEffect
+        runProgrammaticCamera {
+            it.scheduleApplyMetroRegion(selectedCity, userLocation, preserveZoom = true)
+        }
     }
 
     Box(
@@ -3118,6 +3179,13 @@ private fun OsmDensityMap(
                     }
                     addMapListener(object : MapListener {
                         override fun onScroll(event: ScrollEvent?): Boolean {
+                            if (!programmaticCameraMoveRef[0]) {
+                                onMapCameraSnapshot(
+                                    mapCenter.latitude,
+                                    mapCenter.longitude,
+                                    zoomLevelDouble,
+                                )
+                            }
                             if (isAtCityOverviewZoom()) {
                                 removeCallbacks(cityReframeAfterIdle)
                                 postDelayed(cityReframeAfterIdle, 180L)
@@ -3170,7 +3238,19 @@ private fun OsmDensityMap(
                     }
                     mapHolder.map = this
                     mapViewRef[0] = this
-                    scheduleFitCityOverview(selectedCity, overviewRestore)
+                    val restoreLat = savedMapCenterLat
+                    val restoreLon = savedMapCenterLon
+                    val restoreZoom = savedMapZoom
+                    if (mapCameraUserPositioned && restoreLat != null && restoreLon != null && restoreZoom != null) {
+                        programmaticCameraMoveRef[0] = true
+                        controller.setCenter(GeoPoint(restoreLat, restoreLon))
+                        controller.setZoom(restoreZoom)
+                        post { programmaticCameraMoveRef[0] = false }
+                    } else {
+                        programmaticCameraMoveRef[0] = true
+                        scheduleFitCityOverview(selectedCity, overviewRestore)
+                        post { programmaticCameraMoveRef[0] = false }
+                    }
                 }
             },
             update = { view ->
@@ -3378,7 +3458,8 @@ private fun OsmDensityMap(
                 SmallFloatingActionButton(
                     onClick = {
                         onMapViewControlUsed()
-                        runFastMapAction { it.scheduleFitCityOverview(selectedCity, overviewRestore) }
+                        onResetMapCamera()
+                        runProgrammaticCamera { it.scheduleFitCityOverview(selectedCity, overviewRestore) }
                         scheduleHideZoomControls()
                     },
                     containerColor = Color.White,

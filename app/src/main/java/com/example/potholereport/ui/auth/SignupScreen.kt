@@ -56,10 +56,10 @@ fun SignupScreen(
     initialVerificationRequested: Boolean = false,
     onPendingSignupChanged: (String, String, String, Boolean) -> Unit = { _, _, _, _ -> },
 ) {
-    var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
-    var email by rememberSaveable(initialEmail) { mutableStateOf(initialEmail) }
-    var password by rememberSaveable(initialPassword) { mutableStateOf(initialPassword) }
-    var confirmPassword by rememberSaveable(initialPassword) { mutableStateOf(initialPassword) }
+    var name by rememberSaveable { mutableStateOf(initialName) }
+    var email by rememberSaveable { mutableStateOf(initialEmail) }
+    var password by rememberSaveable { mutableStateOf(initialPassword) }
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
     var nameError by rememberSaveable { mutableStateOf<String?>(null) }
     var emailError by rememberSaveable { mutableStateOf<String?>(null) }
     var passwordError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -67,9 +67,7 @@ fun SignupScreen(
     var code by rememberSaveable { mutableStateOf("") }
     var codeError by rememberSaveable { mutableStateOf<String?>(null) }
     var infoMessage by rememberSaveable { mutableStateOf<String?>(null) }
-    var verificationRequested by rememberSaveable(initialVerificationRequested) {
-        mutableStateOf(initialVerificationRequested)
-    }
+    var verificationRequested by rememberSaveable { mutableStateOf(initialVerificationRequested) }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
     var showLeaveDialog by remember { mutableStateOf(false) }

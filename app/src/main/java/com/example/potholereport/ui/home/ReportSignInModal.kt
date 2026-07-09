@@ -85,11 +85,13 @@ fun ReportSignInModal(
     initialModalTab: Int = 0,
     onPendingSignupChanged: (String, String, String, Boolean) -> Unit = { _, _, _, _ -> },
 ) {
-    var modalTab by rememberSaveable(initialModalTab) { mutableIntStateOf(initialModalTab) }
-    var fullName by rememberSaveable(initialFullName) { mutableStateOf(initialFullName) }
-    var email by rememberSaveable(initialEmail) { mutableStateOf(initialEmail) }
-    var password by rememberSaveable(initialPassword) { mutableStateOf(initialPassword) }
-    var confirmPassword by rememberSaveable(initialPassword) { mutableStateOf(initialPassword) }
+    var modalTab by rememberSaveable { mutableIntStateOf(initialModalTab) }
+    var signInEmail by rememberSaveable { mutableStateOf("") }
+    var signInPassword by rememberSaveable { mutableStateOf("") }
+    var signupFullName by rememberSaveable { mutableStateOf(initialFullName) }
+    var signupEmail by rememberSaveable { mutableStateOf(initialEmail) }
+    var signupPassword by rememberSaveable { mutableStateOf(initialPassword) }
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
     var code by rememberSaveable { mutableStateOf("") }
     var nameError by rememberSaveable { mutableStateOf<String?>(null) }
     var emailError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -97,9 +99,7 @@ fun ReportSignInModal(
     var confirmError by rememberSaveable { mutableStateOf<String?>(null) }
     var codeError by rememberSaveable { mutableStateOf<String?>(null) }
     var infoMessage by rememberSaveable { mutableStateOf<String?>(null) }
-    var verificationRequested by rememberSaveable(initialVerificationRequested) {
-        mutableStateOf(initialVerificationRequested)
-    }
+    var verificationRequested by rememberSaveable { mutableStateOf(initialVerificationRequested) }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
     var submitting by remember { mutableStateOf(false) }
@@ -110,8 +110,8 @@ fun ReportSignInModal(
         borderColor = ModalFieldBorder,
     )
 
-    LaunchedEffect(fullName, email, password, verificationRequested) {
-        onPendingSignupChanged(fullName, email, password, verificationRequested)
+    LaunchedEffect(signupFullName, signupEmail, signupPassword, verificationRequested) {
+        onPendingSignupChanged(signupFullName, signupEmail, signupPassword, verificationRequested)
     }
 
     LaunchedEffect(initialVerificationRequested) {
@@ -248,9 +248,9 @@ fun ReportSignInModal(
                         Text("EMAIL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
                         Spacer(Modifier.height(4.dp))
                         OutlinedTextField(
-                            value = email,
+                            value = signInEmail,
                             onValueChange = {
-                                email = it
+                                signInEmail = it
                                 emailError = null
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -268,9 +268,9 @@ fun ReportSignInModal(
                         Text("PASSWORD", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
                         Spacer(Modifier.height(4.dp))
                         OutlinedTextField(
-                            value = password,
+                            value = signInPassword,
                             onValueChange = {
-                                password = it
+                                signInPassword = it
                                 passwordError = null
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -297,22 +297,22 @@ fun ReportSignInModal(
                         Button(
                             onClick = {
                                 var ok = true
-                                if (email.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()) {
+                                if (signInEmail.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(signInEmail.trim()).matches()) {
                                     emailError = "Enter a valid email"
                                     ok = false
                                 }
-                                if (password.length < 6) {
+                                if (signInPassword.length < 6) {
                                     passwordError = "Password must be at least 6 characters"
                                     ok = false
                                 }
                                 if (ok) {
                                     submitting = true
                                     scope.launch {
-                                        val result = onSignIn(email.trim(), password)
+                                        val result = onSignIn(signInEmail.trim(), signInPassword)
                                         submitting = false
                                         when (result) {
                                             LoginResult.SUCCESS -> {
-                                                val signedInEmail = email.trim()
+                                                val signedInEmail = signInEmail.trim()
                                                 onDismiss()
                                                 scope.launch {
                                                     yield()
@@ -362,9 +362,9 @@ fun ReportSignInModal(
                         Text("FULL NAME", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
                         Spacer(Modifier.height(4.dp))
                         OutlinedTextField(
-                            value = fullName,
+                            value = signupFullName,
                             onValueChange = {
-                                fullName = it
+                                signupFullName = it
                                 nameError = null
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -381,9 +381,9 @@ fun ReportSignInModal(
                         Text("EMAIL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
                         Spacer(Modifier.height(4.dp))
                         OutlinedTextField(
-                            value = email,
+                            value = signupEmail,
                             onValueChange = {
-                                email = it
+                                signupEmail = it
                                 emailError = null
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -401,9 +401,9 @@ fun ReportSignInModal(
                         Text("PASSWORD", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
                         Spacer(Modifier.height(4.dp))
                         OutlinedTextField(
-                            value = password,
+                            value = signupPassword,
                             onValueChange = {
-                                password = it
+                                signupPassword = it
                                 passwordError = null
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -465,19 +465,19 @@ fun ReportSignInModal(
                         Button(
                             onClick = {
                                 var ok = true
-                                if (fullName.isBlank()) {
+                                if (signupFullName.isBlank()) {
                                     nameError = "Enter your full name"
                                     ok = false
                                 }
-                                if (email.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()) {
+                                if (signupEmail.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(signupEmail.trim()).matches()) {
                                     emailError = "Enter a valid email"
                                     ok = false
                                 }
-                                if (!isStrongCitizenPassword(password)) {
+                                if (!isStrongCitizenPassword(signupPassword)) {
                                     passwordError = "Use 6+ chars: uppercase, lowercase, number & symbol"
                                     ok = false
                                 }
-                                if (password != confirmPassword) {
+                                if (signupPassword != confirmPassword) {
                                     confirmError = "Passwords do not match"
                                     ok = false
                                 }
@@ -486,7 +486,7 @@ fun ReportSignInModal(
                                     infoMessage = "Sending verification code..."
                                     val wasPending = verificationRequested
                                     scope.launch {
-                                        val result = onStartSignup(fullName.trim(), email.trim(), password)
+                                        val result = onStartSignup(signupFullName.trim(), signupEmail.trim(), signupPassword)
                                         submitting = false
                                         when (result) {
                                             SignupStartResult.CODE_SENT -> {
@@ -557,11 +557,11 @@ fun ReportSignInModal(
                                     } else {
                                         submitting = true
                                         scope.launch {
-                                            val result = onVerifyCode(email.trim(), code.trim())
+                                            val result = onVerifyCode(signupEmail.trim(), code.trim())
                                             submitting = false
                                             when (result) {
                                                 SignupVerifyResult.SUCCESS -> {
-                                                    val signedInEmail = email.trim()
+                                                    val signedInEmail = signupEmail.trim()
                                                     onDismiss()
                                                     scope.launch {
                                                         yield()
