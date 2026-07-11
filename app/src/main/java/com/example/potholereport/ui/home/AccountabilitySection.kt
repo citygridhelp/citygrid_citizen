@@ -38,7 +38,7 @@ import com.example.potholereport.data.RecentReportsRepository
 import com.example.potholereport.data.formatRecentReportCaption
 import java.util.Locale
 
-private const val BBMP_DIRECTORY_URL = "https://bbmp.gov.in/"
+private const val GBA_DIRECTORY_URL = "https://bbmp.gov.in/"
 
 @Composable
 fun AccountabilitySection(
@@ -73,7 +73,7 @@ fun AccountabilitySection(
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            "Bengaluru reports are tagged with the BBMP zone and public officer contact from the official directory below. " +
+            "Bengaluru reports are tagged with the GBA city corporation and public officer contact from the official directory below. " +
                 "City Grid is not a government app — data is for citizen reference only.",
             fontSize = 11.sp,
             lineHeight = 14.sp,
@@ -99,7 +99,7 @@ fun AccountabilitySection(
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Submit a Bengaluru pothole report with location to see the assigned BBMP zone officer here.",
+                        "Submit a Bengaluru pothole report with location to see the assigned GBA corporation officer here.",
                         fontSize = 12.sp,
                         color = Color(0xFF7B7B7B),
                     )
@@ -116,18 +116,18 @@ fun AccountabilitySection(
 
         Spacer(Modifier.height(12.dp))
         Text(
-            "Official source — Bengaluru (BBMP) zone officers:",
+            "Official source — Bengaluru (GBA / BBMP) city corporations:",
             fontSize = 9.sp,
             lineHeight = 12.sp,
             color = Color(0xFF7B7B7B),
         )
         TextButton(
-            onClick = { uriHandler.openUri(BBMP_DIRECTORY_URL) },
+            onClick = { uriHandler.openUri(GBA_DIRECTORY_URL) },
             contentPadding = PaddingValues(0.dp),
             modifier = Modifier.height(28.dp),
         ) {
             Text(
-                BBMP_DIRECTORY_URL,
+                GBA_DIRECTORY_URL,
                 fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -212,12 +212,31 @@ private fun AccountabilityReportCard(report: PersistedPotholeReport) {
             )
 
             Text(
-                "ASSIGNED TO",
+                "ASSIGNED FOR ACCOUNTABILITY",
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.8.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                report.assigneeCorporation,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            )
+            Text(
+                report.assigneeZone,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+            ReportAssigneeDisplay.wardLabel(report)?.let { ward ->
+                Text(
+                    ward,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
             Spacer(Modifier.height(6.dp))
             Text(
                 report.assigneeName,
@@ -232,19 +251,7 @@ private fun AccountabilityReportCard(report: PersistedPotholeReport) {
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.primary,
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                report.assigneeCorporation,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-            )
-            Text(
-                report.assigneeZone,
-                fontSize = 10.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
                 report.assigneeOfficeAddress,
                 fontSize = 10.sp,

@@ -102,7 +102,33 @@ Full release checklist: [release_and_versioning_guide.md](release_and_versioning
 - Estimated pothole width/depth (advisory-scale estimate)
 - Suggested rider speed near pothole (risk advisory)
 
-## Recommended Government App Features (Next Integration)
+## Government enhancements backlog (parked)
+
+**Strategy (July 2026):** Finish **citizen app** closed testing first. All CG GOVT work lives here until the citizen app ships **1.0.3+** and testers stabilize. Citizen master list: [`future_features_backlog.md`](future_features_backlog.md).
+
+GBA detail (corporations, wards, officers): [`future_govt_bbmp_gba_zones.md`](future_govt_bbmp_gba_zones.md).
+
+### Priority order (when citizen app is stable)
+
+| # | Enhancement | Scope | Depends on |
+|---|-------------|-------|------------|
+| **G1** | **Consume ward routing from citizen reports** | Read `ward_key`, `ward_number`, `ward_name`, `assignee_*` on sync; show in gov ticket detail | Migration `0011` applied (citizen already pushes these) |
+| **G2** | **GBA corporation registry mirror** | Update `MunicipalOfficersRegistry.kt` — 5 corp keys (`BENGALURU:GBA_*`); keep legacy 8 BBMP keys for old tickets | Citizen `MunicipalContactsRegistry.kt` (shipped 1.0.3) |
+| **G3** | **Verify commissioner names + seed officers** | Edit `officers.json` with real GBA names; run `seed_officers.mjs`; test CG GOVT logins | Public GBA/BBMP directory |
+| **G4** | **Two-way sync (#9)** | Status OPEN → IN PROGRESS → COMPLETED round-trip; completion proof photos visible in citizen **My Reports** | Gov workflow RPCs + citizen pull merge |
+| **G5** | **Gov map — corp / ward overlays** | Choropleth or boundary lines on gov map; queue filter by corporation / ward | Ward asset `bengaluru_gba_wards.json` (shared from citizen repo) |
+| **G6** | **Ward officers (369)** | Ward-level assignee keys + roster — **not** in citizen app | Official ward officer directory |
+| **G7** | **Prioritization dashboard** | Filter by AI severity + citizen severity + repeat reports | Existing AI fields on report |
+| **G8** | **SLA tracking** | Time-to-assign, time-to-fix, overdue alerts | Status timestamps in DB |
+
+### Already on citizen side (gov can consume — no citizen work needed)
+
+- Report push to `reports` + `evidence` bucket
+- GBA outer boundary + submit validation
+- 5 corporation + 369 ward routing snapshot at submit (`0011` columns)
+- Confirmation email with corporation + ward (signed-in only)
+
+### Recommended Government App Features (baseline — from original handover)
 
 - Official status update controls:
   - Open -> In Progress -> Completed
@@ -122,6 +148,7 @@ Full release checklist: [release_and_versioning_guide.md](release_and_versioning
 - Lifecycle status: `status`
 - Assignment metadata:
   - `assigneeKey`, `assigneeCorporation`, `assigneeZone`, `assigneeName`, `assigneePosition`, `assigneeOfficeAddress`
+- **GBA ward routing (v1.0.3+):** `wardKey`, `wardNumber`, `wardName` — migration `0011_report_ward_routing.sql`
 - Reporter privacy-safe key: `reporterUserId` (no raw PII)
 
 ## GPS Calibration Update (Latest)

@@ -159,11 +159,24 @@ fun ReportDetailDialog(
                 }
 
                 if (report.hasAssignee()) {
-                    DetailSectionTitle("ASSIGNED OFFICER")
-                    DetailLine("Name", report.assigneeName)
-                    DetailLine("Position", report.assigneePosition)
-                    DetailLine("Corporation", report.assigneeCorporation)
-                    DetailLine("Zone", report.assigneeZone)
+                    DetailSectionTitle("ACCOUNTABILITY (REFERENCE ONLY)")
+                    Text(
+                        ReportAssigneeDisplay.routingDisclaimer(report),
+                        fontSize = 10.sp,
+                        lineHeight = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    DetailLine(ReportAssigneeDisplay.authorityLabel(), report.assigneeCorporation)
+                    DetailLine(
+                        ReportAssigneeDisplay.municipalUnitLabel(report),
+                        report.assigneeZone,
+                    )
+                    ReportAssigneeDisplay.wardLabel(report)?.let { ward ->
+                        DetailLine("Ward", ward)
+                    }
+                    DetailLine("Officer", report.assigneeName)
+                    DetailLine("Role", report.assigneePosition)
                     DetailLine("Office", report.assigneeOfficeAddress)
                     Spacer(Modifier.height(12.dp))
                 }

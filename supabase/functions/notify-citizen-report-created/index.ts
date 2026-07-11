@@ -22,6 +22,10 @@ type ReportRow = {
   area_label: string;
   severity: string;
   citizen_note: string;
+  assignee_corp?: string;
+  assignee_zone?: string;
+  ward_number?: number;
+  ward_name?: string;
 };
 
 type WebhookPayload = {
@@ -73,6 +77,14 @@ function buildEmailBody(row: ReportRow, ticket: string): string {
   const userId = row.reporter_user_id?.trim() || "—";
   const note = row.citizen_note?.trim() || "—";
   const severity = row.severity?.trim() || "MODERATE";
+  const routingLines: string[] = [];
+  const corp = row.assignee_zone?.trim() || row.assignee_corp?.trim();
+  if (corp) routingLines.push(`Corporation: ${corp}`);
+  const wardNum = row.ward_number ?? 0;
+  const wardName = row.ward_name?.trim();
+  if (wardNum > 0 && wardName) {
+    routingLines.push(`Ward:        Ward ${wardNum} — ${wardName}`);
+  }
   return [
     "City Grid — Report received",
     "",
@@ -81,6 +93,7 @@ function buildEmailBody(row: ReportRow, ticket: string): string {
     `Location:   ${formatLocation(row)}`,
     `Severity:   ${severity}`,
     `Note:       ${note}`,
+    ...routingLines,
     `Submitted:  ${formatIst(row.created_at_ms)}`,
     "",
     "You can track this report in the app under My Reports.",

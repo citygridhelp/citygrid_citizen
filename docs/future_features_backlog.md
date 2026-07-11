@@ -1,8 +1,29 @@
 # Citizen app — future features backlog
 
-Planned or deferred work for the City Grid citizen app (`potholereport`). Items here are **not** in the current release scope unless marked as shipped.
+**This is the master enhancement list** for the City Grid citizen app (`potholereport`).
 
-For release steps and what is already live, see [release_and_versioning_guide.md](release_and_versioning_guide.md).
+| Role | File |
+|------|------|
+| **Master list (update after every implementation)** | **`docs/future_features_backlog.md`** ← this file |
+| GBA / BBMP detail (§10 only) | [`docs/future_govt_bbmp_gba_zones.md`](future_govt_bbmp_gba_zones.md) |
+| Release notes per version | [`docs/play_store_release_notes_*.md`](play_store_release_notes_1.0.2.md) |
+| Product defaults & thresholds | [`docs/product_assumptions.md`](product_assumptions.md) |
+
+Planned or deferred work lives here unless marked **Shipped**. For release steps, see [release_and_versioning_guide.md](release_and_versioning_guide.md).
+
+### After each implementation — update checklist
+
+When you finish an enhancement (or a sub-phase such as **#10.1**), update **this file** in the same PR / commit:
+
+1. **Item section** — set `**Status:** **Shipped** (vX.Y.Z)` or mark sub-phase done; add key files changed.
+2. **Release roadmap** (bottom) — move item from “Next” to “Shipped” row if applicable.
+3. **Priority reference** table — adjust what is “Next”.
+4. **Linked docs** (only if scope changed):
+   - GBA work → [`future_govt_bbmp_gba_zones.md`](future_govt_bbmp_gba_zones.md) “Current state” table
+   - Store-facing copy → new or existing `play_store_release_notes_*.md`
+   - Behaviour thresholds → [`product_assumptions.md`](product_assumptions.md)
+
+Do **not** rely on chat or memory alone — **this backlog is the source of truth** for what is done vs pending.
 
 ---
 
@@ -64,9 +85,11 @@ Signed-in and public feed sync download evidence photos into app storage via
 
 ### 5. Stricter city / metro match on report submit
 
-**Status:** Partially shelved (was in IDE shelved patches).
+**Status:** **Shipped** (v1.0.2).
 
-Validate that report GPS / picked map location lies inside the selected city metro before submit, with clear citizen-facing errors.
+Validate that report GPS / picked map location lies inside the selected city boundary before submit. Bengaluru uses official **GBA polygon** (`CityMetroLocation.validateSubmitLocation`, `BengaluruGbaBoundary`).
+
+**Files:** `CityMetroLocation.kt`, `NewReportScreen.kt`, `BengaluruGbaBoundary.kt`.
 
 ---
 
@@ -74,9 +97,11 @@ Validate that report GPS / picked map location lies inside the selected city met
 
 ### 6. In-app notifications bell
 
-**Status:** Not implemented (shelved patch).
+**Status:** **Shipped** (v1.0.2).
 
-Header bell for citizen notifications (e.g. app update prompts, report status messages) wired to `CitizenNotificationsRepository`.
+Header bell for citizen notifications (app update prompts, report status messages) wired to `CitizenNotificationsRepository`.
+
+**Files:** `CitizenNotificationsRepository.kt`, `NotificationsDialog.kt`, `HomeScreen.kt`, `RecentReportsRepository.kt`.
 
 ---
 
@@ -90,19 +115,21 @@ Signup and profile email change rely on Supabase email templates using `{{ .Toke
 
 ### 8. Report submission confirmation email
 
-**Status:** Implemented in repo — **deploy** migration `0010`, Brevo secrets, Edge Function, and Database Webhook.
+**Status:** **Shipped** — deployed and verified (July 2026).
 
-After a **signed-in** citizen’s report is inserted into `public.reports`, a webhook
-calls `notify-citizen-report-created` to email the citizen via Brevo.
+After a **signed-in** citizen’s report is inserted into `public.reports`, a Database Webhook calls `notify-citizen-report-created` to email the reporter at their **registered Supabase Auth email** via Brevo.
+
+**By design — not for guests:** Reports with no `reporter_auth_id` skip the email (anonymous / guest submit). No guest confirmation email is planned.
 
 | Item | Decision |
-|------|----------|
+|------|--------|
+| Who gets mail | Signed-in users only (`reporter_auth_id` set) |
 | Ticket in email | `CG-` + last 8 digits of `reports.id` |
 | User ID in email | Raw `reporter_user_id` (`PW-xxx`) |
 | Timestamp | IST |
 | Idempotency | `report_email_log` |
 
-Deploy guide: [`docs/report_confirmation_email.md`](report_confirmation_email.md).
+**Files / ops:** `supabase/migrations/0010_report_email_log.sql`, `supabase/functions/notify-citizen-report-created/index.ts`. Deploy guide: [`docs/report_confirmation_email.md`](report_confirmation_email.md).
 
 ---
 
@@ -110,37 +137,76 @@ Deploy guide: [`docs/report_confirmation_email.md`](report_confirmation_email.md
 
 ### 9. Deeper two-way sync with CG GOVT app
 
-**Status:** Ongoing / handover.
+**Status:** **Parked** — government app backlog (citizen push already works).
 
-Citizen push to `reports` + `evidence` is implemented. Full round-trip (all status transitions, proof photos visible in citizen My Reports) depends on government app workflows and migrations — see [government_app_handover.md](government_app_handover.md).
+Citizen push to `reports` + `evidence` is implemented. Full round-trip (status transitions, proof photos in My Reports) is **CG GOVT work** — see [government_app_handover.md](government_app_handover.md) § **G4**.
 
 ---
 
-### 10. Bengaluru municipal areas — BBMP zones / GBA corporations / wards
+### 10. Bengaluru GBA / municipal alignment
 
-**Status:** Not implemented — **remind after internal testing** before wide Bengaluru pilot.
+**Status:** **Citizen shipped** (v1.0.3) — boundary, 5 corp routing, ward at submit, Accountability copy. **Gov/seed work parked** — see [government_app_handover.md](government_app_handover.md) § G2–G3.
 
-**Problem:** Citizens may feel “too few BBMP areas” in the app. Today routing uses **all 8 classic BBMP zones** (complete for that model), but not **198/369 wards** or the **5 GBA corporations (2025)**.
+**Problem:** Map and report eligibility should match **2025 GBA** structure. Boundary is aligned; **officer routing** still uses legacy **8 BBMP zones**.
 
-**Full draft (options A–D, phasing, files, acceptance criteria):**  
+**Full draft (options A–D, ward-level, files):**  
 [`docs/future_govt_bbmp_gba_zones.md`](future_govt_bbmp_gba_zones.md)
 
-**Suggested path:**
+#### 10.0 — GBA official outer boundary (map + submit)
 
-| Phase | What |
-|-------|------|
-| 1 | Zone reference UI + clearer Accountability copy (Option A) |
-| 2 | Migrate to 5 GBA corporations + officer seed (Option B) |
-| 3 | Ward polygons + ward officers if GBA data available (Option C) |
-| Parallel | More map locality labels via JSON (Option D) |
+**Status:** **Shipped** (v1.0.2).
 
-**Reminder trigger:** When starting BBMP/GBA official pilot, or when stakeholders ask for Central/North corporation or ward-level routing.
+| What | Detail |
+|------|--------|
+| Red city outline | Official Sept 2025 GBA polygon (OpenCity KML, simplified) |
+| Pan / zoom limits | GBA bounding box (replaces oversized hand-tuned bbox) |
+| Report eligibility | Point-in-polygon for Bengaluru submit + map pick |
+| Asset | `assets/bengaluru_gba_boundary.json` |
+| Regenerate | `python tools/generate_bengaluru_gba_boundary_assets.py` |
+
+**Files:** `BengaluruGbaBoundary.kt`, `HomeScreen.kt`, `CityMetroLocation.kt`, `IndiaCityMapCatalog.kt`, `MainActivity.kt`.
+
+#### 10.1–10.4 — GBA corporation routing migration (Option B)
+
+**Status:** Not started — **recommended next GBA work** after 1.0.2 ships.
+
+| Phase | Work | Scope | Status |
+|-------|------|-------|--------|
+| **1** | Add **5 GBA corporation assignee keys + centroids** | `MunicipalContactsRegistry.kt` — keys `BENGALURU:GBA_CENTRAL` … `GBA_WEST`; legacy 8 BBMP keys kept for lookup | **Shipped** (v1.0.3 dev) |
+| **2** | Update **`officers.json` / Supabase seed** with GBA commissioners | **Parked** — gov backlog **G3**; placeholder commissioners in seed until verified | **Parked** |
+| **3** | **Re-map existing reports** (optional backfill) or **new reports only** | **Forward-only** — historical rows keep old 8-zone `assignee_key` | **Decided** |
+| **4** | **Accountability UI labels** — “East Corporation” vs “East Zone” | `AccountabilitySection.kt` GBA copy | **Shipped** (v1.0.3 dev) |
+
+**Suggested implementation order:** Phase **1 → 2 → 4** in one release; Phase **3** decided before seed deploy (backfill vs forward-only).
+
+**Depends on:** Verified commissioner names from BBMP/GBA public directory.
+
+#### 10.5 — Ward-level routing at submit (citizen app)
+
+**Status:** **Shipped** (v1.0.3 dev) — citizen submit + report details only; **not** on home map.
+
+| Scope | Detail |
+|-------|--------|
+| **Citizen app** | GPS → 369 official GBA ward polygons → corporation + ward snapshot on new reports; shown in submit snackbar, report details, Accountability tab |
+| **Home map** | GBA outer boundary only — **no** corp/ward overlays (by design) |
+| **Gov app** | Ward/corp map overlays + ward officers — separate backlog; see [`future_govt_bbmp_gba_zones.md`](future_govt_bbmp_gba_zones.md) Option C |
+| **DB** | `supabase/migrations/0011_report_ward_routing.sql` — apply before cloud sync includes ward columns |
+| **Assets** | `bengaluru_gba_wards.json` (369 wards); regenerate via `tools/generate_bengaluru_gba_wards_assets.py` |
+| **Historical reports** | Forward-only — no backfill of ward fields on old BBMP-zone rows |
+
+**Not in scope (later):** 369 ward **officers**, gov-app ward map, citizen home map ward boundaries.
+
+#### 10.6 — Zone / corporation reference UI (Option A, optional)
+
+Read-only citizen screen listing municipal units + officer office addresses; can ship alongside Phase 4.
+
+**Reminder trigger:** Before BBMP/GBA official pilot, or when stakeholders ask for Central/North corporation names in Accountability.
 
 ---
 
 ### 11. Signup interrupted after “Send verification code” (stuck / “email already exists”)
 
-**Status:** Not implemented — **discussed, not coded** (June 2026). **Review / implement tomorrow.**
+**Status:** **Shipped** (v1.0.2).
 
 **Primary surface:** **Full signup screen** — `SignupScreen.kt` via Login → Create account (`AuthNavHost`).  
 **Also apply later for consistency:** `ReportSignInModal.kt` (home report flow).
@@ -194,42 +260,30 @@ Citizen push to `reports` + `evidence` is implemented. Full round-trip (all stat
 
 ### 12. GPS / current location accuracy
 
-**Status:** Not implemented — enhancement backlog (June 2026).
+**Status:** **Shipped** (v1.0.3).
 
 **Problem:** The map sometimes shows a poor or stale GPS fix. The home strip shows `GPS accuracy: ±Xm` or “searching…”, but pin position can still feel wrong or jump.
 
-**Likely causes to investigate:**
+**Implemented:**
 
-- Single-shot / last-known location used before a fresh fix completes (`fetchBestCalibratedLocation`, `requestSingleUpdate` in `NewReportScreen` / `HomeScreen`).
-- Indoor / weak signal; no fusion with network location where helpful.
-- GPS pin on map vs report submit location using different pipelines.
-- No clear “low accuracy” warning before submit when `accuracy` is poor (e.g. > 50 m).
+- [x] Report screen shows `GPS ±Xm` when using device GPS (green / amber / red by threshold).
+- [x] **Warn** when accuracy > **50 m** — submit still allowed; amber copy suggests retry or manual entry.
+- [x] **Block** auto-GPS submit when accuracy > **100 m** — footer “GPS TOO INACCURATE — RETRY OR MANUAL”; manual Maps URL / coordinates bypass check.
+- [x] Existing calibrated location pipeline unchanged (`fetchBestCalibratedLocation`).
 
-**Rough scope:**
+**Files:** `NewReportScreen.kt` (`LocationBlock`, `GPS_SUBMIT_*_ACCURACY_METERS`).
 
-- [ ] Prefer best available fix (fresh GPS, then network, with timeout) before tagging a report.
-- [ ] Show accuracy on report screen and block or warn submit when accuracy exceeds a threshold (configurable).
-- [ ] Optional: short “improving location…” state while waiting for a better fix.
-- [ ] Re-test on physical device outdoors vs indoors.
-
-**Files:** `HomeScreen.kt` (GPS pipeline, `gpsPinLocation`), `NewReportScreen.kt` (`refreshGpsLocation`, `latEffective` / `lngEffective`).
+**Still optional later:** “Improving location…” extended wait for better fix before first display (`HomeScreen.kt` passive pin).
 
 ---
 
 ### 13. Report submit loading feedback
 
-**Status:** Not implemented — enhancement backlog (June 2026).
+**Status:** **Shipped** (v1.0.2).
 
-**Problem:** Tapping **Submit report** can take noticeable time (save photos locally, optional on-device checks, `RecentReportsRepository.addReport`, `ReportSyncRepository.pushReport`) with no dedicated loading UI — button stays as “SUBMIT REPORT” and the screen may feel frozen.
+Submit button shows `SUBMITTING…` + spinner; form locked during save/upload.
 
-**Rough scope:**
-
-- [ ] `submitting` state: disable form, show progress indicator on button (e.g. `SUBMITTING…`) or full-screen / inline overlay.
-- [ ] Optional branded animation (City Grid) for longer sync paths.
-- [ ] Prevent double-tap submit.
-- [ ] Clear error path if IO/sync fails (keep form open, as today).
-
-**Files:** `NewReportScreen.kt` (submit `Button` + `scope.launch` block ~line 720).
+**Files:** `NewReportScreen.kt`.
 
 ---
 
@@ -254,50 +308,19 @@ Citizen push to `reports` + `evidence` is implemented. Full round-trip (all stat
 
 ### 15. Map jumps to current location without user intent
 
-**Status:** Not implemented — enhancement backlog (June 2026).
+**Status:** **Shipped** (v1.0.2).
 
-**Problem:** While viewing **city overview** or a manually panned area, the map sometimes **auto-moves to the user’s GPS pin** without tapping **Locate me**.
+Passive GPS updates move the pin only; camera moves on **Locate me** or city change.
 
-**Likely causes to investigate:**
-
-- `mapLocateEpoch` / `LaunchedEffect(mapLocateEpoch)` re-centering map on GPS updates.
-- Background GPS refresh updating `userLocation` / `gpsPinLocation` and triggering fit or pan.
-- `scheduleFitCityOverview` vs street-view / city-view toggle fighting user pan.
-- Compose `update` block re-applying camera when props change.
-
-**Rough scope:**
-
-- [ ] Distinguish **user-requested locate** (button) from **passive GPS updates** (update pin only, do not move camera).
-- [ ] Remember “user has panned/zoomed” flag; suppress auto-recenter until Locate me or city picker.
-- [ ] Re-test: select city → pan map → wait for GPS refresh → map should **not** jump.
-
-**Files:** `HomeScreen.kt` (`OsmDensityMap`, `mapLocateEpoch`, `scheduleFitCityOverview`, GPS `LaunchedEffect`s).
+**Files:** `HomeScreen.kt`.
 
 ---
 
-### 16. “Active critical reports” mode should survive map pan / zoom
+### 16. Map severity filter should survive map pan / zoom
 
-**Status:** Not implemented — enhancement backlog (June 2026). **Behaviour bug.**
+**Status:** **Shipped** (v1.0.2). Replaced “Active critical reports” link with **Severity** dropdown (All / Minor / … / Critical); filter persists during pan/zoom.
 
-**Problem:** User turns on **Active critical reports** (filters map to critical + open/in-progress). After **panning or zooming** the map, the filter **turns off** and all reports show again. User must tap the link again to re-enable critical-only view — wrong for exploring the map while filtered.
-
-**Root cause (known):** `OsmDensityMap` calls `onMapViewControlUsed` on map gestures; parent sets `showCriticalActiveClusters = false`:
-
-```kotlin
-onMapViewControlUsed = {
-    if (showCriticalActiveClusters) showCriticalActiveClusters = false
-}
-```
-
-Same clear happens on **Locate me** and **city view** controls (may be intentional there).
-
-**Rough scope:**
-
-- [ ] **Do not** clear `showCriticalActiveClusters` on pan/zoom / generic map touch.
-- [ ] Only clear when user **toggles off** the critical link, **changes city**, or explicitly chooses an action that means “exit filter” (product decision).
-- [ ] Keep critical styling on cluster overlay while filter is on during pan/zoom.
-
-**Files:** `HomeScreen.kt` (`ReportAndTrackSection`, `OsmDensityMap`, `showCriticalActiveClusters`, `onMapViewControlUsed`).
+**Files:** `HomeScreen.kt` (`mapSeverityFilter`, `ReportAndTrackSection`).
 
 ---
 
@@ -337,32 +360,9 @@ Same clear happens on **Locate me** and **city view** controls (may be intention
 
 ### 18. “Report a pothole” CTA — rounded button, centered label
 
-**Status:** Not implemented — enhancement backlog (July 2026).
+**Status:** **Shipped** (v1.0.2). Pill/capsule shape on home CTA and New Report submit button.
 
-**Problem:** The main **Report a pothole** control on the home tab looks like a **full-width bar**, not a button — it is stretched edge-to-edge with **square corners** and **left-aligned** text/icon.
-
-**Current UI:** `ReportAndTrackSection` in `HomeScreen.kt` — `Card` with `fillMaxWidth()`, `height(56.dp)`, `RoundedCornerShape(0.dp)`, row layout with camera icon + title/subtitle on the left.
-
-**Desired UI:**
-
-- **Rounded corners** (e.g. 8–12 dp or match Material button radius) so it reads as a tappable button.
-- **Label centered** horizontally (icon + “REPORT A POTHOLE” + subtitle as a centered group, or title centered with subtitle below).
-- Optional: **not** full-bleed width — e.g. `fillMaxWidth()` with horizontal padding already present, or intrinsic width centered in parent (product choice).
-- Keep brand red (`0xFFB74233`) and existing tap behaviour (signed-in vs guest sign-in modal).
-
-**Rough scope:**
-
-- [ ] Replace square `Card` styling with rounded shape (`RoundedCornerShape`) or `Button` / `FilledTonalButton` with custom colors.
-- [ ] Center content in `Row` / `Column` (`Arrangement.Center`, `Alignment.CenterHorizontally`).
-- [ ] Quick visual check in light theme on phone + tablet widths.
-
-**Files:** `HomeScreen.kt` (`ReportAndTrackSection` report CTA `Card`, ~lines 693–732).
-
-**Acceptance criteria:**
-
-- [ ] Control clearly looks like a **button**, not a flat banner strip.
-- [ ] Corners visibly rounded; primary text centered.
-- [ ] Same click targets and auth flow as today.
+**Files:** `HomeScreen.kt`, `NewReportScreen.kt`.
 
 ---
 
@@ -411,19 +411,31 @@ Same clear happens on **Locate me** and **city view** controls (may be intention
 
 ## How to use this list
 
+### Release roadmap (July 2026)
+
+| When | Focus | Items |
+|------|--------|-------|
+| **Now** | Ship **1.0.3** to Play closed test | Ward routing smoke test; migration `0011` applied |
+| **Next dev sprint (citizen only)** | **#14** map labels, optional **#10.6** corp reference UI | **#12** GPS accuracy shipped in 1.0.3 |
+| **Major (citizen)** | Map analytics | **#17** GBA division heat map |
+| **Last (citizen)** | Testing polish | **#19** tap cluster → view reports |
+| **Parked** | Government app | **#9**, **#10.2** seed — [government_app_handover.md](government_app_handover.md) § G1–G8 |
+| **Low / strategic** | Identity | #2 account linking, #3 email history |
+
+### Priority reference
+
 | Priority | Suggested order |
 |----------|-----------------|
-| High (product) | **#11** signup OTP interrupt, **#16** critical filter + map pan bug, **#15** unwanted map recenter |
-| High (UX) | **#13** submit loading, **#12** GPS accuracy, **#18** Report a pothole button styling |
-| Medium | **#6** notifications bell, **#5** city match, **#14** map area labels |
-| Medium (Bengaluru pilot) | **#10** BBMP/GBA zones — [future_govt_bbmp_gba_zones.md](future_govt_bbmp_gba_zones.md) |
-| Major / strategic | **#17** GBA division heat map (after #10 boundaries) |
-| Last (testing polish) | **#19** tap map cluster → view reports |
+| **Next (citizen)** | **#14** map area labels; optional **#10.6** corp reference UI |
+| Optional (citizen) | **#10.6** zone/corp reference UI |
+| Major (citizen) | **#17** GBA heat map |
+| Last (citizen) | **#19** tap map cluster → view reports |
+| **Parked (gov)** | **#9** two-way sync, **#10.2** seed/officers — [government_app_handover.md](government_app_handover.md) |
 | Low / strategic | #2 account linking, #3 email history |
 | Reference only | #1 (document current design) |
-| Shipped | #4 photo download |
+| **Shipped (v1.0.2–1.0.3 + backend)** | #4, #5, #6, **#8**, #11, #12, #13, #15, #16, #18, **#10.0–10.1, #10.4–10.5** GBA boundary/corp/ward routing, map bounds/clusters/severity/GPS pill |
 
-When an item ships, move it to the release guide or handover doc and mark it **Shipped** here with the migration/app version.
+When an item ships, follow **After each implementation — update checklist** at the top of this file. Minimum: mark the item **Shipped** with version + update the **Shipped** row in the tables below.
 
 **Product thresholds & defaults (duplicate radius, GPS, map clusters, auth, etc.):** see [product_assumptions.md](product_assumptions.md).
 

@@ -110,6 +110,61 @@
     "fieldOfficerKey": ""
   },
   {
+    "email": "gba.central@bbmp.gov.in",
+    "displayName": "GBA Central Corporation Commissioner",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "City Corporation Commissioner",
+    "corporation": "Greater Bengaluru Authority (GBA)",
+    "zoneLabel": "Bengaluru Central City Corporation",
+    "assigneeKey": "BENGALURU:GBA_CENTRAL",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "gba.north@bbmp.gov.in",
+    "displayName": "GBA North Corporation Commissioner",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "City Corporation Commissioner",
+    "corporation": "Greater Bengaluru Authority (GBA)",
+    "zoneLabel": "Bengaluru North City Corporation",
+    "assigneeKey": "BENGALURU:GBA_NORTH",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "gba.south@bbmp.gov.in",
+    "displayName": "GBA South Corporation Commissioner",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "City Corporation Commissioner",
+    "corporation": "Greater Bengaluru Authority (GBA)",
+    "zoneLabel": "Bengaluru South City Corporation",
+    "assigneeKey": "BENGALURU:GBA_SOUTH",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "gba.east@bbmp.gov.in",
+    "displayName": "GBA East Corporation Commissioner",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "City Corporation Commissioner",
+    "corporation": "Greater Bengaluru Authority (GBA)",
+    "zoneLabel": "Bengaluru East City Corporation",
+    "assigneeKey": "BENGALURU:GBA_EAST",
+    "fieldOfficerKey": ""
+  },
+  {
+    "email": "gba.west@bbmp.gov.in",
+    "displayName": "GBA West Corporation Commissioner",
+    "role": "ZONE_HEAD",
+    "cityKey": "BENGALURU",
+    "position": "City Corporation Commissioner",
+    "corporation": "Greater Bengaluru Authority (GBA)",
+    "zoneLabel": "Bengaluru West City Corporation",
+    "assigneeKey": "BENGALURU:GBA_WEST",
+    "fieldOfficerKey": ""
+  },
+  {
     "email": "mumbai.island@mcgm.gov.in",
     "displayName": "Assistant Municipal Commissioner (Ward A – Fort)",
     "role": "ZONE_HEAD",

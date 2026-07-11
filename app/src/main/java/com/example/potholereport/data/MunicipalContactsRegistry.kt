@@ -9,7 +9,7 @@ import kotlin.math.sqrt
  * Official municipal contacts for pothole accountability routing.
  *
  * Sources (verified public directories, 2025–2026):
- * - Bengaluru: BBMP zone-wise officers (bbmp.gov.in / site.bbmp.gov.in)
+ * - Bengaluru: GBA five city corporations (2025 delimitation); legacy 8 BBMP zones kept for old assignee keys
  * - Mumbai: Brihanmumbai Municipal Corporation ward offices (mcgm.gov.in)
  * - Delhi: Municipal Corporation of Delhi zone directories (mcdonline.nic.in)
  * - Chennai: Greater Chennai Corporation RTI public information officers
@@ -17,8 +17,11 @@ import kotlin.math.sqrt
  */
 object MunicipalContactsRegistry {
 
+    private val legacyBbmpByKey: Map<String, MunicipalZoneRecord> =
+        bbmpZones().associateBy { it.key }
+
     private val zones: List<MunicipalZoneRecord> = buildList {
-        addAll(bbmpZones())
+        addAll(gbaCorporationZones())
         addAll(bmcZones())
         addAll(mcdZones())
         addAll(gccZones())
@@ -29,7 +32,8 @@ object MunicipalContactsRegistry {
 
     private val byCity: Map<String, List<MunicipalZoneRecord>> = zones.groupBy { it.cityKey }
 
-    fun assigneeForKey(key: String): MunicipalAssignee? = byKey[key]?.toAssignee()
+    fun assigneeForKey(key: String): MunicipalAssignee? =
+        byKey[key]?.toAssignee() ?: legacyBbmpByKey[key]?.toAssignee()
 
     fun nearestAssignee(cityKey: String, latitude: Double, longitude: Double): MunicipalAssignee? {
         val cityZones = byCity[cityKey] ?: return null
@@ -52,7 +56,34 @@ object MunicipalContactsRegistry {
         return r * c
     }
 
-    /** BBMP — Joint Commissioners (zonal heads). */
+    /** GBA (2025) — five city corporations; routing uses HQ-area centroids. */
+    private fun gbaCorporationZones(): List<MunicipalZoneRecord> {
+        val gba = "Greater Bengaluru Authority (GBA)"
+        return listOf(
+            zone("BENGALURU", "GBA_CENTRAL", gba, "Bengaluru Central City Corporation",
+                "See official GBA directory", "City Corporation Commissioner",
+                "Bengaluru Central City Corporation, Hudson Circle, Bengaluru, Karnataka 560001",
+                12.9720, 77.5980),
+            zone("BENGALURU", "GBA_NORTH", gba, "Bengaluru North City Corporation",
+                "See official GBA directory", "City Corporation Commissioner",
+                "Bengaluru North City Corporation, Yelahanka, Bengaluru, Karnataka 560064",
+                13.100, 77.597),
+            zone("BENGALURU", "GBA_SOUTH", gba, "Bengaluru South City Corporation",
+                "See official GBA directory", "City Corporation Commissioner",
+                "Bengaluru South City Corporation, Jayanagar, Bengaluru, Karnataka 560041",
+                12.925, 77.583),
+            zone("BENGALURU", "GBA_EAST", gba, "Bengaluru East City Corporation",
+                "See official GBA directory", "City Corporation Commissioner",
+                "Bengaluru East City Corporation, Mahadevapura, Bengaluru, Karnataka 560037",
+                12.995, 77.715),
+            zone("BENGALURU", "GBA_WEST", gba, "Bengaluru West City Corporation",
+                "See official GBA directory", "City Corporation Commissioner",
+                "Bengaluru West City Corporation, Rajarajeshwari Nagar, Bengaluru, Karnataka 560098",
+                12.920, 77.518),
+        )
+    }
+
+    /** Legacy BBMP eight zones — lookup only for reports routed before GBA corporation migration. */
     private fun bbmpZones(): List<MunicipalZoneRecord> {
         val corp = "Bruhat Bengaluru Mahanagara Palike (BBMP)"
         return listOf(
@@ -275,13 +306,13 @@ object MunicipalContactsRegistry {
 
     private val cityFallbacks: Map<String, MunicipalAssignee> = mapOf(
         "BENGALURU" to MunicipalAssignee(
-            key = "BENGALURU:HQ",
+            key = "BENGALURU:GBA_HQ",
             cityKey = "BENGALURU",
-            corporationName = "Bruhat Bengaluru Mahanagara Palike (BBMP)",
-            zoneLabel = "Headquarters",
-            officerName = "Municipal Commissioner, BBMP",
+            corporationName = "Greater Bengaluru Authority (GBA)",
+            zoneLabel = "Authority headquarters",
+            officerName = "GBA / BBMP Municipal Commissioner",
             officerPosition = "Municipal Commissioner",
-            officeAddress = "BBMP Head Office, N.R. Square, Bengaluru, Karnataka 560002",
+            officeAddress = "BBMP / GBA Head Office, N.R. Square, Bengaluru, Karnataka 560002",
         ),
         "MUMBAI" to MunicipalAssignee(
             key = "MUMBAI:HQ",

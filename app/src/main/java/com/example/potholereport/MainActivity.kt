@@ -23,6 +23,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.navigation.compose.rememberNavController
 import com.example.potholereport.data.AppAutoRefresh
+import com.example.potholereport.data.BengaluruGbaBoundary
+import com.example.potholereport.data.BengaluruGbaWards
 import com.example.potholereport.data.CitizenNotificationsRepository
 import com.example.potholereport.data.RecentReportsRepository
 import com.example.potholereport.data.UserProfileRepository
@@ -52,6 +54,8 @@ class MainActivity : ComponentActivity() {
         RecentReportsRepository.init(applicationContext)
         UserProfileRepository.init(applicationContext)
         CitizenNotificationsRepository.init(applicationContext)
+        BengaluruGbaBoundary.init(applicationContext)
+        BengaluruGbaWards.init(applicationContext)
         setContent {
             var splashVisible by remember {
                 mutableStateOf(!AppAutoRefresh.initialSplashCompleted)

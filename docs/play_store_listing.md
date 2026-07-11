@@ -3,7 +3,7 @@
 **App:** City Grid (`in.citygrid.citizen`)  
 **Upload:** Play Console → **Grow users** → **Store presence** → **Main store listing**
 
-Bengaluru pilot release (v1.0.1). Updated July 2026 for Google Play **Misleading Claims** policy.
+Bengaluru pilot — store listing v1.0.2 (July 2026). Updated for Google Play **Misleading Claims** policy.
 
 ---
 
@@ -76,13 +76,23 @@ Note: Independent civic tool for Bengaluru in this release. We do not control BB
 | Disclaimer in About + Emergency | `HomeScreen.kt`, `EmergencyScreen.kt` |
 | BBMP-only municipal assignee routing | `MunicipalAssignmentResolver.kt` |
 
-## Before resubmitting
+## App changes in v1.0.2 (versionCode 3) — planned
 
-1. Build `bundleRelease` with versionCode **2** / versionName **1.0.1**
+Full user-facing copy, implementation table, map layout, and upload checklist:
+
+**[play_store_release_notes_1.0.2.md](play_store_release_notes_1.0.2.md)**
+
+## Before uploading v1.0.2
+
+1. Build `bundleRelease` with versionCode **3** / versionName **1.0.2** (already set in `app/build.gradle.kts`)
 2. Upload AAB to Closed testing (or your review track)
-3. Paste **Full description** and **Short description** above → Save
-4. **App content** → Government app = **No**
-5. Open each URL in incognito — must load
-6. **Publishing overview** → Send for review
+3. **Release name:** `1.0.2 — GBA map, notifications, severity filter`
+4. Paste **What's New** from [play_store_release_notes_1.0.2.md](play_store_release_notes_1.0.2.md)
+5. **Main store listing** — only re-paste Full/Short description if copy changed (not required for every release)
+6. **App content** → Government app = **No**
+7. Open each URL in incognito — must load
+8. **Publishing overview** → Send for review / Start rollout
+
+For v1.0.1 upload steps (historical): versionCode **2** / versionName **1.0.1**
 
 See also: [privacy_policy_hosting.md](privacy_policy_hosting.md)

@@ -33,6 +33,10 @@ data class PersistedPotholeReport(
     val assigneeName: String = "",
     val assigneePosition: String = "",
     val assigneeOfficeAddress: String = "",
+    /** GBA ward routing snapshot (Bengaluru only; from official GIS at submit). */
+    val wardKey: String = "",
+    val wardNumber: Int = 0,
+    val wardName: String = "",
     /** Stable reporter id ([UserProfile.anonymousUserId] or [DeviceReporterId]). */
     val reporterUserId: String = "",
     /** True once this row exists in Supabase (successful push or server restore). */
@@ -44,7 +48,9 @@ data class PersistedPotholeReport(
 ) {
     fun hasCoordinates(): Boolean = !latitude.isNaN() && !longitude.isNaN()
 
-    fun hasAssignee(): Boolean = assigneeName.isNotBlank()
+    fun hasAssignee(): Boolean = assigneeName.isNotBlank() || assigneeZone.isNotBlank()
+
+    fun hasWard(): Boolean = wardNumber > 0 && wardName.isNotBlank()
 
     fun withAssignee(assignee: MunicipalAssignee): PersistedPotholeReport {
         val fields = assignee.toPersistedFields()
@@ -57,6 +63,12 @@ data class PersistedPotholeReport(
             assigneeOfficeAddress = fields.assigneeOfficeAddress,
         )
     }
+
+    fun withWard(ward: GbaWardMatch): PersistedPotholeReport = copy(
+        wardKey = ward.wardKey,
+        wardNumber = ward.wardNumber,
+        wardName = ward.wardName,
+    )
 }
 
 /**
@@ -222,8 +234,8 @@ object RecentReportsRepository {
                 return@synchronized AddReportResult.Failed
             }
             val areaLabel = resolveAreaLabel(ctx, latitude, longitude).takeIf { isMeaningfulAreaName(it) }.orEmpty()
-            val assignee = MunicipalAssignmentResolver.resolve(cityKey, latitude, longitude)
-            val entry = PersistedPotholeReport(
+            val routing = BengaluruMunicipalRouting.resolve(cityKey, latitude, longitude)
+            var entry = PersistedPotholeReport(
                 id = id,
                 cityKey = cityKey,
                 createdAtMs = id,
@@ -237,7 +249,8 @@ object RecentReportsRepository {
                 submittedSignedIn = submittedSignedIn,
                 status = PotholeReportStatus.OPEN,
                 reporterUserId = reporterUserId,
-            ).withAssignee(assignee)
+            ).withAssignee(routing.assignee)
+            routing.ward?.let { entry = entry.withWard(it) }
             cache.add(0, entry)
             while (cache.size > MAX_STORED) {
                 val removed = cache.removeAt(cache.lastIndex)
@@ -397,6 +410,9 @@ object RecentReportsRepository {
                         assigneeName = row.assigneeName,
                         assigneePosition = row.assigneeRole,
                         assigneeOfficeAddress = row.assigneeAddr,
+                        wardKey = row.wardKey,
+                        wardNumber = row.wardNumber,
+                        wardName = row.wardName,
                     )
                     if (row.assigneeName.isBlank()) {
                         entry = entry.withAssignee(MunicipalAssignmentResolver.resolve(row.cityKey, lat, lon))
@@ -420,8 +436,19 @@ object RecentReportsRepository {
                     assigneeName = row.assigneeName.ifBlank { existing.assigneeName },
                     assigneePosition = row.assigneeRole.ifBlank { existing.assigneePosition },
                     assigneeOfficeAddress = row.assigneeAddr.ifBlank { existing.assigneeOfficeAddress },
+                    wardKey = row.wardKey.ifBlank { existing.wardKey },
+                    wardNumber = row.wardNumber.takeIf { it > 0 } ?: existing.wardNumber,
+                    wardName = row.wardName.ifBlank { existing.wardName },
                 )
                 if (merged != existing) {
+                    if (existing.status != visibleStatus) {
+                        CitizenNotificationsRepository.addStatusChange(
+                            reportId = existing.id,
+                            previousStatus = existing.status,
+                            newStatus = visibleStatus,
+                            areaLabel = existing.areaLabel,
+                        )
+                    }
                     cache[idx] = merged
                     changed = true
                 }
@@ -507,6 +534,9 @@ object RecentReportsRepository {
                         assigneeName = row.assigneeName.ifBlank { existing.assigneeName },
                         assigneePosition = row.assigneeRole.ifBlank { existing.assigneePosition },
                         assigneeOfficeAddress = row.assigneeAddr.ifBlank { existing.assigneeOfficeAddress },
+                        wardKey = row.wardKey.ifBlank { existing.wardKey },
+                        wardNumber = row.wardNumber.takeIf { it > 0 } ?: existing.wardNumber,
+                        wardName = row.wardName.ifBlank { existing.wardName },
                     )
                     if (merged != existing) {
                         cache[idx] = merged
@@ -549,6 +579,9 @@ object RecentReportsRepository {
                     assigneeName = row.assigneeName,
                     assigneePosition = row.assigneeRole,
                     assigneeOfficeAddress = row.assigneeAddr,
+                    wardKey = row.wardKey,
+                    wardNumber = row.wardNumber,
+                    wardName = row.wardName,
                 )
                 if (assignee != null && row.assigneeName.isBlank()) {
                     entry = entry.withAssignee(assignee)
@@ -641,6 +674,9 @@ object RecentReportsRepository {
                             assigneeName = o.optString("assigneeName", ""),
                             assigneePosition = o.optString("assigneeRole", ""),
                             assigneeOfficeAddress = o.optString("assigneeAddr", ""),
+                            wardKey = o.optString("wardKey", ""),
+                            wardNumber = o.optInt("wardNumber", 0),
+                            wardName = o.optString("wardName", ""),
                             reporterUserId = o.optString("reporterId", ""),
                             cloudSynced = o.optBoolean("cloudSynced", false),
                             storageClosePath = o.optString("storageClose", ""),
@@ -693,6 +729,11 @@ object RecentReportsRepository {
                         put("assigneeName", r.assigneeName)
                         put("assigneeRole", r.assigneePosition)
                         put("assigneeAddr", r.assigneeOfficeAddress)
+                    }
+                    if (r.wardKey.isNotBlank()) {
+                        put("wardKey", r.wardKey)
+                        put("wardNumber", r.wardNumber)
+                        put("wardName", r.wardName)
                     }
                     if (r.reporterUserId.isNotBlank()) {
                         put("reporterId", r.reporterUserId)
