@@ -71,7 +71,8 @@ Related docs:
 | Map severity filter | Dropdown: All / Minor / Moderate / Severe / Critical (`mapSeverityFilter`) | `ReportAndTrackSection`, `attachReportClusterOverlay` |
 | Pan/zoom vs severity filter | Severity filter **persists** during pan/zoom | `HomeScreen.kt` |
 | Cluster tap | **No action** — display only (*planned* §19) |
-| Region labels (e.g. Bengaluru) | ~200 localities; each has **minZoom** — labels appear only when zoomed in enough | `bengaluruRegionLabelSpecs` |
+| Region labels (Bengaluru) | ~215 curated locality points; G-lite tiering (min/max zoom, priority) | `HomeScreen.kt` `RegionNameLabelsOverlay` |
+| Basemap | CARTO **light_nolabels** — no tile place names (by design) | `CartoPositronNoLabels` |
 | City view vs street view | City label at min zoom band; `CITY_VIEW_ZOOM_EPSILON` controls “at city zoom” | `HomeScreen.kt` |
 | Default selected city | **BENGALURU** | `HomeScreen`, `CityMetroKeys.NAV_FALLBACK_CITY` |
 | Metro bbox (Bengaluru) | Official **GBA** outer boundary (Sept 2025): N 13.14266, E 77.784361, S 12.833625, W 77.460051; red outline = simplified polygon from OpenCity KML | `BengaluruGbaBoundary.kt`, `bengaluru_gba_boundary.json` |

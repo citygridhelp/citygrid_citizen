@@ -1,4 +1,4 @@
-@file:Suppress("SpellCheckingInspection")
+﻿@file:Suppress("SpellCheckingInspection")
 
 package com.example.potholereport.ui.home
 
@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material.icons.outlined.AccountBox
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Close
@@ -90,6 +91,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -116,12 +119,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -141,6 +144,7 @@ import androidx.core.location.LocationManagerCompat
 import androidx.core.os.CancellationSignal
 import com.example.potholereport.BuildConfig
 import com.example.potholereport.data.BengaluruGbaBoundary
+import com.example.potholereport.data.BengaluruGbaWards
 import com.example.potholereport.data.CitizenNotificationsRepository
 import com.example.potholereport.data.CityLaunchConfig
 import com.example.potholereport.data.CityMetroKeys
@@ -231,7 +235,7 @@ fun HomeScreen(
     var selectedCity by rememberSaveable { mutableStateOf(CityLaunchConfig.PRIMARY_CITY) }
     /** Marker / map focus; may be map-picked while browsing. */
     var userLocation by remember { mutableStateOf<Location?>(null) }
-    /** Last fix from the device GPS pipeline only — never updated by map drag. */
+    /** Last fix from the device GPS pipeline only â€” never updated by map drag. */
     var lastGpsLocation by remember { mutableStateOf<Location?>(null) }
     /** Metro key from last real GPS fix ([cityForLocation]); used so pan-to-pick stays inside the same city as GPS. */
     var gpsMetroCity by remember { mutableStateOf<String?>(null) }
@@ -602,7 +606,7 @@ fun HomeScreen(
                     "City Grid helps citizens report potholes and other road hazards with photos and location. " +
                         "When you are signed in, you can track your submissions in My Reports. " +
                         "Your reporter identity stays private on public maps and recent reports.\n\n" +
-                        "City Grid is an independent app — not affiliated with BBMP or any government body. " +
+                        "City Grid is an independent app â€” not affiliated with BBMP or any government body. " +
                         "Reporting and municipal zone officers are available for Bengaluru (BBMP) in this release. " +
                         "More cities will be added when official directories are verified.\n\n" +
                         "BBMP directory: https://bbmp.gov.in/\n\n" +
@@ -763,9 +767,14 @@ private fun TopTab(
 @Composable
 private fun CityWeatherSubline(selectedCity: String) {
     var forecast by remember(selectedCity) { mutableStateOf<CityWeatherForecast?>(null) }
-    var loading by remember(selectedCity) { mutableStateOf(true) }
+    var loading by remember(selectedCity) { mutableStateOf(selectedCity.isNotBlank()) }
 
     LaunchedEffect(selectedCity) {
+        if (selectedCity.isBlank()) {
+            forecast = null
+            loading = false
+            return@LaunchedEffect
+        }
         loading = true
         forecast = withContext(Dispatchers.IO) {
             CityWeatherRepository.fetchToday(selectedCity)
@@ -784,6 +793,7 @@ private fun CityWeatherSubline(selectedCity: String) {
 
     Text(
         text = when {
+            selectedCity.isBlank() -> "Weather loads after city is set"
             loading -> "Loading today's weather..."
             forecast != null -> forecast!!.summaryLine
             else -> "Weather forecast unavailable"
@@ -874,6 +884,11 @@ private fun ReportAndTrackSection(
         mapSeverityFilterKey?.let { key -> PotholeSeverity.entries.find { it.name == key } }
     }
     var severityMenuExpanded by remember { mutableStateOf(false) }
+    var areaHeatEnabled by rememberSaveable { mutableStateOf(false) }
+    val heatAvailable = CityMetroKeys.canonical(selectedCity) == "BENGALURU"
+    LaunchedEffect(heatAvailable) {
+        if (!heatAvailable) areaHeatEnabled = false
+    }
     var citySearchQuery by rememberSaveable { mutableStateOf("") }
     var searchedPlaces by remember { mutableStateOf<List<Pair<String, GeoPoint>>>(emptyList()) }
     var mapCameraUserPositioned by rememberSaveable { mutableStateOf(false) }
@@ -926,7 +941,7 @@ private fun ReportAndTrackSection(
         val cityChipBorderWidth = if (metroMatchesGps) 2.5.dp else 2.dp
 
         Column(modifier = Modifier.weight(1f)) {
-            Text("$selectedCity • POTHOLE DENSITY", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text("$selectedCity â€¢ POTHOLE DENSITY", fontWeight = FontWeight.Bold, fontSize = 14.sp)
             CityWeatherSubline(selectedCity = selectedCity)
         }
 
@@ -1019,9 +1034,9 @@ private fun ReportAndTrackSection(
     val gpsAccuracyText = remember(gpsPinLocation?.accuracy, gpsPinLocation?.time) {
         val loc = gpsPinLocation
         if (loc != null && loc.hasAccuracy()) {
-            "GPS ±${loc.accuracy.toInt().coerceAtLeast(1)}m"
+            "GPS Â±${loc.accuracy.toInt().coerceAtLeast(1)}m"
         } else {
-            "GPS searching…"
+            "GPS searchingâ€¦"
         }
     }
     Row(
@@ -1029,16 +1044,18 @@ private fun ReportAndTrackSection(
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(
-            "Severity",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        Spacer(Modifier.width(8.dp))
-        Box {
-            AssistChip(
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Severity",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Spacer(Modifier.width(8.dp))
+            Box {
+                AssistChip(
                     onClick = { severityMenuExpanded = true },
                     label = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1094,6 +1111,40 @@ private fun ReportAndTrackSection(
                     }
                 }
             }
+        }
+        if (heatAvailable) {
+            FilterChip(
+                selected = areaHeatEnabled,
+                onClick = { areaHeatEnabled = !areaHeatEnabled },
+                label = {
+                    Text(
+                        "Heat",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.Whatshot,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                },
+                shape = RoundedCornerShape(50),
+                border = BorderStroke(
+                    1.dp,
+                    if (areaHeatEnabled) Color(0xFFB91C1C) else Color(0xFF9CA3AF),
+                ),
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = Color.Transparent,
+                    labelColor = MaterialTheme.colorScheme.onBackground,
+                    iconColor = MaterialTheme.colorScheme.onBackground,
+                    selectedContainerColor = Color(0xFFB91C1C),
+                    selectedLabelColor = Color.White,
+                    selectedLeadingIconColor = Color.White,
+                ),
+            )
+        }
     }
 
     Spacer(Modifier.height(8.dp))
@@ -1127,6 +1178,7 @@ private fun ReportAndTrackSection(
             gpsPinLocation = gpsPinLocation,
             gpsAccuracyText = gpsAccuracyText,
             mapSeverityFilter = mapSeverityFilter,
+            areaHeatEnabled = areaHeatEnabled,
             recentReportsEpoch = recentReportsEpoch,
             modifier = Modifier.fillMaxSize()
         )
@@ -1369,7 +1421,7 @@ private val indiaPopularPlaces = listOf(
     "AMRAVATI", "SOLAPUR", "KOLHAPUR", "NANDED", "AKOLA", "SANGALI", "WARANGAL", "NELLORE", "GUNTUR", "KAKINADA",
 )
 
-/** Metro bounding boxes (north, east, south, west) — pan is clamped inside; min zoom keeps view city-sized. */
+/** Metro bounding boxes (north, east, south, west) â€” pan is clamped inside; min zoom keeps view city-sized. */
 private val cityMetroBounds: Map<String, BoundingBox> = mapOf(
     // Official GBA outer boundary bbox (Sept 2025); red outline uses full polygon asset.
     "BENGALURU" to BoundingBox(13.14266, 77.784361, 12.833625, 77.460051),
@@ -1620,25 +1672,38 @@ private fun buildReportScreenOverlapClusters(
     return nodes.map { ReportGeoCluster(lat = it.lat, lon = it.lon, count = it.count) }
 }
 
-/** Light translucent red disks with white counts (density / not solid blobs). */
+/** Cluster count disks. Heat on → white fill + black count; heat off → red fill as before. */
 private class ReportClusterMarkersOverlay(
     private val mapView: MapView,
     private val clusters: List<ReportGeoCluster>,
+    heatMode: Boolean = false,
     accentMode: Boolean = false,
 ) : Overlay() {
 
     private val circleFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = if (accentMode) AndroidColor.argb(155, 220, 38, 38) else AndroidColor.argb(115, 252, 165, 165)
+        color = when {
+            heatMode -> AndroidColor.argb(235, 255, 255, 255)
+            accentMode -> AndroidColor.argb(155, 220, 38, 38)
+            else -> AndroidColor.argb(115, 252, 165, 165)
+        }
         style = Paint.Style.FILL
     }
 
     private val circleStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = if (accentMode) AndroidColor.argb(230, 153, 27, 27) else AndroidColor.argb(200, 200, 70, 70)
+        color = when {
+            heatMode -> AndroidColor.argb(180, 120, 120, 120)
+            accentMode -> AndroidColor.argb(230, 153, 27, 27)
+            else -> AndroidColor.argb(200, 200, 70, 70)
+        }
         style = Paint.Style.STROKE
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = if (accentMode) AndroidColor.parseColor("#FFFFFF") else AndroidColor.parseColor("#5C1010")
+        color = when {
+            heatMode -> AndroidColor.parseColor("#111827")
+            accentMode -> AndroidColor.parseColor("#FFFFFF")
+            else -> AndroidColor.parseColor("#5C1010")
+        }
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         textAlign = Paint.Align.CENTER
     }
@@ -1672,6 +1737,7 @@ private fun attachReportClusterOverlay(
     selectedCity: String,
     decor: CityOutlineDecor,
     mapSeverityFilter: PotholeSeverity?,
+    heatEnabled: Boolean = false,
 ) {
     decor.clusters?.let { map.overlays.remove(it) }
     decor.clusters = null
@@ -1686,10 +1752,71 @@ private fun attachReportClusterOverlay(
     val overlay = ReportClusterMarkersOverlay(
         mapView = map,
         clusters = clusters,
-        accentMode = mapSeverityFilter == PotholeSeverity.CRITICAL,
+        heatMode = heatEnabled,
+        accentMode = !heatEnabled && mapSeverityFilter == PotholeSeverity.CRITICAL,
     )
     decor.clusters = overlay
     map.overlays.add(overlay)
+}
+
+private class CityOutlineDecor(
+    var dim: Polygon? = null,
+    var edge: Polyline? = null,
+    var areaHeat: AreaDensityHeatOverlay? = null,
+    var regionLabels: RegionNameLabelsOverlay? = null,
+    var cityName: CityNameOverlay? = null,
+    var clusters: ReportClusterMarkersOverlay? = null,
+)
+
+private fun removeAreaHeatOverlay(map: MapView, decor: CityOutlineDecor) {
+    decor.areaHeat?.let { map.overlays.remove(it) }
+    decor.areaHeat = null
+}
+
+/**
+ * Area ward choropleth under clusters (color only). Bengaluru only; no-op for other cities.
+ */
+private fun refreshAreaHeatOverlay(
+    map: MapView,
+    selectedCity: String,
+    decor: CityOutlineDecor,
+    mapSeverityFilter: PotholeSeverity?,
+    heatEnabled: Boolean,
+) {
+    if (!heatEnabled || CityMetroKeys.canonical(selectedCity) != "BENGALURU" ||
+        !BengaluruGbaWards.isInitialized()
+    ) {
+        removeAreaHeatOverlay(map, decor)
+        return
+    }
+    val bbox = metroBboxForCity(selectedCity) ?: run {
+        removeAreaHeatOverlay(map, decor)
+        return
+    }
+    val reports = reportsForAreaHeat(
+        RecentReportsRepository.reportsForMapInMetro(selectedCity, bbox),
+        mapSeverityFilter,
+    )
+    val counts = countReportsByWardKey(reports) { lat, lon ->
+        BengaluruGbaWards.findWard(lat, lon)?.wardKey
+    }
+    val existing = decor.areaHeat
+    if (existing != null) {
+        existing.updateDensity(counts)
+        return
+    }
+    val overlay = AreaDensityHeatOverlay(
+        mapView = map,
+        polygons = BengaluruGbaWards.allPolygons(),
+        countsByWardKey = counts,
+    )
+    decor.areaHeat = overlay
+    val dimIdx = decor.dim?.let { map.overlays.indexOf(it) } ?: -1
+    if (dimIdx >= 0) {
+        map.overlays.add(dimIdx + 1, overlay)
+    } else {
+        map.overlays.add(0, overlay)
+    }
 }
 
 private fun refreshReportClusterOverlayOnly(
@@ -1697,23 +1824,29 @@ private fun refreshReportClusterOverlayOnly(
     selectedCity: String,
     decor: CityOutlineDecor,
     mapSeverityFilter: PotholeSeverity?,
+    heatEnabled: Boolean = false,
 ) {
     attachReportClusterOverlay(
         map = map,
         selectedCity = selectedCity,
         decor = decor,
         mapSeverityFilter = mapSeverityFilter,
+        heatEnabled = heatEnabled,
     )
+    refreshAreaHeatOverlay(
+        map = map,
+        selectedCity = selectedCity,
+        decor = decor,
+        mapSeverityFilter = mapSeverityFilter,
+        heatEnabled = heatEnabled,
+    )
+    // Keep clusters above heat after re-attach.
+    decor.clusters?.let { clusters ->
+        map.overlays.remove(clusters)
+        map.overlays.add(clusters)
+    }
     map.invalidate()
 }
-
-private class CityOutlineDecor(
-    var dim: Polygon? = null,
-    var edge: Polyline? = null,
-    var regionLabels: RegionNameLabelsOverlay? = null,
-    var cityName: CityNameOverlay? = null,
-    var clusters: ReportClusterMarkersOverlay? = null,
-)
 
 /**
  * City title at the outline centroid; drawn on the map canvas so it pans with the city border.
@@ -1754,17 +1887,37 @@ private class CityNameOverlay(
     }
 }
 
+/**
+ * Curated locality label on the home map (CARTO basemap has no built-in place names).
+ *
+ * G-lite tiering (v1.0.4): [minZoom] gates appearance; optional [maxZoom] hides macro names when
+ * zoomed in; [priority] breaks grid ties (higher wins). Macro labels with minZoom â‰¤ 10.35 get a
+ * default maxZoom of 11.9 when [maxZoom] is null.
+ *
+ * Street-level road names are not in scope â€” see backlog #14 deferred options.
+ */
 private data class RegionLabelSpec(
     val lat: Double,
     val lon: Double,
     val text: String,
     val minZoom: Double,
-)
+    val maxZoom: Double? = null,
+    /** Higher wins a grid cell when two labels compete; 0 = auto from [minZoom]. */
+    val priority: Int = 0,
+) {
+    fun effectiveMaxZoom(): Double? =
+        maxZoom ?: if (minZoom <= 10.35) 11.9 else null
+
+    fun drawPriority(): Int =
+        if (priority != 0) priority
+        else if (minZoom <= 10.35) 400 - (minZoom * 10).toInt()
+        else (minZoom * 10).toInt()
+}
 
 /**
  * Region names: one typeface + text size from map zoom only (not per-label), so labels look uniform.
  * [labelRevealSlack] delays finer labels until zoomed in, keeping city overview readable without extra
- * work per frame (same loop as before; pan smoothness unchanged — still gated by [drawSuppressed]).
+ * work per frame (same loop as before; pan smoothness unchanged â€” still gated by [drawSuppressed]).
  */
 private class RegionNameLabelsOverlay(
     private val mapView: MapView,
@@ -1772,10 +1925,14 @@ private class RegionNameLabelsOverlay(
 ) : Overlay() {
 
     /** Broader (lower minZoom) names win screen slots when zoomed out. */
-    private val specsMacroFirst = specs.sortedBy { it.minZoom }
+    private val specsMacroFirst = specs.sortedWith(
+        compareByDescending<RegionLabelSpec> { it.drawPriority() }.thenBy { it.minZoom },
+    )
 
     /** When zoomed in (slack low), prefer finer labels so hyperlocal names are not blocked by macro cells. */
-    private val specsMicroFirst = specs.sortedByDescending { it.minZoom }
+    private val specsMicroFirst = specs.sortedWith(
+        compareByDescending<RegionLabelSpec> { it.minZoom }.thenByDescending { it.drawPriority() },
+    )
 
     private val gridOccupied = HashSet<Long>(256)
 
@@ -1804,9 +1961,11 @@ private class RegionNameLabelsOverlay(
         val cellPx = labelGridCellPx(zoom, d)
         val scr = Point()
         gridOccupied.clear()
-        val ordered = if (slack < 0.34) specsMicroFirst else specsMacroFirst
+        val ordered = if (slack < 0.36) specsMicroFirst else specsMacroFirst
         for (spec in ordered) {
             if (zoom + 1e-6 < spec.minZoom + slack) continue
+            val hideAbove = spec.effectiveMaxZoom()
+            if (hideAbove != null && zoom > hideAbove + 1e-6) continue
             if (!vis.contains(spec.lat, spec.lon)) continue
             pProjection.toPixels(GeoPoint(spec.lat, spec.lon), scr)
             val ix = floor(scr.x / cellPx).toInt()
@@ -1828,11 +1987,12 @@ private fun regionLabelTextSizePx(zoom: Double, density: Float): Float {
 
 /**
  * When zoomed out, require extra zoom beyond each spec's [RegionLabelSpec.minZoom] before drawing,
- * so minor areas stay hidden until the user zooms in; slack → ~0 by ~14.5 so finer labels can appear.
+ * so minor areas stay hidden until the user zooms in; slack â†’ ~0 by ~14.5 so finer labels can appear.
  */
 private fun labelRevealSlack(zoom: Double): Double {
     val z = zoom.coerceIn(8.8, 20.0)
-    return (2.18 * (1.0 - (z - 8.85) / 5.45)).coerceAtLeast(0.0)
+    // G-lite: slightly lower slack (~14%) so names appear closer to minZoom (Google-like tiers).
+    return (1.88 * (1.0 - (z - 8.85) / 5.45)).coerceAtLeast(0.0)
 }
 
 /** Screen-space cell size for label de-overlap: large when zoomed out (few names), shrinks as you zoom in. */
@@ -2040,10 +2200,27 @@ private val bengaluruRegionLabelSpecs: List<RegionLabelSpec> = listOf(
     RegionLabelSpec(12.825, 77.518, "Kaggalipura", 14.05),
     RegionLabelSpec(12.805, 77.502, "Thalaghattapura", 13.95),
     RegionLabelSpec(12.785, 77.482, "Kumbalgodu", 14.0),
-    RegionLabelSpec(12.802, 77.395, "Bidadi", 13.85),
+    RegionLabelSpec(12.802, 77.395, "Bidadi Town", 13.85),
     RegionLabelSpec(12.977, 77.518, "Nayandahalli", 13.85),
     RegionLabelSpec(12.935, 77.519, "Rajarajeshwari Arch", 13.9),
     RegionLabelSpec(12.915, 77.485, "Kengeri Town", 13.95),
+    // G-lite v1.0.4 â€” additional Bengaluru localities (area / place names, not street geometry)
+    RegionLabelSpec(13.043, 77.619, "Manyata Tech Park", 10.85),
+    RegionLabelSpec(13.247, 77.708, "Devanahalli", 9.2),
+    RegionLabelSpec(13.006, 77.578, "Sadashivnagar", 11.35),
+    RegionLabelSpec(13.024, 77.594, "RT Nagar", 11.25),
+    RegionLabelSpec(13.004, 77.602, "Benson Town", 11.85),
+    RegionLabelSpec(12.989, 77.587, "Cunningham Road", 12.15),
+    RegionLabelSpec(12.924, 77.638, "Agara", 11.65),
+    RegionLabelSpec(13.198, 77.668, "Kempegowda Airport", 9.0, maxZoom = 10.75),
+    RegionLabelSpec(13.092, 77.580, "Yelahanka New Town", 10.65, maxZoom = 12.2),
+    RegionLabelSpec(12.882, 77.628, "Bommasandra", 11.15),
+    RegionLabelSpec(12.978, 77.572, "Race Course Road", 12.25),
+    RegionLabelSpec(12.962, 77.601, "Richmond Circle", 12.45),
+    RegionLabelSpec(13.035, 77.567, "MS Palya", 12.15),
+    RegionLabelSpec(12.968, 77.701, "Hosur Road", 11.05, maxZoom = 12.5),
+    RegionLabelSpec(13.028, 77.584, "Bellary Road", 10.95, maxZoom = 12.3),
+    RegionLabelSpec(12.946, 77.573, "Vittal Mallya Road", 12.35),
 )
 
 private val mumbaiRegionLabelSpecs: List<RegionLabelSpec> = listOf(
@@ -2575,6 +2752,7 @@ private fun syncCityOutlineDecorations(
     selectedCity: String,
     decor: CityOutlineDecor,
     mapSeverityFilter: PotholeSeverity?,
+    heatEnabled: Boolean = false,
 ) {
     decor.regionLabels?.let { map.overlays.remove(it) }
     decor.regionLabels = null
@@ -2582,6 +2760,7 @@ private fun syncCityOutlineDecorations(
     decor.cityName = null
     decor.clusters?.let { map.overlays.remove(it) }
     decor.clusters = null
+    removeAreaHeatOverlay(map, decor)
     decor.dim?.let { map.overlays.remove(it) }
     decor.edge?.let { map.overlays.remove(it) }
     decor.dim = null
@@ -2637,12 +2816,13 @@ private fun syncCityOutlineDecorations(
         selectedCity = selectedCity,
         decor = decor,
         mapSeverityFilter = mapSeverityFilter,
+        heatEnabled = heatEnabled,
     )
     applyCityMapChromeVisibility(decor, visible = false)
     map.invalidate()
 }
 
-/** Red outline + dim + region labels — only for city overview zoom. */
+/** Red outline + dim + region labels â€” only for city overview zoom. */
 private fun applyCityMapChromeVisibility(decor: CityOutlineDecor, visible: Boolean) {
     decor.dim?.isEnabled = visible
     decor.edge?.isEnabled = visible
@@ -2859,7 +3039,7 @@ private fun MapView.applyMetroDefaultZoom(): Boolean {
     return true
 }
 
-/** Trace to GPS: center on fix and zoom in to street level — never zoom out to city view. */
+/** Trace to GPS: center on fix and zoom in to street level â€” never zoom out to city view. */
 private fun MapView.scheduleFocusOnGps(selectedCity: String, location: Location, attempt: Int = 0) {
     val maxAttempts = 15
     post {
@@ -2963,6 +3143,7 @@ private fun OsmDensityMap(
     gpsPinLocation: Location?,
     gpsAccuracyText: String,
     mapSeverityFilter: PotholeSeverity?,
+    areaHeatEnabled: Boolean,
     onLocateMe: () -> Unit,
     onMapViewControlUsed: () -> Unit,
     onMapTouchChanged: (Boolean) -> Unit,
@@ -2992,6 +3173,9 @@ private fun OsmDensityMap(
     val lastOutlineCity = remember { mutableStateOf<String?>(null) }
     val lastSyncedReportEpoch = remember { mutableIntStateOf(-1) }
     val lastMapSeverityFilter = remember { mutableStateOf<PotholeSeverity?>(null) }
+    val lastAreaHeatEnabled = remember { mutableStateOf(false) }
+    val areaHeatEnabledHolder = remember { object { var enabled: Boolean = false } }
+    areaHeatEnabledHolder.enabled = areaHeatEnabled
     val gpsMarkerRef = remember { arrayOfNulls<Marker>(1) }
     val gpsPinHideRunnable = remember { arrayOfNulls<Runnable>(1) }
     /** Latest GPS fix for map touch hit-test (factory listener reads this each frame). */
@@ -3027,15 +3211,42 @@ private fun OsmDensityMap(
                 cityOutlineDecor.regionLabels?.let { m.overlays.remove(it) }
                 cityOutlineDecor.cityName?.let { m.overlays.remove(it) }
                 cityOutlineDecor.clusters?.let { m.overlays.remove(it) }
+                cityOutlineDecor.areaHeat?.let { m.overlays.remove(it) }
                 cityOutlineDecor.dim?.let { m.overlays.remove(it) }
                 cityOutlineDecor.edge?.let { m.overlays.remove(it) }
                 cityOutlineDecor.regionLabels = null
                 cityOutlineDecor.cityName = null
                 cityOutlineDecor.clusters = null
+                cityOutlineDecor.areaHeat = null
                 cityOutlineDecor.dim = null
                 cityOutlineDecor.edge = null
             }
         }
+    }
+    /**
+     * Apply heat toggle immediately. Relying only on [AndroidView] update can miss the change
+     * until the next map touch (which also refreshes overlays).
+     */
+    LaunchedEffect(areaHeatEnabled, mapSessionId) {
+        var map = mapHolder.map
+        var tries = 0
+        while (map == null && tries < 30) {
+            delay(16)
+            map = mapHolder.map
+            tries++
+        }
+        map ?: return@LaunchedEffect
+        cityOutlineDecor.areaHeat?.drawSuppressed = false
+        refreshReportClusterOverlayOnly(
+            map = map,
+            selectedCity = selectedCity,
+            decor = cityOutlineDecor,
+            mapSeverityFilter = mapSeverityFilter,
+            heatEnabled = areaHeatEnabled,
+        )
+        lastAreaHeatEnabled.value = areaHeatEnabled
+        map.invalidate()
+        map.postInvalidate()
     }
     val zoomHideJob = remember { object { var job: Job? = null } }
     val programmaticCameraMoveRef = remember { booleanArrayOf(false) }
@@ -3080,6 +3291,7 @@ private fun OsmDensityMap(
         cityOutlineDecor.regionLabels?.isEnabled = false
         cityOutlineDecor.cityName?.drawSuppressed = true
         labelOverlayRef[0]?.drawSuppressed = true
+        cityOutlineDecor.areaHeat?.drawSuppressed = true
         action(map)
         map.invalidate()
         map.postDelayed({
@@ -3087,6 +3299,7 @@ private fun OsmDensityMap(
             cityOutlineDecor.regionLabels?.isEnabled = chrome
             cityOutlineDecor.cityName?.drawSuppressed = false
             labelOverlayRef[0]?.drawSuppressed = false
+            cityOutlineDecor.areaHeat?.drawSuppressed = false
             map.invalidate()
         }, 72L)
     }
@@ -3139,6 +3352,7 @@ private fun OsmDensityMap(
             selectedCity = selectedCityHolder.city,
             decor = cityOutlineDecor,
             mapSeverityFilter = mapSeverityFilterHolder.filter,
+            heatEnabled = areaHeatEnabledHolder.enabled,
         )
     }
     touchCallbacks.onMapOrientationChanged = { mapOrientationDeg = it }
@@ -3180,7 +3394,7 @@ private fun OsmDensityMap(
         )
     }
 
-    /** City picker change → full city bbox view (not street/locate). */
+    /** City picker change â†’ full city bbox view (not street/locate). */
     LaunchedEffect(selectedCity, mapSessionId) {
         zoomOutMapUsedSinceMax = false
         val map = mapHolder.map ?: return@LaunchedEffect
@@ -3189,7 +3403,7 @@ private fun OsmDensityMap(
         runProgrammaticCamera { it.scheduleFitCityOverview(selectedCity, overviewRestore) }
     }
 
-    /** Locate button → street-level track view (no city chrome). */
+    /** Locate button â†’ street-level track view (no city chrome). */
     LaunchedEffect(mapLocateEpoch, lastConsumedMapLocateEpoch) {
         if (mapLocateEpoch <= lastConsumedMapLocateEpoch) return@LaunchedEffect
         val map = mapHolder.map ?: return@LaunchedEffect
@@ -3249,7 +3463,7 @@ private fun OsmDensityMap(
                     var panStartLat = 0.0
                     var panStartLon = 0.0
                     var panExceededSlop = false
-                    /** True if 2+ fingers touched in this gesture — avoids treating pinch-zoom as a pan. */
+                    /** True if 2+ fingers touched in this gesture â€” avoids treating pinch-zoom as a pan. */
                     var gestureHadMultiplePointers = false
                     var scrollParentNotified = false
                     fun suspendHeavyOverlaysFromTouch() {
@@ -3259,6 +3473,7 @@ private fun OsmDensityMap(
                         cityOutlineDecor.clusters?.isEnabled = false
                         cityOutlineDecor.cityName?.drawSuppressed = true
                         labelOverlayRef[0]?.drawSuppressed = true
+                        cityOutlineDecor.areaHeat?.drawSuppressed = true
                     }
                     val resumeHeavyOverlaysRunnable = Runnable {
                         val chrome = cityMapChromeVisibleRef[0]
@@ -3268,6 +3483,7 @@ private fun OsmDensityMap(
                         cityOutlineDecor.clusters?.isEnabled = true
                         cityOutlineDecor.cityName?.drawSuppressed = false
                         labelOverlayRef[0]?.drawSuppressed = false
+                        cityOutlineDecor.areaHeat?.drawSuppressed = false
                         invalidate()
                     }
                     val cityReframeAfterIdle = Runnable {
@@ -3455,11 +3671,24 @@ private fun OsmDensityMap(
                         selectedCity = selectedCity,
                         decor = cityOutlineDecor,
                         mapSeverityFilter = mapSeverityFilter,
+                        heatEnabled = areaHeatEnabledHolder.enabled,
                     )
+                    refreshAreaHeatOverlay(
+                        map = view,
+                        selectedCity = selectedCity,
+                        decor = cityOutlineDecor,
+                        mapSeverityFilter = mapSeverityFilter,
+                        heatEnabled = areaHeatEnabledHolder.enabled,
+                    )
+                    cityOutlineDecor.clusters?.let { clusters ->
+                        view.overlays.remove(clusters)
+                        view.overlays.add(clusters)
+                    }
                     view.clampViewportToMetroBounds(selectedCity)
                     lastOutlineCity.value = selectedCity
                     lastSyncedReportEpoch.intValue = recentReportsEpoch
                     lastMapSeverityFilter.value = mapSeverityFilter
+                    lastAreaHeatEnabled.value = areaHeatEnabledHolder.enabled
                 } else if (
                     lastSyncedReportEpoch.intValue != recentReportsEpoch ||
                     lastMapSeverityFilter.value != mapSeverityFilter
@@ -3469,9 +3698,24 @@ private fun OsmDensityMap(
                         selectedCity = selectedCity,
                         decor = cityOutlineDecor,
                         mapSeverityFilter = mapSeverityFilter,
+                        heatEnabled = areaHeatEnabledHolder.enabled,
                     )
                     lastSyncedReportEpoch.intValue = recentReportsEpoch
                     lastMapSeverityFilter.value = mapSeverityFilter
+                }
+                // Backup path if AndroidView update runs; primary apply is LaunchedEffect(areaHeatEnabled).
+                if (areaHeatEnabled != lastAreaHeatEnabled.value) {
+                    cityOutlineDecor.areaHeat?.drawSuppressed = false
+                    refreshReportClusterOverlayOnly(
+                        map = view,
+                        selectedCity = selectedCity,
+                        decor = cityOutlineDecor,
+                        mapSeverityFilter = mapSeverityFilter,
+                        heatEnabled = areaHeatEnabled,
+                    )
+                    lastAreaHeatEnabled.value = areaHeatEnabled
+                    view.invalidate()
+                    view.postInvalidate()
                 }
                 labelOverlayRef[0] = cityOutlineDecor.regionLabels
                 cityOutlineDecor.cityName?.let { cityLabel ->
@@ -3737,6 +3981,8 @@ private fun OsmDensityMap(
                 )
             }
         }
+
+
     }
 }
 
@@ -3923,7 +4169,7 @@ private fun MyReportsSection(
         Text(
             when {
                 total == 0 -> "NONE YET"
-                statFilter == MyReportsStatFilter.TOTAL -> "$total · NEWEST FIRST"
+                statFilter == MyReportsStatFilter.TOTAL -> "$total Â· NEWEST FIRST"
                 else -> "${filteredReports.size} SHOWN"
             },
             fontSize = 12.sp,
@@ -4154,14 +4400,14 @@ private fun MyReportsTabFooter() {
                 .padding(horizontal = 16.dp),
         ) {
             Text(
-                "REPORTS STAY ANONYMOUS TO OTHER USERS • ONLY YOU SEE THIS VIEW",
+                "REPORTS STAY ANONYMOUS TO OTHER USERS â€¢ ONLY YOU SEE THIS VIEW",
                 fontSize = 10.sp,
                 lineHeight = 13.sp,
                 color = Color(0xFF7B7B7B),
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                "CITY GRID • CIVIC REPORTING",
+                "CITY GRID â€¢ CIVIC REPORTING",
                 fontSize = 10.sp,
                 lineHeight = 13.sp,
                 color = Color(0xFF7B7B7B),

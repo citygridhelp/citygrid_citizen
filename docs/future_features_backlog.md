@@ -289,20 +289,35 @@ Submit button shows `SUBMITTING…` + spinner; form locked during save/upload.
 
 ### 14. More map area labels (zoom-based show / hide)
 
-**Status:** Not implemented — enhancement backlog (June 2026).
+**Status:** **Partial — G-lite shipped** (v1.0.4). Deferred options below if more Google-like behavior needed later.
 
-**Problem:** Users want **more neighborhood / area names** as they **zoom in**, and fewer (or none) when **zoomed out** — without cluttering the city overview.
+**Decision (July 2026):** Conservative **G-lite** — keep CARTO `light_nolabels` basemap + custom overlay; small Google-inspired tiering; no labeled-tile switch. Testers wanted more area/place names; **true street geometry labels** remain deferred.
 
-**Current behaviour:** `bengaluruRegionLabelSpecs` (~200 labels) in `HomeScreen.kt` with per-label `minZoom`; many names only appear at high zoom. Coverage may still feel sparse in some areas.
+**Shipped in G-lite (v1.0.4):**
 
-**Rough scope:**
+- [x] **`maxZoom` tiering** — macro labels (minZoom ≤ 10.35) auto-hide above z≈11.9; explicit max on airport / corridor names
+- [x] **`priority`** for grid tie-break (macro wins when zoomed out)
+- [x] **Reduced `labelRevealSlack`** (~14%) — names appear closer to their minZoom
+- [x] **16 new Bengaluru localities** + major corridor names (Hosur Road, Bellary Road, etc.)
+- [x] Duplicate **Bidadi** resolved (`Bidadi Town` vs outer `Bidadi`)
 
-- [ ] Audit missing Bengaluru (and other metro) localities vs user feedback.
-- [ ] Move label specs to `assets/` JSON (see also `future_govt_bbmp_gba_zones.md` Option D).
-- [ ] Tune `minZoom` / optional `maxZoom` per label so labels **appear on zoom in** and **hide on zoom out**.
-- [ ] Performance check with OSMDroid `RegionLabelsOverlay` at high label counts.
+**Files:** `HomeScreen.kt` (`RegionLabelSpec`, `RegionNameLabelsOverlay`, `bengaluruRegionLabelSpecs`).
 
-**Files:** `HomeScreen.kt` (`RegionLabelSpec`, `bengaluruRegionLabelSpecs`, `regionLabelSpecsForCity`).
+#### Deferred options (pick up only if G-lite is not enough)
+
+| Option | What | When to consider |
+|--------|------|------------------|
+| **D — Full tune + bulk names** | Add 50–80+ localities; manual minZoom audit | Testers name many blank pockets after 1.0.4 |
+| **G-full overlay** | Bbox collision, label persistence across zoom, fade | Labels flicker or wrong names win grid cells |
+| **JSON assets** | Move label specs to `assets/*_region_labels.json` | Frequent label edits without Kotlin releases |
+| **E — Labeled tiles** | Switch to CARTO `light_all` / OSM labels | Willing to accept basemap clutter vs pothole markers |
+| **H — Defer further** | No more label work | Ward on report + G-lite sufficient |
+
+**Not in scope (any option):** Full Google-style street network labels without labeled vector tiles or a street GIS layer.
+
+**Problem (original):** Users want **more neighborhood / area names** as they **zoom in**, and fewer when **zoomed out** — without cluttering the city overview.
+
+**Current behaviour:** ~215 Bengaluru labels in `HomeScreen.kt` with per-label `minZoom`, optional `maxZoom`, and grid de-overlap.
 
 ---
 
@@ -324,37 +339,51 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 ---
 
-### 17. GBA division heat map on city map (major)
+### 17. GBA / area heat map on city map (major)
 
-**Status:** Not implemented — enhancement backlog (June 2026). **Major.**
+**Locked product rule (July 2026):** Heat map is **area-wise choropleth** — GBA ward polygons + density fill by report count (same severity filter as clusters). Clusters stay on top. **Color-only for MVP (17.1).** Tap + name popup (17.2) is the **next enhancement**, not required to ship heat.
 
-**Goal:** A **heat-map-style grid** over the **city boundary only** (not outside metro periphery), showing **report density per GBA division**. Divisions with **more reports** use a **stronger red gradient**; fewer reports use a **lighter red**. Toggle via a **new button below the existing City view control** on the map.
+**Status:** **17.1 in progress / shippable** (color heat + Heat toggle on Bengaluru). **17.2 deferred.**
 
-**Context:**
+**Product direction (decided in discussion):**
 
-- Bengaluru GBA (2025): **5 city corporations** — Central, North, East, South, West (369 wards total). See [`future_govt_bbmp_gba_zones.md`](future_govt_bbmp_gba_zones.md).
-- Today: point markers / clusters only; no choropleth or grid heat layer.
-- Requires division **boundaries** inside city metro bbox (GeoJSON/KML from OpenCity or simplified grid cells aligned to corporations).
+| Decision | Detail |
+|----------|--------|
+| Visual style | **Ward-style choropleth** (filled polygons, pale → deep red by report count) — sample looked good |
+| Clusters | Numbered red disks **unchanged** — heat draws **under** clusters |
+| Severity | Heat uses the **same severity filter** as clusters |
+| Geometry for MVP | Official **369 GBA wards** as fill geometry (data already in app) — **do not draw ward numbers** on the map |
+| User orientation (MVP) | Place names via **G-lite labels** + color legend only |
+| Tap / name popup | **Next enhancement (17.2)** — Namma Kasa–style highlight + area name/count card |
+| Named sectors (HSR Sector 1, BTM Phase 2) | **Later** — better for citizens, needs curated polygons; optional after ward choropleth |
+| Soft blob / grid heat | Alternative if choropleth feels too busy; lower priority than ward style |
 
-**Rough scope:**
+#### 17.1 — Choropleth heat layer (core) — ship this first
 
-- [ ] **Data:** Corporation/division polygons clipped to `cityMetroBounds` for Bengaluru (extend later for other cities).
-- [ ] **Counts:** Aggregate `RecentReportsRepository` reports per division (open + in-progress + completed — product rule TBD).
-- [ ] **Map layer:** OSMDroid overlay — filled polygons or grid boxes with red gradient scale (min = pale, max = deep red).
-- [ ] **UI:** Button under **City view** — e.g. “Division heat map” / “GBA density”; mutually exclusive or combinable with city view (TBD).
-- [ ] **Legend:** Small key showing count → color scale.
-- [ ] **Backend:** May share ward/corp boundaries with #10 / GBA doc; optional Supabase table for boundaries + counts cache.
+- [x] **Heat** toggle top-right, in line with **Severity** (Bengaluru only; default **off**; stays on across zoom/locate)
+- [x] Fill ward polygons by report count under current severity filter
+- [x] Soft/light ward boundary strokes (not strong red)
+- [x] Cluster disks: **white + black count** while heat on; **red fill** while heat off
+- [x] Clip / draw only visible wards; Bengaluru first
+- [ ] Legend (“Reports by area”) — **deferred enhancement**
+- [ ] Performance check on mid-range phones with 369 polys
 
-**Depends on:** Division geometry (#10 Option B/C) for accurate boxes; MVP could use rough corporation bounding boxes before full ward polygons.
+#### 17.2 — Interactive area highlight + name popup (next enhancement)
 
-**Files:** `HomeScreen.kt` (map overlays, map controls), new overlay module, `MunicipalContactsRegistry` / GBA corp definitions, possibly `RecentReportsRepository`.
+- [ ] Tap area → highlight outline + card with ward name, corporation, report count
+- [ ] Clusters remain visible on top / taps do not fight cluster interaction
+- [ ] Optional: map ward → friendlier locality title (HSR / BTM) when available
+- [ ] Optional: Fewer → More legend chip on map
 
-**Acceptance criteria:**
+**Files:** `AreaDensityHeatOverlay.kt`, `BengaluruGbaWards.kt`, `HomeScreen.kt` (`OsmDensityMap`).
 
-- [ ] Heat view limited to **inside city periphery** (metro bbox or official outline).
-- [ ] Each GBA division visible with color by relative report count.
-- [ ] Toggling off restores normal marker map.
-- [ ] Performance acceptable on mid-range Android phones.
+**Acceptance criteria (17.1):**
+
+- [x] Heat toggle above map (not on-map FAB); off restores red clusters
+- [x] Severity filter drives fill intensity
+- [x] Heat stays on through zoom / locate / pan until user toggles off (or leaves Bengaluru)
+- [x] Color-only — no tap required
+- [x] Inside GBA / Bengaluru only
 
 ---
 
@@ -415,9 +444,9 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 | When | Focus | Items |
 |------|--------|-------|
-| **Now** | Ship **1.0.3** to Play closed test | Ward routing smoke test; migration `0011` applied |
-| **Next dev sprint (citizen only)** | **#14** map labels, optional **#10.6** corp reference UI | **#12** GPS accuracy shipped in 1.0.3 |
-| **Major (citizen)** | Map analytics | **#17** GBA division heat map |
+| **Now** | Ship **1.0.4** to Play closed test | G-lite map labels; after **1.0.3** (ward + GPS) is live |
+| **Next (citizen)** | **#17.1** color heat map; optional **#10.6** | After 1.0.4 feedback on labels |
+| **Later (citizen)** | **#17.2** area tap + name popup | After heat color ships |
 | **Last (citizen)** | Testing polish | **#19** tap cluster → view reports |
 | **Parked** | Government app | **#9**, **#10.2** seed — [government_app_handover.md](government_app_handover.md) § G1–G8 |
 | **Low / strategic** | Identity | #2 account linking, #3 email history |
@@ -426,14 +455,14 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 | Priority | Suggested order |
 |----------|-----------------|
-| **Next (citizen)** | **#14** map area labels; optional **#10.6** corp reference UI |
-| Optional (citizen) | **#10.6** zone/corp reference UI |
-| Major (citizen) | **#17** GBA heat map |
+| **Next (citizen)** | **#17.1** GBA heat map (color only); optional **#10.6** corp reference UI |
+| Optional (citizen) | **#14** deferred label options (D / G-full / JSON) if G-lite insufficient |
+| Later (citizen) | **#17.2** area tap + name popup |
 | Last (citizen) | **#19** tap map cluster → view reports |
 | **Parked (gov)** | **#9** two-way sync, **#10.2** seed/officers — [government_app_handover.md](government_app_handover.md) |
 | Low / strategic | #2 account linking, #3 email history |
 | Reference only | #1 (document current design) |
-| **Shipped (v1.0.2–1.0.3 + backend)** | #4, #5, #6, **#8**, #11, #12, #13, #15, #16, #18, **#10.0–10.1, #10.4–10.5** GBA boundary/corp/ward routing, map bounds/clusters/severity/GPS pill |
+| **Shipped (v1.0.2–1.0.4 + backend)** | #4, #5, #6, **#8**, #11, #12, #13, #14 G-lite, #15, #16, #18, **#10.0–10.1, #10.4–10.5** GBA boundary/corp/ward routing, map bounds/clusters/severity/GPS pill |
 
 When an item ships, follow **After each implementation — update checklist** at the top of this file. Minimum: mark the item **Shipped** with version + update the **Shipped** row in the tables below.
 
