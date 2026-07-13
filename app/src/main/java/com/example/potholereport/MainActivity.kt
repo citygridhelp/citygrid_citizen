@@ -42,6 +42,9 @@ class MainActivity : ComponentActivity() {
     private var keepSystemSplash = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // If the process already finished cold splash, never hold the system splash again —
+        // otherwise Activity recreate on return-from-background shows a stuck white screen.
+        keepSystemSplash = !AppAutoRefresh.initialSplashCompleted
         setTheme(R.style.Theme_PotholeReport_Launch)
         window.setBackgroundDrawableResource(R.drawable.splash_window_background)
         val splashScreen = installSplashScreen()
@@ -60,13 +63,22 @@ class MainActivity : ComponentActivity() {
             var splashVisible by remember {
                 mutableStateOf(!AppAutoRefresh.initialSplashCompleted)
             }
-            LaunchedEffect(splashVisible) {
-                if (!splashVisible) return@LaunchedEffect
+            LaunchedEffect(Unit) {
+                if (!splashVisible) {
+                    applyPostSplashWindowChrome()
+                    return@LaunchedEffect
+                }
                 val startedAt = System.currentTimeMillis()
                 if (SupabaseClientProvider.isConfigured) {
                     withContext(Dispatchers.IO) {
                         SupabaseAuthRepository.restoreSignedInEmail()
                         AppAutoRefresh.refreshLocalData()
+                        AppAutoRefresh.checkPlayStoreUpdate(this@MainActivity)
+                    }
+                } else {
+                    withContext(Dispatchers.IO) {
+                        AppAutoRefresh.refreshLocalData()
+                        AppAutoRefresh.checkPlayStoreUpdate(this@MainActivity)
                     }
                 }
                 val elapsed = System.currentTimeMillis() - startedAt
@@ -74,14 +86,7 @@ class MainActivity : ComponentActivity() {
                 if (remaining > 0L) delay(remaining)
                 AppAutoRefresh.initialSplashCompleted = true
                 splashVisible = false
-                keepSystemSplash = false
-                setTheme(R.style.Theme_PotholeReport)
-                window.setBackgroundDrawable(
-                    ContextCompat.getDrawable(
-                        this@MainActivity,
-                        R.color.new_app_icon_launcher_background,
-                    ),
-                )
+                applyPostSplashWindowChrome()
             }
             Box(modifier = Modifier.fillMaxSize()) {
                 PotholeReportTheme(dynamicColor = false) {
@@ -115,5 +120,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun applyPostSplashWindowChrome() {
+        keepSystemSplash = false
+        setTheme(R.style.Theme_PotholeReport)
+        window.setBackgroundDrawable(
+            ContextCompat.getDrawable(
+                this,
+                R.color.new_app_icon_launcher_background,
+            ),
+        )
     }
 }

@@ -941,7 +941,7 @@ private fun ReportAndTrackSection(
         val cityChipBorderWidth = if (metroMatchesGps) 2.5.dp else 2.dp
 
         Column(modifier = Modifier.weight(1f)) {
-            Text("$selectedCity â€¢ POTHOLE DENSITY", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text("$selectedCity - POTHOLE DENSITY", fontWeight = FontWeight.Bold, fontSize = 14.sp)
             CityWeatherSubline(selectedCity = selectedCity)
         }
 
@@ -1034,9 +1034,9 @@ private fun ReportAndTrackSection(
     val gpsAccuracyText = remember(gpsPinLocation?.accuracy, gpsPinLocation?.time) {
         val loc = gpsPinLocation
         if (loc != null && loc.hasAccuracy()) {
-            "GPS Â±${loc.accuracy.toInt().coerceAtLeast(1)}m"
+            "GPS +/-${loc.accuracy.toInt().coerceAtLeast(1)}m"
         } else {
-            "GPS searchingâ€¦"
+            "GPS searching..."
         }
     }
     Row(
@@ -1888,48 +1888,69 @@ private class CityNameOverlay(
 }
 
 /**
- * Curated locality label on the home map (CARTO basemap has no built-in place names).
+ * Curated place label on the home map (CARTO basemap has no built-in place names).
  *
- * G-lite tiering (v1.0.4): [minZoom] gates appearance; optional [maxZoom] hides macro names when
- * zoomed in; [priority] breaks grid ties (higher wins). Macro labels with minZoom â‰¤ 10.35 get a
- * default maxZoom of 11.9 when [maxZoom] is null.
- *
- * Street-level road names are not in scope â€” see backlog #14 deferred options.
+ * Google-like tiers (#14): on zoom-out, STREET names drop first, then LANDMARK,
+ * then LOCALITY, then DISTRICT; MACRO (outer towns) stay longest but hide when zoomed in.
  */
+private enum class MapLabelTier(
+    val defaultMinZoom: Double,
+    val defaultMaxZoom: Double?,
+    /** Higher preferred when the map is zoomed out. */
+    val zoomOutPriority: Int,
+) {
+    MACRO(9.05, 11.75, 520),
+    DISTRICT(10.45, 13.05, 430),
+    LOCALITY(11.85, 14.45, 330),
+    LANDMARK(12.95, null, 230),
+    STREET(14.05, null, 130),
+    ;
+
+    companion object {
+        fun fromMinZoom(minZoom: Double): MapLabelTier = when {
+            minZoom <= 9.85 -> MACRO
+            minZoom <= 11.25 -> DISTRICT
+            minZoom <= 12.65 -> LOCALITY
+            minZoom <= 13.55 -> LANDMARK
+            else -> STREET
+        }
+    }
+}
+
 private data class RegionLabelSpec(
     val lat: Double,
     val lon: Double,
     val text: String,
     val minZoom: Double,
     val maxZoom: Double? = null,
-    /** Higher wins a grid cell when two labels compete; 0 = auto from [minZoom]. */
+    /** Higher wins a grid cell when two labels compete; 0 = auto from [tier]. */
     val priority: Int = 0,
+    val tier: MapLabelTier = MapLabelTier.fromMinZoom(minZoom),
 ) {
     fun effectiveMaxZoom(): Double? =
-        maxZoom ?: if (minZoom <= 10.35) 11.9 else null
+        maxZoom ?: tier.defaultMaxZoom
 
     fun drawPriority(): Int =
         if (priority != 0) priority
-        else if (minZoom <= 10.35) 400 - (minZoom * 10).toInt()
-        else (minZoom * 10).toInt()
+        else tier.zoomOutPriority - (minZoom * 2.0).toInt()
 }
 
 /**
  * Region names: one typeface + text size from map zoom only (not per-label), so labels look uniform.
  * [labelRevealSlack] delays finer labels until zoomed in, keeping city overview readable without extra
- * work per frame (same loop as before; pan smoothness unchanged â€” still gated by [drawSuppressed]).
+ * work per frame (same loop as before; pan smoothness unchanged - still gated by [drawSuppressed]).
  */
 private class RegionNameLabelsOverlay(
     private val mapView: MapView,
     specs: List<RegionLabelSpec>,
 ) : Overlay() {
 
-    /** Broader (lower minZoom) names win screen slots when zoomed out. */
+    /** Broader (higher zoom-out priority) names win screen slots when zoomed out. */
     private val specsMacroFirst = specs.sortedWith(
         compareByDescending<RegionLabelSpec> { it.drawPriority() }.thenBy { it.minZoom },
     )
 
-    /** When zoomed in (slack low), prefer finer labels so hyperlocal names are not blocked by macro cells. */
+    /** When zoomed in, prefer finer labels (street / landmark) so hyperlocal names are not blocked. */
     private val specsMicroFirst = specs.sortedWith(
         compareByDescending<RegionLabelSpec> { it.minZoom }.thenByDescending { it.drawPriority() },
     )
@@ -1987,240 +2008,280 @@ private fun regionLabelTextSizePx(zoom: Double, density: Float): Float {
 
 /**
  * When zoomed out, require extra zoom beyond each spec's [RegionLabelSpec.minZoom] before drawing,
- * so minor areas stay hidden until the user zooms in; slack â†’ ~0 by ~14.5 so finer labels can appear.
+ * so streets/landmarks stay hidden until the user zooms in; slack -> ~0 by ~14.2.
  */
 private fun labelRevealSlack(zoom: Double): Double {
     val z = zoom.coerceIn(8.8, 20.0)
-    // G-lite: slightly lower slack (~14%) so names appear closer to minZoom (Google-like tiers).
-    return (1.88 * (1.0 - (z - 8.85) / 5.45)).coerceAtLeast(0.0)
+    // #14: slightly tighter than G-lite so tier minZoom reads more like Google Maps.
+    return (1.55 * (1.0 - (z - 8.85) / 5.25)).coerceAtLeast(0.0)
 }
 
 /** Screen-space cell size for label de-overlap: large when zoomed out (few names), shrinks as you zoom in. */
 private fun labelGridCellPx(zoom: Double, density: Float): Float {
     val z = zoom.coerceIn(9.0, 18.0).toFloat()
-    return (132f - 5.1f * (z - 9f)).coerceIn(36f, 128f) * density
+    return (128f - 5.4f * (z - 9f)).coerceIn(32f, 124f) * density
 }
 
 private fun packGridKey(ix: Int, iy: Int): Long = ix.toLong() shl 32 or (iy.toLong() and 0xffffffffL)
 
 private val bengaluruRegionLabelSpecs: List<RegionLabelSpec> = listOf(
-    RegionLabelSpec(13.07, 77.80, "Hoskote", 9.0),
-    RegionLabelSpec(12.905, 77.485, "Kengeri", 9.0),
-    RegionLabelSpec(13.10, 77.42, "Nelamangala", 9.1),
-    RegionLabelSpec(12.80, 77.37, "Bidadi", 9.1),
-    RegionLabelSpec(12.77, 77.78, "Attibele", 9.1),
-    RegionLabelSpec(12.98, 77.75, "Whitefield", 9.55),
-    RegionLabelSpec(12.85, 77.66, "Electronic City", 9.55),
-    RegionLabelSpec(13.10, 77.60, "Yelahanka", 9.55),
-    RegionLabelSpec(13.02, 77.59, "Hebbal", 9.55),
-    RegionLabelSpec(13.00, 77.68, "KR Puram", 9.75),
-    RegionLabelSpec(12.93, 77.78, "Sarjapur", 9.85),
-    RegionLabelSpec(12.9716, 77.5946, "Majestic", 10.1),
-    RegionLabelSpec(12.95, 77.70, "Marathahalli", 10.1),
-    RegionLabelSpec(13.03, 77.50, "Peenya", 10.1),
-    RegionLabelSpec(12.99, 77.55, "Rajajinagar", 10.35),
-    RegionLabelSpec(12.935, 77.58, "Jayanagar", 10.35),
-    RegionLabelSpec(12.925, 77.545, "Banashankari", 10.35),
-    RegionLabelSpec(12.907, 77.59, "JP Nagar", 10.35),
-    RegionLabelSpec(12.978, 77.638, "Indiranagar", 10.45),
-    RegionLabelSpec(12.98, 77.615, "Ulsoor", 10.55),
-    RegionLabelSpec(12.93, 77.66, "Bellandur", 10.85),
-    RegionLabelSpec(12.938, 77.745, "Varthur", 10.85),
-    RegionLabelSpec(12.935, 77.62, "Koramangala", 10.85),
-    RegionLabelSpec(12.912, 77.64, "HSR Layout", 11.05),
-    RegionLabelSpec(12.916, 77.605, "BTM Layout", 11.05),
-    RegionLabelSpec(12.963, 77.645, "Domlur", 11.25),
-    RegionLabelSpec(12.99, 77.695, "Mahadevapura", 11.25),
-    RegionLabelSpec(13.035, 77.665, "Ramamurthy Nagar", 11.35),
-    RegionLabelSpec(13.03, 77.64, "Hennur", 11.35),
-    RegionLabelSpec(13.039, 77.55, "Jalahalli", 11.45),
-    RegionLabelSpec(13.006, 77.59, "Malleshwaram", 11.45),
-    RegionLabelSpec(12.948, 77.57, "Basavanagudi", 11.55),
-    RegionLabelSpec(13.10, 77.625, "Jakkur", 11.15),
-    RegionLabelSpec(13.058, 77.645, "Thanisandra", 11.35),
-    RegionLabelSpec(12.972, 77.6068, "MG Road", 11.65),
-    RegionLabelSpec(12.948, 77.583, "Lalbagh", 11.75),
-    RegionLabelSpec(12.886, 77.575, "Bannerghatta", 11.25),
-    RegionLabelSpec(13.00, 77.566, "Vijayanagar", 11.25),
-    RegionLabelSpec(12.905, 77.52, "Kumaraswamy Layout", 11.85),
-    RegionLabelSpec(12.939, 77.627, "Ejipura", 12.05),
-    RegionLabelSpec(12.996, 77.669, "Brookefield", 11.95),
-    RegionLabelSpec(13.02, 77.52, "Nagasandra", 11.85),
-    RegionLabelSpec(12.995, 77.715, "Kadugodi", 12.0),
-    RegionLabelSpec(12.978, 77.712, "Hoodi", 12.15),
-    RegionLabelSpec(12.962, 77.718, "Graphite India", 12.35),
-    RegionLabelSpec(12.938, 77.712, "Panathur", 12.25),
-    RegionLabelSpec(12.915, 77.735, "Kaikondrahalli", 12.4),
-    RegionLabelSpec(12.905, 77.748, "Carmelaram", 12.35),
-    RegionLabelSpec(12.9195, 77.6215, "Silk Board", 12.1),
-    RegionLabelSpec(12.968, 77.592, "Cubbon Park", 12.2),
-    RegionLabelSpec(12.989, 77.592, "High Grounds", 12.3),
-    RegionLabelSpec(13.008, 77.614, "Frazer Town", 12.25),
-    RegionLabelSpec(13.015, 77.625, "Cox Town", 12.35),
-    RegionLabelSpec(13.022, 77.645, "Kammanahalli", 12.4),
-    RegionLabelSpec(13.015, 77.655, "Banaswadi", 12.35),
-    RegionLabelSpec(13.045, 77.625, "Nagawara", 12.45),
-    RegionLabelSpec(13.028, 77.64, "Kalyan Nagar", 12.45),
-    RegionLabelSpec(13.01, 77.54, "Nandini Layout", 12.5),
-    RegionLabelSpec(13.015, 77.555, "Mahalakshmi Layout", 12.45),
-    RegionLabelSpec(12.99, 77.52, "Laggere", 12.55),
-    RegionLabelSpec(12.975, 77.485, "Herohalli", 12.55),
-    RegionLabelSpec(12.925, 77.51, "Rajarajeshwari Nagar", 12.35),
-    RegionLabelSpec(12.87, 77.58, "Begur", 12.3),
-    RegionLabelSpec(12.895, 77.57, "Gottigere", 12.5),
-    RegionLabelSpec(12.905, 77.565, "Konanakunte", 12.55),
-    RegionLabelSpec(12.965, 77.665, "CV Raman Nagar", 12.4),
-    RegionLabelSpec(12.955, 77.655, "Kodihalli", 12.55),
-    RegionLabelSpec(12.978, 77.705, "Doddanekundi", 12.35),
-    RegionLabelSpec(12.935, 77.59, "St Johns Road", 12.6),
-    RegionLabelSpec(12.988, 77.628, "Shivajinagar", 12.5),
-    RegionLabelSpec(12.975, 77.625, "Richmond Town", 12.65),
-    RegionLabelSpec(12.965, 77.615, "Austin Town", 12.65),
-    RegionLabelSpec(12.959, 77.656, "Murugeshpalya", 12.7),
-    RegionLabelSpec(13.05, 77.57, "Mathikere", 12.55),
-    RegionLabelSpec(13.065, 77.59, "Sanjaynagar", 12.6),
-    RegionLabelSpec(12.945, 77.605, "Adugodi", 12.75),
-    RegionLabelSpec(12.928, 77.625, "Neelasandra", 12.75),
-    RegionLabelSpec(12.918, 77.622, "Madiwala", 12.45),
-    RegionLabelSpec(12.982, 77.75, "Gunjur", 12.85),
-    RegionLabelSpec(12.905, 77.74, "Chandapura", 12.5),
-    RegionLabelSpec(12.835, 77.68, "Jigani", 12.6),
-    RegionLabelSpec(13.115, 77.57, "Sahakara Nagar", 12.4),
-    RegionLabelSpec(13.08, 77.52, "Hesaraghatta", 12.7),
-    RegionLabelSpec(12.99, 77.73, "Bellandur Lake", 13.0),
-    RegionLabelSpec(12.97, 77.64, "Langford Town", 12.85),
-    RegionLabelSpec(13.002, 77.568, "Okalipuram", 12.9),
-    RegionLabelSpec(12.958, 77.648, "HAL", 13.15),
-    RegionLabelSpec(12.935, 77.688, "Bellandur SEZ", 13.25),
-    RegionLabelSpec(12.902, 77.625, "Arekere", 13.2),
-    RegionLabelSpec(12.888, 77.605, "Gottigere South", 13.35),
-    RegionLabelSpec(12.915, 77.535, "Pattanagere", 13.3),
-    RegionLabelSpec(12.945, 77.495, "Kengeri Satellite Town", 13.25),
-    RegionLabelSpec(12.998, 77.505, "Peenya Industrial", 13.35),
-    RegionLabelSpec(13.048, 77.505, "T Dasarahalli", 13.4),
-    RegionLabelSpec(13.072, 77.535, "Chikkabanavara", 13.45),
-    RegionLabelSpec(13.085, 77.605, "Kodigehalli", 13.35),
-    RegionLabelSpec(13.065, 77.615, "Hebbal Kempapura", 13.4),
-    RegionLabelSpec(13.042, 77.665, "HBR Layout", 13.45),
-    RegionLabelSpec(13.028, 77.675, "HRBR Layout", 13.5),
-    RegionLabelSpec(13.008, 77.675, "Kasturi Nagar", 13.45),
-    RegionLabelSpec(12.992, 77.665, "Jeevan Bheemanagar", 13.5),
-    RegionLabelSpec(12.968, 77.725, "Hope Farm", 13.35),
-    RegionLabelSpec(12.942, 77.698, "Seegehalli", 13.55),
-    RegionLabelSpec(12.918, 77.672, "Haralur Road", 13.5),
-    RegionLabelSpec(12.916, 77.619, "Madiwala Checkpost", 13.45),
-    RegionLabelSpec(12.942, 77.592, "Wilson Garden", 13.55),
-    RegionLabelSpec(12.932, 77.572, "Srinagar", 13.6),
-    RegionLabelSpec(12.918, 77.558, "Banashankari 3rd Stage", 13.55),
-    RegionLabelSpec(12.905, 77.538, "Chikkalasandra", 13.6),
-    RegionLabelSpec(12.895, 77.52, "Uttarahalli", 13.55),
-    RegionLabelSpec(12.882, 77.535, "Subramanyapura", 13.65),
-    RegionLabelSpec(12.868, 77.52, "Poornaprajna Layout", 13.65),
-    RegionLabelSpec(12.948, 77.505, "Nagarbhavi", 13.45),
-    RegionLabelSpec(12.965, 77.495, "Moodalapalya", 13.55),
-    RegionLabelSpec(12.985, 77.52, "Kamakshipalya", 13.5),
-    RegionLabelSpec(12.992, 77.535, "Chord Road", 13.55),
-    RegionLabelSpec(13.005, 77.52, "Goraguntepalya", 13.5),
-    RegionLabelSpec(13.018, 77.545, "Yeshwanthpur Industry", 13.45),
-    RegionLabelSpec(12.978, 77.655, "Indiranagar 100ft", 13.6),
-    RegionLabelSpec(12.952, 77.628, "Shanthinagar", 13.65),
-    RegionLabelSpec(12.938, 77.615, "Adugodi Lake", 13.7),
-    RegionLabelSpec(12.922, 77.598, "Tavarekere", 13.65),
-    RegionLabelSpec(12.908, 77.615, "Suddaguntepalya", 13.7),
-    RegionLabelSpec(12.895, 77.595, "Roopena Agrahara", 13.65),
-    RegionLabelSpec(12.878, 77.62, "Muneshwara Nagar", 13.75),
-    RegionLabelSpec(12.865, 77.645, "Bommanahalli", 13.55),
-    RegionLabelSpec(12.852, 77.665, "Hongasandra", 13.7),
-    RegionLabelSpec(12.838, 77.68, "Singasandra", 13.65),
-    RegionLabelSpec(12.825, 77.695, "Hosa Road", 13.55),
-    RegionLabelSpec(12.998, 77.738, "Varthur Kodi", 13.6),
-    RegionLabelSpec(13.018, 77.728, "Siddapura", 13.75),
-    RegionLabelSpec(13.035, 77.71, "Whitefield HO", 13.65),
-    RegionLabelSpec(12.988, 77.738, "Gunjur Village", 13.8),
-    RegionLabelSpec(12.972, 77.752, "Balagere", 13.85),
-    RegionLabelSpec(12.955, 77.765, "Bellandur Gate", 13.75),
-    RegionLabelSpec(13.055, 77.58, "RMV Extension", 13.55),
-    RegionLabelSpec(13.075, 77.565, "Sanjay Nagar West", 13.65),
-    RegionLabelSpec(13.088, 77.59, "Yelahanka New Town", 13.45),
-    RegionLabelSpec(13.095, 77.615, "Kogilu", 13.7),
-    RegionLabelSpec(13.068, 77.665, "Thanisandra Main Road", 13.65),
-    RegionLabelSpec(13.045, 77.695, "Hennur Bande", 13.75),
-    RegionLabelSpec(13.022, 77.705, "Kothanur", 13.8),
-    RegionLabelSpec(12.988, 77.585, "Sheshadripuram", 13.7),
-    RegionLabelSpec(12.978, 77.575, "Chamrajpet", 13.75),
-    RegionLabelSpec(12.968, 77.565, "Fort Area", 13.85),
-    RegionLabelSpec(12.958, 77.555, "Kalasipalya", 13.9),
-    RegionLabelSpec(12.948, 77.598, "Lalbagh West Gate", 13.75),
-    RegionLabelSpec(12.942, 77.636, "Koramangala 8th Block", 13.85),
-    RegionLabelSpec(12.935, 77.618, "Koramangala 4th Block", 13.9),
-    RegionLabelSpec(12.937, 77.629, "Ejipura Signal", 13.95),
-    RegionLabelSpec(12.935, 77.615, "Sony World Signal", 14.0),
-    RegionLabelSpec(12.936, 77.610, "Forum Mall area", 14.05),
-    RegionLabelSpec(12.930, 77.622, "Koramangala Inner", 14.1),
-    RegionLabelSpec(12.995, 77.668, "Old Airport Road", 13.65),
-    RegionLabelSpec(13.008, 77.688, "Wind Tunnel Road", 13.85),
-    RegionLabelSpec(13.022, 77.698, "Murphy Town", 13.9),
-    RegionLabelSpec(12.965, 77.738, "Panathur Road", 13.8),
-    RegionLabelSpec(12.948, 77.728, "Sarjapur Road", 13.55),
-    RegionLabelSpec(12.918, 77.712, "Wipro SEZ", 13.75),
-    RegionLabelSpec(12.905, 77.702, "RGA Tech Park", 13.85),
-    RegionLabelSpec(12.892, 77.692, "Sompura Gate", 13.9),
-    RegionLabelSpec(12.878, 77.685, "Dommasandra", 14.0),
-    RegionLabelSpec(12.865, 77.675, "Chandapura Anekal", 13.95),
-    RegionLabelSpec(12.852, 77.665, "Hebbagodi", 13.85),
-    RegionLabelSpec(12.838, 77.655, "Electronic City Phase 2", 13.7),
-    RegionLabelSpec(12.825, 77.645, "Konappana Agrahara", 13.75),
-    RegionLabelSpec(12.812, 77.635, "Bommasandra Industrial", 13.8),
-    RegionLabelSpec(12.798, 77.625, "Jigani Industrial", 13.85),
-    RegionLabelSpec(12.785, 77.615, "Anekal Town", 13.65),
-    RegionLabelSpec(12.772, 77.605, "Attibele Industrial", 13.7),
-    RegionLabelSpec(13.105, 77.645, "Kannuru", 13.75),
-    RegionLabelSpec(13.118, 77.665, "Hosuru Road", 13.8),
-    RegionLabelSpec(13.128, 77.685, "Budigere Cross", 13.85),
-    RegionLabelSpec(13.138, 77.705, "Old Madras Road", 13.55),
-    RegionLabelSpec(13.148, 77.725, "Hoskote Industrial", 13.65),
-    RegionLabelSpec(13.088, 77.755, "Narasapura", 14.0),
-    RegionLabelSpec(13.058, 77.735, "Seegehalli Cross", 13.95),
-    RegionLabelSpec(13.042, 77.715, "Hope Farm Junction", 13.7),
-    RegionLabelSpec(13.025, 77.695, "Kundalahalli Gate", 13.75),
-    RegionLabelSpec(13.012, 77.678, "Graphite India Main", 13.8),
-    RegionLabelSpec(12.998, 77.662, "ITPL Main Road", 13.65),
-    RegionLabelSpec(12.985, 77.648, "Brookefield Mall", 13.85),
-    RegionLabelSpec(12.972, 77.635, "Kundalahalli Colony", 13.9),
-    RegionLabelSpec(12.958, 77.622, "Marathahalli Bridge", 13.95),
-    RegionLabelSpec(12.945, 77.612, "Marathahalli ORR", 13.85),
-    RegionLabelSpec(12.932, 77.602, "Devarabisanahalli", 14.0),
-    RegionLabelSpec(12.918, 77.592, "Bellandur ORR", 13.95),
-    RegionLabelSpec(12.905, 77.582, "Agara Village", 14.05),
-    RegionLabelSpec(12.892, 77.572, "Iblur Village", 14.1),
-    RegionLabelSpec(12.878, 77.562, "Haralur", 14.0),
-    RegionLabelSpec(12.865, 77.552, "Hulimavu", 13.95),
-    RegionLabelSpec(12.852, 77.542, "Gottigere Forest", 14.15),
-    RegionLabelSpec(12.838, 77.532, "Bannerghatta National Park", 13.9),
-    RegionLabelSpec(12.825, 77.518, "Kaggalipura", 14.05),
-    RegionLabelSpec(12.805, 77.502, "Thalaghattapura", 13.95),
-    RegionLabelSpec(12.785, 77.482, "Kumbalgodu", 14.0),
-    RegionLabelSpec(12.802, 77.395, "Bidadi Town", 13.85),
-    RegionLabelSpec(12.977, 77.518, "Nayandahalli", 13.85),
-    RegionLabelSpec(12.935, 77.519, "Rajarajeshwari Arch", 13.9),
-    RegionLabelSpec(12.915, 77.485, "Kengeri Town", 13.95),
-    // G-lite v1.0.4 â€” additional Bengaluru localities (area / place names, not street geometry)
-    RegionLabelSpec(13.043, 77.619, "Manyata Tech Park", 10.85),
-    RegionLabelSpec(13.247, 77.708, "Devanahalli", 9.2),
-    RegionLabelSpec(13.006, 77.578, "Sadashivnagar", 11.35),
-    RegionLabelSpec(13.024, 77.594, "RT Nagar", 11.25),
-    RegionLabelSpec(13.004, 77.602, "Benson Town", 11.85),
-    RegionLabelSpec(12.989, 77.587, "Cunningham Road", 12.15),
-    RegionLabelSpec(12.924, 77.638, "Agara", 11.65),
-    RegionLabelSpec(13.198, 77.668, "Kempegowda Airport", 9.0, maxZoom = 10.75),
-    RegionLabelSpec(13.092, 77.580, "Yelahanka New Town", 10.65, maxZoom = 12.2),
-    RegionLabelSpec(12.882, 77.628, "Bommasandra", 11.15),
-    RegionLabelSpec(12.978, 77.572, "Race Course Road", 12.25),
-    RegionLabelSpec(12.962, 77.601, "Richmond Circle", 12.45),
-    RegionLabelSpec(13.035, 77.567, "MS Palya", 12.15),
-    RegionLabelSpec(12.968, 77.701, "Hosur Road", 11.05, maxZoom = 12.5),
-    RegionLabelSpec(13.028, 77.584, "Bellary Road", 10.95, maxZoom = 12.3),
-    RegionLabelSpec(12.946, 77.573, "Vittal Mallya Road", 12.35),
+    RegionLabelSpec(13.07, 77.8, "Hoskote", 9.0, tier = MapLabelTier.MACRO),
+    RegionLabelSpec(12.905, 77.485, "Kengeri", 9.0, tier = MapLabelTier.MACRO),
+    RegionLabelSpec(13.1, 77.42, "Nelamangala", 9.1, tier = MapLabelTier.MACRO),
+    RegionLabelSpec(12.8, 77.37, "Bidadi", 9.1, tier = MapLabelTier.MACRO),
+    RegionLabelSpec(12.77, 77.78, "Attibele", 9.1, tier = MapLabelTier.MACRO),
+    RegionLabelSpec(13.247, 77.708, "Devanahalli", 9.2, tier = MapLabelTier.MACRO),
+    RegionLabelSpec(13.198, 77.668, "Kempegowda Airport", 9.0, maxZoom = 10.75, tier = MapLabelTier.MACRO),
+    RegionLabelSpec(12.98, 77.75, "Whitefield", 9.55, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.85, 77.66, "Electronic City", 9.55, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(13.1, 77.6, "Yelahanka", 9.55, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(13.02, 77.59, "Hebbal", 9.55, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(13.0, 77.68, "KR Puram", 9.75, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.93, 77.78, "Sarjapur", 9.85, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.9716, 77.5946, "Majestic", 10.1, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.95, 77.7, "Marathahalli", 10.1, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(13.03, 77.5, "Peenya", 10.1, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.99, 77.55, "Rajajinagar", 10.35, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.935, 77.58, "Jayanagar", 10.35, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.925, 77.545, "Banashankari", 10.35, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.907, 77.59, "JP Nagar", 10.35, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.978, 77.638, "Indiranagar", 10.45, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.93, 77.66, "Bellandur", 10.85, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.938, 77.745, "Varthur", 10.85, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.935, 77.62, "Koramangala", 10.85, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.912, 77.64, "HSR Layout", 11.05, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.916, 77.605, "BTM Layout", 11.05, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(13.043, 77.619, "Manyata Tech Park", 10.85, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.886, 77.575, "Bannerghatta", 11.25, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(13.1, 77.625, "Jakkur", 11.15, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.99, 77.695, "Mahadevapura", 11.25, tier = MapLabelTier.DISTRICT),
+    RegionLabelSpec(12.98, 77.615, "Ulsoor", 11.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.963, 77.645, "Domlur", 11.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.035, 77.665, "Ramamurthy Nagar", 11.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.03, 77.64, "Hennur", 11.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.039, 77.55, "Jalahalli", 11.65, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.006, 77.59, "Malleshwaram", 11.65, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.948, 77.57, "Basavanagudi", 11.65, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.058, 77.645, "Thanisandra", 11.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.0, 77.566, "Vijayanagar", 11.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.905, 77.52, "Kumaraswamy Layout", 12.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.939, 77.627, "Ejipura", 12.15, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.996, 77.669, "Brookefield", 12.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.02, 77.52, "Nagasandra", 12.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.995, 77.715, "Kadugodi", 12.15, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.978, 77.712, "Hoodi", 12.25, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.938, 77.712, "Panathur", 12.35, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.915, 77.735, "Kaikondrahalli", 12.45, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.905, 77.748, "Carmelaram", 12.45, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.008, 77.614, "Frazer Town", 12.35, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.015, 77.625, "Cox Town", 12.45, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.022, 77.645, "Kammanahalli", 12.5, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.015, 77.655, "Banaswadi", 12.45, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.045, 77.625, "Nagawara", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.028, 77.64, "Kalyan Nagar", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.01, 77.54, "Nandini Layout", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.015, 77.555, "Mahalakshmi Layout", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.925, 77.51, "Rajarajeshwari Nagar", 12.45, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.87, 77.58, "Begur", 12.4, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.895, 77.57, "Gottigere", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.905, 77.565, "Konanakunte", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.965, 77.665, "CV Raman Nagar", 12.5, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.978, 77.705, "Doddanekundi", 12.45, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.988, 77.628, "Shivajinagar", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.918, 77.622, "Madiwala", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.865, 77.645, "Bommanahalli", 12.65, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.882, 77.628, "Bommasandra", 12.25, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.006, 77.578, "Sadashivnagar", 12.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.024, 77.594, "RT Nagar", 12.0, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.004, 77.602, "Benson Town", 12.25, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.924, 77.638, "Agara", 12.15, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.092, 77.58, "Yelahanka New Town", 11.85, maxZoom = 13.4, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.948, 77.505, "Nagarbhavi", 12.65, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.895, 77.52, "Uttarahalli", 12.75, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.042, 77.665, "HBR Layout", 12.75, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.028, 77.675, "HRBR Layout", 12.8, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.952, 77.628, "Shanthinagar", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.942, 77.592, "Wilson Garden", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.902, 77.665, "Kasavanahalli", 12.35, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.888, 77.668, "Haralur", 12.45, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.915, 77.668, "Ibbalur", 12.4, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.928, 77.672, "Ambalipura", 12.45, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.908, 77.682, "Kasavanahalli Lake", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.898, 77.655, "Haralur Gate", 13.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.922, 77.655, "HSR Sector 1", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.918, 77.648, "HSR Sector 2", 12.65, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.912, 77.652, "HSR Sector 3", 12.7, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.908, 77.645, "HSR Sector 4", 12.75, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.905, 77.638, "HSR Sector 5", 12.8, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.902, 77.632, "HSR Sector 6", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.898, 77.625, "HSR Sector 7", 12.9, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.925, 77.615, "BTM 1st Stage", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.915, 77.61, "BTM 2nd Stage", 12.65, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.908, 77.602, "BTM Layout Stage 3", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.935, 77.635, "Koramangala 1st Block", 13.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.932, 77.628, "Koramangala 5th Block", 13.1, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.928, 77.622, "Koramangala 6th Block", 13.15, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.942, 77.636, "Koramangala 8th Block", 13.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.868, 77.62, "Begur Road Area", 12.9, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.855, 77.64, "Hongasandra", 12.95, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.842, 77.655, "Singasandra", 12.9, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.828, 77.67, "Hosa Road Area", 12.95, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.955, 77.655, "Kodihalli", 12.75, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.968, 77.682, "HAL 2nd Stage", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.975, 77.625, "Richmond Town", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.965, 77.615, "Austin Town", 12.9, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.989, 77.592, "High Grounds", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.05, 77.57, "Mathikere", 12.75, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.065, 77.59, "Sanjaynagar", 12.8, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.115, 77.57, "Sahakara Nagar", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.945, 77.605, "Adugodi", 12.9, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.928, 77.625, "Neelasandra", 12.95, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.982, 77.75, "Gunjur", 12.95, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.905, 77.74, "Chandapura", 12.65, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.835, 77.68, "Jigani", 12.75, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.918, 77.558, "Banashankari 3rd Stage", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.905, 77.538, "Chikkalasandra", 12.9, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.882, 77.535, "Subramanyapura", 12.95, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.008, 77.675, "Kasturi Nagar", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.992, 77.665, "Jeevan Bheemanagar", 12.9, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.088, 77.59, "Yelahanka Satellite", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.978, 77.575, "Chamrajpet", 13.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.988, 77.585, "Sheshadripuram", 12.95, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.802, 77.395, "Bidadi Town", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.948, 77.583, "Lalbagh", 12.55, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.968, 77.592, "Cubbon Park", 12.55, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.962, 77.718, "Graphite India", 12.85, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.9195, 77.6215, "Silk Board", 12.65, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.958, 77.648, "HAL", 13.05, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.935, 77.688, "Bellandur SEZ", 13.15, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.918, 77.712, "Wipro SEZ", 13.25, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.905, 77.702, "RGA Tech Park", 13.35, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.838, 77.655, "Electronic City Phase 2", 13.15, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.985, 77.648, "Brookefield Mall", 13.35, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.936, 77.61, "Forum Mall", 13.45, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.99, 77.73, "Bellandur Lake", 13.15, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.838, 77.532, "Bannerghatta National Park", 13.25, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.902, 77.672, "Bren Imperia", 13.35, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.908, 77.675, "Shriram Chirping Woods", 13.55, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.895, 77.67, "PLaY Arena", 13.45, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.918, 77.68, "ORCHIDS School Haralur", 13.65, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.912, 77.66, "Total Mall HSR", 13.55, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.925, 77.632, "Sony World Signal", 13.55, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.998, 77.662, "ITPL", 13.15, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(13.018, 77.545, "Yeshwanthpur", 12.95, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.977, 77.518, "Nayandahalli", 13.15, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.948, 77.598, "Lalbagh West Gate", 13.35, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.942, 77.698, "Seegehalli", 13.45, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(13.025, 77.695, "Kundalahalli Gate", 13.35, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(13.042, 77.715, "Hope Farm Junction", 13.25, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.892, 77.692, "Sompura Gate", 13.55, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.878, 77.685, "Dommasandra", 13.45, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.852, 77.665, "Hebbagodi", 13.35, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.825, 77.645, "Konappana Agrahara", 13.45, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.812, 77.635, "Bommasandra Industrial", 13.5, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.785, 77.615, "Anekal Town", 13.25, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(13.055, 77.58, "RMV Extension", 13.15, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(13.095, 77.615, "Kogilu", 13.35, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(13.022, 77.705, "Kothanur", 13.45, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.955, 77.765, "Bellandur Gate", 13.35, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.972, 77.752, "Balagere", 13.55, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.902, 77.625, "Arekere", 13.25, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.865, 77.552, "Hulimavu", 13.35, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.892, 77.572, "Iblur", 13.45, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.932, 77.602, "Devarabisanahalli", 13.55, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.958, 77.622, "Marathahalli Bridge", 13.55, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.972, 77.6068, "MG Road", 13.85, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.989, 77.587, "Cunningham Road", 14.05, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.978, 77.572, "Race Course Road", 14.1, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.962, 77.601, "Richmond Circle", 14.15, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.968, 77.701, "Hosur Road", 13.55, maxZoom = 15.2, tier = MapLabelTier.STREET),
+    RegionLabelSpec(13.028, 77.584, "Bellary Road", 13.45, maxZoom = 15.0, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.946, 77.573, "Vittal Mallya Road", 14.15, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.918, 77.672, "Haralur Main Road", 14.05, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.948, 77.728, "Sarjapur Road", 13.65, maxZoom = 15.3, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.995, 77.668, "Old Airport Road", 13.85, tier = MapLabelTier.STREET),
+    RegionLabelSpec(13.008, 77.688, "Wind Tunnel Road", 14.15, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.965, 77.738, "Panathur Road", 14.05, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.992, 77.535, "Chord Road", 14.05, tier = MapLabelTier.STREET),
+    RegionLabelSpec(13.068, 77.665, "Thanisandra Main Road", 13.95, tier = MapLabelTier.STREET),
+    RegionLabelSpec(13.138, 77.705, "Old Madras Road", 13.65, maxZoom = 15.1, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.825, 77.695, "Hosa Road", 13.85, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.978, 77.655, "100 Feet Road", 14.15, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.935, 77.59, "St Johns Road", 14.2, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.916, 77.619, "Madiwala Checkpost", 14.05, tier = MapLabelTier.STREET),
+    RegionLabelSpec(13.118, 77.665, "Hosuru Road North", 14.0, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.905, 77.668, "15th Main Kasavanahalli", 14.35, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.912, 77.655, "27th Main HSR", 14.25, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.908, 77.648, "24th Main HSR", 14.3, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.922, 77.642, "14th Main HSR", 14.25, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.898, 77.662, "Silver County Road", 14.4, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.935, 77.615, "80 Feet Road Koramangala", 14.2, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.945, 77.612, "Outer Ring Road", 13.75, maxZoom = 15.4, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.918, 77.592, "ORR Bellandur", 13.85, maxZoom = 15.3, tier = MapLabelTier.STREET),
+    // Extra coverage (#14) - north / west / east pockets
+    RegionLabelSpec(12.99, 77.52, "Laggere", 12.75, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.975, 77.485, "Herohalli", 12.8, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.048, 77.505, "T Dasarahalli", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.072, 77.535, "Chikkabanavara", 12.9, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.085, 77.605, "Kodigehalli", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.065, 77.615, "Hebbal Kempapura", 12.9, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.968, 77.725, "Hope Farm", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.915, 77.535, "Pattanagere", 12.95, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.945, 77.495, "Kengeri Satellite Town", 12.9, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.998, 77.505, "Peenya Industrial", 12.95, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.965, 77.495, "Moodalapalya", 12.95, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.985, 77.52, "Kamakshipalya", 12.9, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.005, 77.52, "Goraguntepalya", 12.9, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.922, 77.598, "Tavarekere", 13.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.908, 77.615, "Suddaguntepalya", 13.1, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.895, 77.595, "Roopena Agrahara", 13.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.878, 77.62, "Muneshwara Nagar", 13.15, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.998, 77.738, "Varthur Kodi", 12.95, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.018, 77.728, "Siddapura", 13.15, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.035, 77.71, "Whitefield HO", 13.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.988, 77.738, "Gunjur Village", 13.25, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.075, 77.565, "Sanjay Nagar West", 13.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.045, 77.695, "Hennur Bande", 13.15, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.958, 77.555, "Kalasipalya", 13.25, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.968, 77.565, "Fort Area", 13.2, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.022, 77.698, "Murphy Town", 13.25, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.865, 77.675, "Chandapura Anekal", 13.2, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.798, 77.625, "Jigani Industrial", 13.25, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.772, 77.605, "Attibele Industrial", 13.15, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.105, 77.645, "Kannuru", 13.15, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.128, 77.685, "Budigere Cross", 13.25, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.148, 77.725, "Hoskote Industrial", 13.15, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.088, 77.755, "Narasapura", 13.35, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.058, 77.735, "Seegehalli Cross", 13.3, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.972, 77.635, "Kundalahalli Colony", 13.25, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.945, 77.612, "Marathahalli ORR", 13.2, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.852, 77.542, "Gottigere Forest", 13.4, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.825, 77.518, "Kaggalipura", 13.3, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.805, 77.502, "Thalaghattapura", 13.25, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.785, 77.482, "Kumbalgodu", 13.3, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.935, 77.519, "Rajarajeshwari Arch", 13.25, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.915, 77.485, "Kengeri Town", 13.2, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.035, 77.567, "MS Palya", 12.55, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.959, 77.656, "Murugeshpalya", 13.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.888, 77.605, "Gottigere South", 13.25, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.868, 77.52, "Poornaprajna Layout", 13.15, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.932, 77.572, "Srinagar", 13.1, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.938, 77.615, "Adugodi Lake", 13.2, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.08, 77.52, "Hesaraghatta", 12.95, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.908, 77.705, "Doddakannelli", 12.85, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.922, 77.695, "Eastwood Township", 13.05, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.935, 77.685, "Kadubeesanahalli", 12.95, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.948, 77.675, "Eco Space", 13.25, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.955, 77.668, "Embassy TechVillage", 13.35, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.912, 77.618, "Central Silk Board", 13.15, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.898, 77.648, "Parappana Agrahara", 13.15, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(12.885, 77.635, "Begur Lake", 13.25, tier = MapLabelTier.LANDMARK),
+    RegionLabelSpec(12.875, 77.655, "Beratena Agrahara", 13.2, tier = MapLabelTier.LOCALITY),
+    RegionLabelSpec(13.012, 77.678, "Graphite India Main", 13.35, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.978, 77.712, "ITPL Road", 14.05, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.925, 77.665, "Sarjapur Main Road", 13.95, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.905, 77.658, "Kasavanahalli Main Road", 14.2, tier = MapLabelTier.STREET),
+    RegionLabelSpec(12.918, 77.628, "Hosur Road Silk Board", 14.0, tier = MapLabelTier.STREET),
 )
 
 private val mumbaiRegionLabelSpecs: List<RegionLabelSpec> = listOf(
@@ -4169,7 +4230,7 @@ private fun MyReportsSection(
         Text(
             when {
                 total == 0 -> "NONE YET"
-                statFilter == MyReportsStatFilter.TOTAL -> "$total Â· NEWEST FIRST"
+                statFilter == MyReportsStatFilter.TOTAL -> "$total - NEWEST FIRST"
                 else -> "${filteredReports.size} SHOWN"
             },
             fontSize = 12.sp,
@@ -4400,14 +4461,14 @@ private fun MyReportsTabFooter() {
                 .padding(horizontal = 16.dp),
         ) {
             Text(
-                "REPORTS STAY ANONYMOUS TO OTHER USERS â€¢ ONLY YOU SEE THIS VIEW",
+                "REPORTS STAY ANONYMOUS TO OTHER USERS - ONLY YOU SEE THIS VIEW",
                 fontSize = 10.sp,
                 lineHeight = 13.sp,
                 color = Color(0xFF7B7B7B),
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                "CITY GRID â€¢ CIVIC REPORTING",
+                "CITY GRID - CIVIC REPORTING",
                 fontSize = 10.sp,
                 lineHeight = 13.sp,
                 color = Color(0xFF7B7B7B),

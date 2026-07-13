@@ -289,35 +289,40 @@ Submit button shows `SUBMITTING…` + spinner; form locked during save/upload.
 
 ### 14. More map area labels (zoom-based show / hide)
 
-**Status:** **Partial — G-lite shipped** (v1.0.4). Deferred options below if more Google-like behavior needed later.
+**Status:** **In progress — Google-like tiers + denser Bengaluru names** (post-1.0.5 / next store cut). G-lite shipped in v1.0.4.
 
-**Decision (July 2026):** Conservative **G-lite** — keep CARTO `light_nolabels` basemap + custom overlay; small Google-inspired tiering; no labeled-tile switch. Testers wanted more area/place names; **true street geometry labels** remain deferred.
+**Decision (July 2026):** Keep CARTO `light_nolabels` + custom overlay. **#14 now adds explicit tiers** matching Google zoom-out order: **STREET → LANDMARK → LOCALITY → DISTRICT → MACRO**. True full street-network GIS / labeled tiles still deferred.
 
 **Shipped in G-lite (v1.0.4):**
 
-- [x] **`maxZoom` tiering** — macro labels (minZoom ≤ 10.35) auto-hide above z≈11.9; explicit max on airport / corridor names
-- [x] **`priority`** for grid tie-break (macro wins when zoomed out)
-- [x] **Reduced `labelRevealSlack`** (~14%) — names appear closer to their minZoom
-- [x] **16 new Bengaluru localities** + major corridor names (Hosur Road, Bellary Road, etc.)
-- [x] Duplicate **Bidadi** resolved (`Bidadi Town` vs outer `Bidadi`)
+- [x] **`maxZoom` tiering** — macro labels hide when zoomed in
+- [x] **`priority`** for grid tie-break
+- [x] Reduced `labelRevealSlack`
+- [x] Extra localities + corridor names
 
-**Files:** `HomeScreen.kt` (`RegionLabelSpec`, `RegionNameLabelsOverlay`, `bengaluruRegionLabelSpecs`).
+**Added in #14 (this pass):**
 
-#### Deferred options (pick up only if G-lite is not enough)
+- [x] **`MapLabelTier`** enum: MACRO / DISTRICT / LOCALITY / LANDMARK / STREET
+- [x] Tier-driven default `maxZoom` + zoom-out priority (streets drop first)
+- [x] Tighter reveal slack (more Google-like)
+- [x] **~250 Bengaluru labels** including Kasavanahalli / Haralur / HSR sectors, Bren Imperia + nearby landmarks, more streets
+- [ ] Play smoke test at SE Bangalore zoom ladder (street → landmark → locality)
+- [ ] Optional further bulk names if testers still report blank pockets
 
-| Option | What | When to consider |
-|--------|------|------------------|
-| **D — Full tune + bulk names** | Add 50–80+ localities; manual minZoom audit | Testers name many blank pockets after 1.0.4 |
-| **G-full overlay** | Bbox collision, label persistence across zoom, fade | Labels flicker or wrong names win grid cells |
-| **JSON assets** | Move label specs to `assets/*_region_labels.json` | Frequent label edits without Kotlin releases |
-| **E — Labeled tiles** | Switch to CARTO `light_all` / OSM labels | Willing to accept basemap clutter vs pothole markers |
-| **H — Defer further** | No more label work | Ward on report + G-lite sufficient |
+**Files:** `HomeScreen.kt` (`MapLabelTier`, `RegionLabelSpec`, `RegionNameLabelsOverlay`, `bengaluruRegionLabelSpecs`).
 
-**Not in scope (any option):** Full Google-style street network labels without labeled vector tiles or a street GIS layer.
+#### Still deferred
+
+| Option | What |
+|--------|------|
+| **G-full overlay** | Bbox collision, fade persistence |
+| **JSON assets** | Move specs out of Kotlin |
+| **E — Labeled tiles** | CARTO `light_all` / OSM labels |
+| Full street GIS | Every lane name without vector tiles |
 
 **Problem (original):** Users want **more neighborhood / area names** as they **zoom in**, and fewer when **zoomed out** — without cluttering the city overview.
 
-**Current behaviour:** ~215 Bengaluru labels in `HomeScreen.kt` with per-label `minZoom`, optional `maxZoom`, and grid de-overlap.
+**Current behaviour:** Tiered Bengaluru labels with grid de-overlap; other metros still use minZoom-only lists.
 
 ---
 
@@ -343,7 +348,7 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 **Locked product rule (July 2026):** Heat map is **area-wise choropleth** — GBA ward polygons + density fill by report count (same severity filter as clusters). Clusters stay on top. **Color-only for MVP (17.1).** Tap + name popup (17.2) is the **next enhancement**, not required to ship heat.
 
-**Status:** **17.1 in progress / shippable** (color heat + Heat toggle on Bengaluru). **17.2 deferred.**
+**Status:** **17.1 shipping in v1.0.5** (color heat + Heat toggle on Bengaluru). **17.2 deferred.**
 
 **Product direction (decided in discussion):**
 
@@ -438,15 +443,80 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 ---
 
+### 20. Weekly pothole report digest for citizens (email / in-app)
+
+**Status:** Not implemented — **enhancement backlog** (captured July 2026). Needs product + backend design before build.
+
+**Idea:** Once a week, each interested citizen gets a short **city / GBA performance digest**:
+
+| Digest section | Content (draft) |
+|----------------|-----------------|
+| Volume | Total potholes **reported** in the period (city and/or their wards of interest) |
+| Closure | How many were **closed / completed** by BBMP / GBA |
+| ETA | **GBA average ETAs** (e.g. open → in progress, open → completed) where data exists |
+| Rankings | **Ward-wise rankings** — which ward areas are doing better (closure rate, speed, backlog) |
+
+**Channels (decide later):**
+
+- Email to signed-in users (opt-in preferred)
+- And/or in-app bell / Accountability card summarizing the same week
+
+**Dependencies / open questions:**
+
+- [ ] Aggregate stats from `reports` (status transitions, `ward_*`, corp, timestamps) — may need server-side job + RLS-safe summary tables
+- [ ] Define “closed by BBMP/GBA” precisely (status = completed only? exclude citizen-cancelled?)
+- [ ] ETA definitions and enough completed tickets for stable averages
+- [ ] Ranking formula (closure %, median days open, reports per ward, fairness for small wards)
+- [ ] Opt-in / privacy — city-wide aggregates only; no other citizens’ PII
+- [ ] Cadence: weekly which day/time (IST); first digest after enough live data
+
+**Not in scope for first cut:** Officer-facing dashboards (gov app); real-time live rankings on every home open.
+
+**Reminder trigger:** After 1.0.5+ heat/labels settle and there is steady Bengaluru report volume for meaningful weekly stats.
+
+---
+
+### 21. Accountability — city / ward overview toggle (beyond “my reports”)
+
+**Status:** Not implemented — **enhancement idea** (captured July 2026). **Product still to be refined** before design/build.
+
+**Today:** Accountability shows the signed-in user’s **own** reports and municipal routing details.
+
+**Enhancement idea:** Add a **toggle** on Accountability so the user can switch between:
+
+| Mode | Intent (draft) |
+|------|----------------|
+| **My reports** (current) | Personal tickets + status |
+| **City / ward overview** | Broader view: wards (or corps), report counts, solved vs pending, how long pending, etc. |
+
+**Draft metrics for overview mode (to decide):**
+
+- Reports **open / in progress / completed** per ward (or corporation)
+- **Pending age** (e.g. oldest open, or average days open)
+- Optional link to map heat / ward context
+
+**Open product questions (user wants to think more):**
+
+- [ ] Scope: all GBA vs user’s corporation vs nearby wards only?
+- [ ] Privacy: aggregates only — never other reporters’ names/photos in this tab?
+- [ ] Does overview replace Accountability copy or sit beside personal list?
+- [ ] Performance with 369 wards — list, top-N, or search?
+- [ ] Overlap with **#20** weekly digest and **#17** heat map — avoid three competing “city score” UIs
+
+**Reminder trigger:** After weekly digest (#20) direction is clearer, or when testers ask for city-wide Accountability beyond personal tickets.
+
+---
+
 ## How to use this list
 
 ### Release roadmap (July 2026)
 
 | When | Focus | Items |
 |------|--------|-------|
-| **Now** | Ship **1.0.4** to Play closed test | G-lite map labels; after **1.0.3** (ward + GPS) is live |
-| **Next (citizen)** | **#17.1** color heat map; optional **#10.6** | After 1.0.4 feedback on labels |
-| **Later (citizen)** | **#17.2** area tap + name popup | After heat color ships |
+| **Now** | Ship **1.0.5** to Play closed test | Area heat map (#17.1); resume fix; Play update bell |
+| **Next (citizen)** | **#14** Google-like label tiers; optional **#10.6** | After 1.0.5 |
+| **Later (citizen)** | **#17.2** area tap + name popup | Deferred after heat color |
+| **Later (citizen)** | **#20** weekly digest; **#21** Accountability overview toggle | Needs product design |
 | **Last (citizen)** | Testing polish | **#19** tap cluster → view reports |
 | **Parked** | Government app | **#9**, **#10.2** seed — [government_app_handover.md](government_app_handover.md) § G1–G8 |
 | **Low / strategic** | Identity | #2 account linking, #3 email history |
@@ -455,9 +525,10 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 | Priority | Suggested order |
 |----------|-----------------|
-| **Next (citizen)** | **#17.1** GBA heat map (color only); optional **#10.6** corp reference UI |
-| Optional (citizen) | **#14** deferred label options (D / G-full / JSON) if G-lite insufficient |
-| Later (citizen) | **#17.2** area tap + name popup |
+| **Next (citizen)** | **#14** Google-like label tiers; optional **#10.6** corp reference UI |
+| Shipping now | **#17.1** GBA heat map (color) — **1.0.5** |
+| Later (citizen) | **#17.2** area tap + name popup + heat legend |
+| Later (citizen) | **#20** weekly report digest; **#21** Accountability city/ward overview toggle *(design TBD)* |
 | Last (citizen) | **#19** tap map cluster → view reports |
 | **Parked (gov)** | **#9** two-way sync, **#10.2** seed/officers — [government_app_handover.md](government_app_handover.md) |
 | Low / strategic | #2 account linking, #3 email history |

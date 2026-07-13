@@ -616,7 +616,7 @@ fun NewReportScreen(
                     if (lowGpsAccuracyWarn) {
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "GPS accuracy is ±${gpsAccuracyM!!.toInt()}m — move outdoors for a better fix, " +
+                            "GPS accuracy is +/-${gpsAccuracyM!!.toInt()}m - move outdoors for a better fix, " +
                                 "or use manual entry below.",
                             color = Color(0xFFB45309),
                             fontSize = 8.sp,
@@ -627,7 +627,7 @@ fun NewReportScreen(
                     if (lowGpsAccuracyBlock) {
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "GPS accuracy is ±${gpsAccuracyM!!.toInt()}m — too low to auto-tag. " +
+                            "GPS accuracy is +/-${gpsAccuracyM!!.toInt()}m - too low to auto-tag. " +
                                 "Retry GPS, enable location, or paste coordinates manually.",
                             color = Color(0xFFB71C1C),
                             fontSize = 8.sp,
@@ -1083,7 +1083,7 @@ private fun LocationBlock(
                     )
                     if (!usingManualLocation && gpsAccuracyM != null) {
                         Text(
-                            "GPS ±${gpsAccuracyM.toInt()}m",
+                            "GPS +/-${gpsAccuracyM.toInt()}m",
                             fontSize = 8.sp,
                             color = when {
                                 gpsAccuracyM > GPS_SUBMIT_BLOCK_ACCURACY_METERS -> Color(0xFFB71C1C)

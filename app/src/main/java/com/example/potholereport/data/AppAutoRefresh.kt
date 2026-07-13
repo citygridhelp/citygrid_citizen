@@ -59,4 +59,11 @@ object AppAutoRefresh {
             false
         }
     }
+
+    /**
+     * Play Store “newer version available” check (bell notification). Safe to call often;
+     * no-op when not installed from Play.
+     */
+    suspend fun checkPlayStoreUpdate(context: android.content.Context): Boolean =
+        AppUpdateChecker.checkAndNotifyIfNeeded(context)
 }

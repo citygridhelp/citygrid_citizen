@@ -56,6 +56,7 @@ fun AuthNavHost(
 ) {
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
     var isSignedIn by rememberSaveable { mutableStateOf(false) }
     var signedInEmail by rememberSaveable { mutableStateOf("") }
     var anonymousUserId by rememberSaveable { mutableStateOf("") }
@@ -182,6 +183,10 @@ fun AuthNavHost(
         if (SupabaseClientProvider.isConfigured) {
             reconcileSessionFromSupabase()
         }
+        withContext(Dispatchers.IO) {
+            AppAutoRefresh.checkPlayStoreUpdate(context)
+        }
+        bumpUiRefresh()
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -195,8 +200,11 @@ fun AuthNavHost(
                     if (!sawBackgroundStop || lastBackgroundAtMs <= 0L) return@LifecycleEventObserver
                     sawBackgroundStop = false
                     val idleMs = System.currentTimeMillis() - lastBackgroundAtMs
-                    if (idleMs >= AppAutoRefresh.RESUME_IDLE_MS) {
-                        scope.launch {
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            AppAutoRefresh.checkPlayStoreUpdate(context)
+                        }
+                        if (idleMs >= AppAutoRefresh.RESUME_IDLE_MS) {
                             withContext(Dispatchers.IO) {
                                 if (isSignedIn) {
                                     AppAutoRefresh.refreshSignedInData(cityKey = null, reporterUserId = anonymousUserId)
@@ -204,8 +212,8 @@ fun AuthNavHost(
                                     AppAutoRefresh.refreshLocalData()
                                 }
                             }
-                            bumpUiRefresh()
                         }
+                        bumpUiRefresh()
                     }
                 }
                 else -> Unit
