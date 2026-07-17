@@ -173,13 +173,13 @@ Citizen push to `reports` + `evidence` is implemented. Full round-trip (status t
 | Phase | Work | Scope | Status |
 |-------|------|-------|--------|
 | **1** | Add **5 GBA corporation assignee keys + centroids** | `MunicipalContactsRegistry.kt` — keys `BENGALURU:GBA_CENTRAL` … `GBA_WEST`; legacy 8 BBMP keys kept for lookup | **Shipped** (v1.0.3 dev) |
-| **2** | Update **`officers.json` / Supabase seed** with GBA commissioners | **Parked** — gov backlog **G3**; placeholder commissioners in seed until verified | **Parked** |
+| **2** | Update **`officers.json` / Supabase seed** with GBA commissioners | **Done in repo** (16 Jul 2026) — names in seed + `MunicipalContactsRegistry`; re-run `seed_officers.mjs` on Supabase when deploying gov | **Shipped (data)** — see [`gba_official_contacts.md`](gba_official_contacts.md) |
 | **3** | **Re-map existing reports** (optional backfill) or **new reports only** | **Forward-only** — historical rows keep old 8-zone `assignee_key` | **Decided** |
 | **4** | **Accountability UI labels** — “East Corporation” vs “East Zone” | `AccountabilitySection.kt` GBA copy | **Shipped** (v1.0.3 dev) |
 
 **Suggested implementation order:** Phase **1 → 2 → 4** in one release; Phase **3** decided before seed deploy (backfill vs forward-only).
 
-**Depends on:** Verified commissioner names from BBMP/GBA public directory.
+**Depends on:** Verified commissioner names — snapshot in [`gba_official_contacts.md`](gba_official_contacts.md) (16 Jul 2026). Ward officers still pending public GBA roster.
 
 #### 10.5 — Ward-level routing at submit (citizen app)
 
@@ -289,40 +289,35 @@ Submit button shows `SUBMITTING…` + spinner; form locked during save/upload.
 
 ### 14. More map area labels (zoom-based show / hide)
 
-**Status:** **In progress — Google-like tiers + denser Bengaluru names** (post-1.0.5 / next store cut). G-lite shipped in v1.0.4.
+**Status:** **Shipped** (v1.0.6) — basemap labels. Seeded lat/lon overlay removed.
 
-**Decision (July 2026):** Keep CARTO `light_nolabels` + custom overlay. **#14 now adds explicit tiers** matching Google zoom-out order: **STREET → LANDMARK → LOCALITY → DISTRICT → MACRO**. True full street-network GIS / labeled tiles still deferred.
+**Decision:** Use CARTO **`light_all`** tiles for place / street / water names. No curated coordinate seed. Heat, clusters, and city outline stay custom overlays on top. Label readability via **per-tile bitmap remap** (`CartoBasemapLabelDarkener`) — mid-grey label ink only; no ColorMatrix (that was fading / thinning streets). Useful max zoom capped at **18** so roads are not lost to overscaled tiles.
 
-**Shipped in G-lite (v1.0.4):**
+**This pass:**
 
-- [x] **`maxZoom` tiering** — macro labels hide when zoomed in
-- [x] **`priority`** for grid tie-break
-- [x] Reduced `labelRevealSlack`
-- [x] Extra localities + corridor names
+- [x] Home map tile source → `light_all`
+- [x] Removed `MapPlaceLabels.kt` and custom seeded label overlay
+- [x] Heat / clusters / GPS / outline untouched
+- [x] Darker labels via per-tile mid-grey remap (home + report detail); ColorMatrix removed
+- [x] Max zoom capped at 18 so residential streets stay visible at closest zoom
+- [ ] Visual smoke test (label density vs heat readability)
+- [ ] Optional later: toggle nolabels vs light_all if heat feels crowded
 
-**Added in #14 (this pass):**
-
-- [x] **`MapLabelTier`** enum: MACRO / DISTRICT / LOCALITY / LANDMARK / STREET
-- [x] Tier-driven default `maxZoom` + zoom-out priority (streets drop first)
-- [x] Tighter reveal slack (more Google-like)
-- [x] **~250 Bengaluru labels** including Kasavanahalli / Haralur / HSR sectors, Bren Imperia + nearby landmarks, more streets
-- [ ] Play smoke test at SE Bangalore zoom ladder (street → landmark → locality)
-- [ ] Optional further bulk names if testers still report blank pockets
-
-**Files:** `HomeScreen.kt` (`MapLabelTier`, `RegionLabelSpec`, `RegionNameLabelsOverlay`, `bengaluruRegionLabelSpecs`).
+**Files:** `CartoBasemapLabelDarkener.kt`, `HomeScreen.kt`, `ReportDetailDialog.kt`.
 
 #### Still deferred
 
 | Option | What |
 |--------|------|
-| **G-full overlay** | Bbox collision, fade persistence |
-| **JSON assets** | Move specs out of Kotlin |
-| **E — Labeled tiles** | CARTO `light_all` / OSM labels |
-| Full street GIS | Every lane name without vector tiles |
+| Nudge label darken strength | Tune mid-grey scale if names still light |
+| Restore zoom 19 | Only if CARTO street detail is sharp enough without upscaling |
+| Custom overlay again | Only if product needs names CARTO doesn't show |
+| **JSON / OSM vector labels** | Full control without tiles |
+| Heat-friendly label dimming | If `light_all` fights ward colors |
 
-**Problem (original):** Users want **more neighborhood / area names** as they **zoom in**, and fewer when **zoomed out** — without cluttering the city overview.
+**Problem (original):** Users want neighborhood / street / water names when zooming.
 
-**Current behaviour:** Tiered Bengaluru labels with grid de-overlap; other metros still use minZoom-only lists.
+**Current behaviour:** Names come from the basemap provider (dynamic with zoom/pan), not app-seeded coordinates.
 
 ---
 
@@ -513,9 +508,8 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 | When | Focus | Items |
 |------|--------|-------|
-| **Now** | Ship **1.0.5** to Play closed test | Area heat map (#17.1); resume fix; Play update bell |
-| **Next (citizen)** | **#14** Google-like label tiers; optional **#10.6** | After 1.0.5 |
-| **Later (citizen)** | **#17.2** area tap + name popup | Deferred after heat color |
+| **Now** | Ship **1.0.6** to Play closed test | Basemap place/street names (#14); stronger label contrast |
+| **Next (citizen)** | **#17.2** area tap + name popup; optional **#10.6** | After 1.0.6 |
 | **Later (citizen)** | **#20** weekly digest; **#21** Accountability overview toggle | Needs product design |
 | **Last (citizen)** | Testing polish | **#19** tap cluster → view reports |
 | **Parked** | Government app | **#9**, **#10.2** seed — [government_app_handover.md](government_app_handover.md) § G1–G8 |
@@ -525,15 +519,14 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 | Priority | Suggested order |
 |----------|-----------------|
-| **Next (citizen)** | **#14** Google-like label tiers; optional **#10.6** corp reference UI |
-| Shipping now | **#17.1** GBA heat map (color) — **1.0.5** |
-| Later (citizen) | **#17.2** area tap + name popup + heat legend |
-| Later (citizen) | **#20** weekly report digest; **#21** Accountability city/ward overview toggle *(design TBD)* |
+| Shipping now | **#14** basemap labels — **1.0.6** |
+| **Next (citizen)** | **#17.2** area tap + name popup + heat legend; optional **#10.6** |
+| Later (citizen) | **#20** weekly digest; **#21** Accountability overview |
 | Last (citizen) | **#19** tap map cluster → view reports |
 | **Parked (gov)** | **#9** two-way sync, **#10.2** seed/officers — [government_app_handover.md](government_app_handover.md) |
 | Low / strategic | #2 account linking, #3 email history |
 | Reference only | #1 (document current design) |
-| **Shipped (v1.0.2–1.0.4 + backend)** | #4, #5, #6, **#8**, #11, #12, #13, #14 G-lite, #15, #16, #18, **#10.0–10.1, #10.4–10.5** GBA boundary/corp/ward routing, map bounds/clusters/severity/GPS pill |
+| **Shipped (v1.0.2–1.0.6 + backend)** | #4, #5, #6, **#8**, #11, #12, #13, #14 (G-lite → basemap), #15, #16, #17.1, #18, **#10.0–10.1, #10.4–10.5** GBA boundary/corp/ward routing, map bounds/clusters/severity/GPS pill |
 
 When an item ships, follow **After each implementation — update checklist** at the top of this file. Minimum: mark the item **Shipped** with version + update the **Shipped** row in the tables below.
 

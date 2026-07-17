@@ -114,7 +114,7 @@ GBA detail (corporations, wards, officers): [`future_govt_bbmp_gba_zones.md`](fu
 |---|-------------|-------|------------|
 | **G1** | **Consume ward routing from citizen reports** | Read `ward_key`, `ward_number`, `ward_name`, `assignee_*` on sync; show in gov ticket detail | Migration `0011` applied (citizen already pushes these) |
 | **G2** | **GBA corporation registry mirror** | Update `MunicipalOfficersRegistry.kt` — 5 corp keys (`BENGALURU:GBA_*`); keep legacy 8 BBMP keys for old tickets | Citizen `MunicipalContactsRegistry.kt` (shipped 1.0.3) |
-| **G3** | **Verify commissioner names + seed officers** | Edit `officers.json` with real GBA names; run `seed_officers.mjs`; test CG GOVT logins | Public GBA/BBMP directory |
+| **G3** | **Verify commissioner names + seed officers** | **Citizen/repo done** — [`gba_official_contacts.md`](gba_official_contacts.md) + `officers.json` + registry (16 Jul 2026). Still run `seed_officers.mjs` against Supabase for CG GOVT logins | Re-verify after IAS transfers |
 | **G4** | **Two-way sync (#9)** | Status OPEN → IN PROGRESS → COMPLETED round-trip; completion proof photos visible in citizen **My Reports** | Gov workflow RPCs + citizen pull merge |
 | **G5** | **Gov map — corp / ward overlays** | Choropleth or boundary lines on gov map; queue filter by corporation / ward | Ward asset `bengaluru_gba_wards.json` (shared from citizen repo) |
 | **G6** | **Ward officers (369)** | Ward-level assignee keys + roster — **not** in citizen app | Official ward officer directory |

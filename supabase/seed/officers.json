@@ -1,23 +1,23 @@
 [
   {
     "email": "commissioner.bengaluru@bbmp.gov.in",
-    "displayName": "Municipal Commissioner",
+    "displayName": "Sri M. Maheshwar Rao, IAS",
     "role": "COMMISSIONER",
     "cityKey": "BENGALURU",
-    "position": "Municipal Commissioner",
-    "corporation": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
-    "zoneLabel": "All zones",
+    "position": "Chief Commissioner, Greater Bengaluru Authority",
+    "corporation": "Greater Bengaluru Authority (GBA)",
+    "zoneLabel": "All corporations",
     "assigneeKey": "",
     "fieldOfficerKey": ""
   },
   {
     "email": "admin.bengaluru@bbmp.gov.in",
-    "displayName": "BBMP City Administrator",
+    "displayName": "GBA City Administrator (seed)",
     "role": "COMMISSIONER",
     "cityKey": "BENGALURU",
     "position": "City Administrator",
-    "corporation": "Bruhat Bengaluru Mahanagara Palike (BBMP)",
-    "zoneLabel": "All zones",
+    "corporation": "Greater Bengaluru Authority (GBA)",
+    "zoneLabel": "All corporations",
     "assigneeKey": "",
     "fieldOfficerKey": ""
   },
@@ -111,7 +111,7 @@
   },
   {
     "email": "gba.central@bbmp.gov.in",
-    "displayName": "GBA Central Corporation Commissioner",
+    "displayName": "Sri G. Jagadeesha, IAS",
     "role": "ZONE_HEAD",
     "cityKey": "BENGALURU",
     "position": "City Corporation Commissioner",
@@ -122,7 +122,7 @@
   },
   {
     "email": "gba.north@bbmp.gov.in",
-    "displayName": "GBA North Corporation Commissioner",
+    "displayName": "Sri Pommala Sunil Kumar, IAS",
     "role": "ZONE_HEAD",
     "cityKey": "BENGALURU",
     "position": "City Corporation Commissioner",
@@ -133,7 +133,7 @@
   },
   {
     "email": "gba.south@bbmp.gov.in",
-    "displayName": "GBA South Corporation Commissioner",
+    "displayName": "Sri Ramesh K.N., IAS",
     "role": "ZONE_HEAD",
     "cityKey": "BENGALURU",
     "position": "City Corporation Commissioner",
@@ -144,7 +144,7 @@
   },
   {
     "email": "gba.east@bbmp.gov.in",
-    "displayName": "GBA East Corporation Commissioner",
+    "displayName": "Sri Ramesh D.S., IAS",
     "role": "ZONE_HEAD",
     "cityKey": "BENGALURU",
     "position": "City Corporation Commissioner",
@@ -155,7 +155,7 @@
   },
   {
     "email": "gba.west@bbmp.gov.in",
-    "displayName": "GBA West Corporation Commissioner",
+    "displayName": "Dr. Rajendra K.V., IAS",
     "role": "ZONE_HEAD",
     "cityKey": "BENGALURU",
     "position": "City Corporation Commissioner",

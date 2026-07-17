@@ -56,28 +56,28 @@ object MunicipalContactsRegistry {
         return r * c
     }
 
-    /** GBA (2025) — five city corporations; routing uses HQ-area centroids. */
+    /** GBA (2025) — five city corporations; officer names: docs/gba_official_contacts.md (as of 16 Jul 2026). */
     private fun gbaCorporationZones(): List<MunicipalZoneRecord> {
         val gba = "Greater Bengaluru Authority (GBA)"
         return listOf(
             zone("BENGALURU", "GBA_CENTRAL", gba, "Bengaluru Central City Corporation",
-                "See official GBA directory", "City Corporation Commissioner",
-                "Bengaluru Central City Corporation, Hudson Circle, Bengaluru, Karnataka 560001",
+                "Sri G. Jagadeesha, IAS", "City Corporation Commissioner",
+                "Bengaluru Central City Corporation, Hudson Circle / PUB Building, Bengaluru, Karnataka 560001",
                 12.9720, 77.5980),
             zone("BENGALURU", "GBA_NORTH", gba, "Bengaluru North City Corporation",
-                "See official GBA directory", "City Corporation Commissioner",
+                "Sri Pommala Sunil Kumar, IAS", "City Corporation Commissioner",
                 "Bengaluru North City Corporation, Yelahanka, Bengaluru, Karnataka 560064",
                 13.100, 77.597),
             zone("BENGALURU", "GBA_SOUTH", gba, "Bengaluru South City Corporation",
-                "See official GBA directory", "City Corporation Commissioner",
+                "Sri Ramesh K.N., IAS", "City Corporation Commissioner",
                 "Bengaluru South City Corporation, Jayanagar, Bengaluru, Karnataka 560041",
                 12.925, 77.583),
             zone("BENGALURU", "GBA_EAST", gba, "Bengaluru East City Corporation",
-                "See official GBA directory", "City Corporation Commissioner",
+                "Sri Ramesh D.S., IAS", "City Corporation Commissioner",
                 "Bengaluru East City Corporation, Mahadevapura, Bengaluru, Karnataka 560037",
                 12.995, 77.715),
             zone("BENGALURU", "GBA_WEST", gba, "Bengaluru West City Corporation",
-                "See official GBA directory", "City Corporation Commissioner",
+                "Dr. Rajendra K.V., IAS", "City Corporation Commissioner",
                 "Bengaluru West City Corporation, Rajarajeshwari Nagar, Bengaluru, Karnataka 560098",
                 12.920, 77.518),
         )
@@ -310,8 +310,8 @@ object MunicipalContactsRegistry {
             cityKey = "BENGALURU",
             corporationName = "Greater Bengaluru Authority (GBA)",
             zoneLabel = "Authority headquarters",
-            officerName = "GBA / BBMP Municipal Commissioner",
-            officerPosition = "Municipal Commissioner",
+            officerName = "Sri M. Maheshwar Rao, IAS",
+            officerPosition = "Chief Commissioner, GBA",
             officeAddress = "BBMP / GBA Head Office, N.R. Square, Bengaluru, Karnataka 560002",
         ),
         "MUMBAI" to MunicipalAssignee(

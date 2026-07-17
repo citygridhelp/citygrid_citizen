@@ -15,7 +15,7 @@ Government + citizen alignment: improve **accountability routing**, **officer ro
 | **GBA city corporations (2025)** | **5** | **Yes** (submit routing) | **No** — parked G2 | `MunicipalContactsRegistry.kt` → `gbaCorporationZones()` |
 | BBMP zones (pre-2025 model) | **8** | lookup only (old reports) | legacy | `MunicipalContactsRegistry.kt` → `bbmpZones()` |
 | GBA wards (2025) | **369** | **Yes** (submit only, not on map) | **No** — parked G5/G6 | `BengaluruGbaWards.kt`, `assets/bengaluru_gba_wards.json` |
-| Zone head officers | 8 JC + 5 GBA placeholders | seed (placeholders) | seed | `supabase/seed/officers.json` — **G3 parked** |
+| Zone head officers | 8 JC (legacy) + **5 named GBA corp commissioners** | seed + registry | seed | [`gba_official_contacts.md`](gba_official_contacts.md) — **G3 partially done**; ward officers still **G6** |
 | Map locality labels | N/A (UX only) | ~200 neighborhoods | — | `HomeScreen.kt` → `bengaluruRegionLabelSpecs` |
 
 **Citizen routing today (v1.0.3):** GPS → point-in-polygon **369 wards** → **5 GBA corporation** assignee + ward snapshot on report → Accountability tab + submit snackbar. Home map shows GBA red outline only (no corp/ward overlays).
@@ -48,22 +48,27 @@ No missing zones for this model. Officer names/addresses should be re-verified f
 
 ---
 
-## Official reference — GBA (2025) — not in app yet
+## Official reference — GBA (2025+) — structure + contacts
 
-Karnataka replaced BBMP with the **Greater Bengaluru Authority (GBA)** and **five city corporations** (369 wards total, notified Nov 2025).
+Karnataka replaced BBMP with the **Greater Bengaluru Authority (GBA)** and **five city corporations** (369 wards total).
 
-| Corporation | HQ | Wards |
-|-------------|-----|-------|
-| Bengaluru Central City Corporation | Hudson Circle | 63 |
+| Corporation | HQ | Wards (approx.) |
+|-------------|-----|-----------------|
+| Bengaluru Central City Corporation | Hudson Circle / PUB | 63 |
 | Bengaluru North City Corporation | Yelahanka | 72 |
 | Bengaluru South City Corporation | Jayanagar | 72 |
 | Bengaluru East City Corporation | Mahadevapura | 50 |
 | Bengaluru West City Corporation | Rajarajeshwari Nagar | 112 |
 
-**Data sources (for implementation):**
+**Commissioners (verified snapshot):** see **[`gba_official_contacts.md`](gba_official_contacts.md)** (as of **16 July 2026**). Wired into `MunicipalContactsRegistry.kt` + `supabase/seed/officers.json`.
+
+**Ward officers:** not in app — legacy BBMP contact CSV kept under [`reference/`](reference/README.md) for research only.
+
+**Data sources:**
 
 - [GBA / BBMP portal](https://bbmp.gov.in/)
-- [OpenCity — GBA Wards Delimitation 2025](https://data.opencity.in/dataset/gba-wards-delimitation-2025) — KML/PDF, 369 wards
+- [OpenCity — GBA Wards Delimitation 2025](https://data.opencity.in/dataset/gba-wards-delimitation-2025)
+- Public transfer / press coverage listed in `gba_official_contacts.md`
 
 ---
 
