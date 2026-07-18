@@ -40,9 +40,10 @@ Related docs:
 | GPS providers tried (report screen) | Last-known from GPS, network, passive; then fresh GPS (**6.5 s** timeout), then network (**3.5 s**) | `fetchBestCalibratedLocation` |
 | Location quality score | `accuracy (m) + ageSeconds × 0.35` — lower is better; age capped at **180 s** | `locationQualityScore` |
 | Map home GPS (similar pipeline) | GPS timeout **6500 ms**, network **3000 ms**, passive fallback **2800 ms** | `HomeScreen.kt` |
-| Accuracy shown on home map | `GPS accuracy: ±Xm` or “searching…” when fix has no accuracy | `HomeScreen.kt` |
+| Accuracy shown on home map | Overlay **top-right on map card**: `GPS ±Xm` or `GPS searching…` | `HomeScreen.kt` (`OsmDensityMap`) |
 | Manual location override | User may paste Maps URL / lat,lng on report screen | `parseMapsInput` |
-| Max accuracy for submit | **None enforced** — poor GPS can still submit (*improvement planned* backlog §12, e.g. warn/block > 50 m) |
+| Max accuracy for submit | **Warn** if GPS > **50 m**; **block** auto-GPS submit if > **100 m** (manual coords bypass) | `NewReportScreen.kt` |
+| Accuracy on report screen | `GPS ±Xm` with green / amber / red by threshold | `LocationBlock` in `NewReportScreen.kt` |
 
 ---
 
@@ -65,16 +66,16 @@ Related docs:
 
 | Assumption | Value | Source |
 |------------|-------|--------|
-| Reports on map | Same `cityKey` and coordinates **inside city metro bbox** | `RecentReportsRepository.reportsForMapInMetro` |
-| Normal map clustering | **6×6 grid** over metro bbox; count = reports per cell | `buildReportGridClusters` |
-| Active critical clustering | **500 m** radius merge | `ACTIVE_CRITICAL_CLUSTER_RADIUS_METERS` |
-| Critical filter | Only **Open / In progress** + **Critical** severity | `attachReportClusterOverlay` |
+| Reports on map | Same `cityKey` and coordinates **inside city boundary** (GBA polygon for Bengaluru; bbox for others) | `RecentReportsRepository.reportsForMapInMetro` |
+| Normal map clustering | Screen-overlap merge: one marker per report; clusters form when circles touch at current zoom | `buildReportScreenOverlapClusters` |
+| Map severity filter | Dropdown: All / Minor / Moderate / Severe / Critical (`mapSeverityFilter`) | `ReportAndTrackSection`, `attachReportClusterOverlay` |
+| Pan/zoom vs severity filter | Severity filter **persists** during pan/zoom | `HomeScreen.kt` |
 | Cluster tap | **No action** — display only (*planned* §19) |
-| Pan/zoom vs critical mode | Pan/zoom **clears** critical filter today (*bug* — fix planned §16) |
-| Region labels (e.g. Bengaluru) | ~200 localities; each has **minZoom** — labels appear only when zoomed in enough | `bengaluruRegionLabelSpecs` |
+| Region labels (Bengaluru) | ~215 curated locality points; G-lite tiering (min/max zoom, priority) | `HomeScreen.kt` `RegionNameLabelsOverlay` |
+| Basemap | CARTO **light_nolabels** — no tile place names (by design) | `CartoPositronNoLabels` |
 | City view vs street view | City label at min zoom band; `CITY_VIEW_ZOOM_EPSILON` controls “at city zoom” | `HomeScreen.kt` |
 | Default selected city | **BENGALURU** | `HomeScreen`, `CityMetroKeys.NAV_FALLBACK_CITY` |
-| Metro bbox example (Bengaluru) | N 13.16, E 77.92, S 12.63, W 77.33 | `cityMetroBounds` |
+| Metro bbox (Bengaluru) | Official **GBA** outer boundary (Sept 2025): N 13.14266, E 77.784361, S 12.833625, W 77.460051; red outline = simplified polygon from OpenCity KML | `BengaluruGbaBoundary.kt`, `bengaluru_gba_boundary.json` |
 
 ---
 
@@ -110,9 +111,9 @@ Related docs:
 
 | Assumption | Value | Source |
 |------------|-------|--------|
-| Assignee selection | **Nearest zone centroid** by GPS within city | `MunicipalAssignmentResolver` → `MunicipalContactsRegistry.nearestAssignee` |
-| Bengaluru zones modeled | **8 BBMP zones** (East, West, South, Mahadevapura, Bommanahalli, RR Nagar, Dasarahalli, Yelahanka) | `MunicipalContactsRegistry.bbmpZones()` |
-| GBA 5 corporations / 369 wards | **Not** used for routing yet | `future_govt_bbmp_gba_zones.md` |
+| Assignee selection | **GBA ward polygon** → corporation assignee (Bengaluru); legacy BBMP zone lookup for old reports | `BengaluruMunicipalRouting`, `BengaluruGbaWards` |
+| Bengaluru zones modeled | **5 GBA corporations** + **369 wards** at submit; legacy 8 BBMP zones lookup-only | `MunicipalContactsRegistry`, `bengaluru_gba_wards.json` |
+| GBA 5 corporations / 369 wards | **Citizen submit + details** (not on home map); gov app parked | `future_govt_bbmp_gba_zones.md`, `government_app_handover.md` |
 | Fallback | City HQ assignee if GPS invalid or no zone match | `fallbackForCity` |
 | Officer data | Public directory snapshots in code + `supabase/seed/officers.json` — **re-verify before production** | Comments in registry |
 

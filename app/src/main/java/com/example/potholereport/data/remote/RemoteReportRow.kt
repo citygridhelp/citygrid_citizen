@@ -34,6 +34,10 @@ data class RemoteReportRow(
     @SerialName("assignee_role") val assigneeRole: String = "",
     @SerialName("assignee_addr") val assigneeAddr: String = "",
 
+    @SerialName("ward_key") val wardKey: String = "",
+    @SerialName("ward_number") val wardNumber: Int = 0,
+    @SerialName("ward_name") val wardName: String = "",
+
     @SerialName("completion_top_path") val completionTopPath: String = "",
     @SerialName("completion_wide_path") val completionWidePath: String = "",
     @SerialName("completed_at_ms") val completedAtMs: Long? = null,
@@ -47,6 +51,7 @@ data class RemoteReportRow(
             "severity", "citizen_note", "status", "citizen_visible_status",
             "assignee_key", "assignee_corp", "assignee_zone", "assignee_name",
             "assignee_role", "assignee_addr",
+            "ward_key", "ward_number", "ward_name",
             "completion_top_path", "completion_wide_path", "completed_at_ms",
             "commissioner_completion_note",
         ).joinToString(",")

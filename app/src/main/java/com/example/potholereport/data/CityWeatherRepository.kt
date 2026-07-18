@@ -28,7 +28,8 @@ object CityWeatherRepository {
     private val cache = ConcurrentHashMap<String, Pair<CityWeatherForecast, Long>>()
 
     fun fetchToday(cityKey: String): CityWeatherForecast? {
-        val key = cityKey.uppercase()
+        val key = CityMetroKeys.canonical(cityKey)
+        if (key.isBlank()) return null
         val now = System.currentTimeMillis()
         cache[key]?.let { (forecast, cachedAt) ->
             if (now - cachedAt < CACHE_TTL_MS) return forecast

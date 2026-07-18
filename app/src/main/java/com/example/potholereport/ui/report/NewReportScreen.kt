@@ -25,7 +25,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -40,6 +42,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -70,6 +73,8 @@ import androidx.core.content.FileProvider
 import androidx.core.location.LocationManagerCompat
 import androidx.core.os.CancellationSignal
 import com.example.potholereport.data.AddReportResult
+import com.example.potholereport.data.BengaluruMunicipalRouting
+import com.example.potholereport.data.CityMetroLocation
 import com.example.potholereport.data.PersistedPotholeReport
 import com.example.potholereport.data.PotholePosition
 import com.example.potholereport.data.PotholeSeverity
@@ -94,10 +99,14 @@ import kotlin.coroutines.resume
 
 private val AccentRed = Color(0xFFB74233)
 private val DarkBlue = Color(0xFF1A1A2E)
+private val ReportActionPillShape = RoundedCornerShape(50)
 private val OffWhite = Color(0xFFF5F2E8)
 private val OrangeSelect = Color(0xFFF58220)
 private val GrayDisabled = Color(0xFF9E9E9E)
 private val GrayButton = Color(0xFF757575)
+
+private const val GPS_SUBMIT_WARN_ACCURACY_METERS = 50f
+private const val GPS_SUBMIT_BLOCK_ACCURACY_METERS = 100f
 
 @Composable
 fun NewReportScreen(
@@ -117,6 +126,7 @@ fun NewReportScreen(
     var closeUpVerified by remember { mutableStateOf(false) }
     var wideVerified by remember { mutableStateOf(false) }
     var photoValidating by remember { mutableStateOf(false) }
+    var submitting by remember { mutableStateOf(false) }
     var photoValidationTitle by remember { mutableStateOf<String?>(null) }
     var photoValidationMessage by remember { mutableStateOf<String?>(null) }
     var duplicateBlockingReport by remember { mutableStateOf<PersistedPotholeReport?>(null) }
@@ -131,6 +141,7 @@ fun NewReportScreen(
 
     var deviceLat by remember { mutableStateOf<Double?>(null) }
     var deviceLng by remember { mutableStateOf<Double?>(null) }
+    var deviceLocationAccuracyM by remember { mutableStateOf<Float?>(null) }
     var manualCoordLat by remember { mutableStateOf<Double?>(null) }
     var manualCoordLng by remember { mutableStateOf<Double?>(null) }
     var useManualLocation by remember { mutableStateOf(false) }
@@ -157,6 +168,7 @@ fun NewReportScreen(
             locationBlockedReason = "PERMISSION"
             deviceLat = null
             deviceLng = null
+            deviceLocationAccuracyM = null
             return
         }
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -166,6 +178,7 @@ fun NewReportScreen(
             locationBlockedReason = "GPS_OFF"
             deviceLat = null
             deviceLng = null
+            deviceLocationAccuracyM = null
             return
         }
         scope.launch {
@@ -178,11 +191,13 @@ fun NewReportScreen(
             if (loc != null) {
                 deviceLat = loc.latitude
                 deviceLng = loc.longitude
+                deviceLocationAccuracyM = loc.accuracy.takeIf { it > 0f }
                 if (!useManualLocation) locationBlockedReason = null
             } else if (!useManualLocation) {
                 locationBlockedReason = "NO_FIX"
                 deviceLat = null
                 deviceLng = null
+                deviceLocationAccuracyM = null
             }
         }
     }
@@ -380,6 +395,24 @@ fun NewReportScreen(
     val latEffective = if (useManualLocation) manualCoordLat else deviceLat
     val lngEffective = if (useManualLocation) manualCoordLng else deviceLng
     val gpsOk = latEffective != null && lngEffective != null
+    val gpsAccuracyM = if (useManualLocation) null else deviceLocationAccuracyM
+    val lowGpsAccuracyBlock = gpsOk && !useManualLocation &&
+        gpsAccuracyM != null && gpsAccuracyM > GPS_SUBMIT_BLOCK_ACCURACY_METERS
+    val lowGpsAccuracyWarn = gpsOk && !useManualLocation &&
+        gpsAccuracyM != null &&
+        gpsAccuracyM > GPS_SUBMIT_WARN_ACCURACY_METERS &&
+        gpsAccuracyM <= GPS_SUBMIT_BLOCK_ACCURACY_METERS
+
+    val metroSubmitBlock = remember(reportCityKey, latEffective, lngEffective) {
+        val lat = latEffective
+        val lng = lngEffective
+        if (lat != null && lng != null) {
+            CityMetroLocation.validateSubmitLocation(reportCityKey, lat, lng)
+        } else {
+            null
+        }
+    }
+    val metroBlock = metroSubmitBlock != null
 
     LaunchedEffect(reportCityKey, reporterUserId, latEffective, lngEffective) {
         val lat = latEffective
@@ -399,23 +432,29 @@ fun NewReportScreen(
     }
 
     val duplicateBlock = duplicateBlockingReport != null
+    val formBusy = photoValidating || submitting
 
     val missingClose = closeUpUri == null || !closeUpVerified
     val missingWide = wideUri == null || !wideVerified
     val missingLoc = !gpsOk
 
     val footerLabel = when {
+        submitting -> "SUBMITTING…"
         photoValidating -> "CHECKING PHOTO WITH AI..."
         duplicateBlock -> {
             val status = duplicateBlockingReport?.status?.displayLabel?.uppercase() ?: "OPEN"
             "ALREADY REPORTED HERE ($status)"
         }
+        metroBlock -> "LOCATION OUTSIDE CITY"
+        lowGpsAccuracyBlock -> "GPS TOO INACCURATE — RETRY OR MANUAL"
         missingClose -> "ADD VALID CLOSE-UP PHOTO TO CONTINUE"
         missingWide -> "ADD VALID WIDE SHOT TO CONTINUE"
         missingLoc -> "ATTACH LOCATION TO CONTINUE"
         else -> "SUBMIT REPORT"
     }
-    val readyToSubmit = !missingClose && !missingWide && !missingLoc && !photoValidating && !duplicateBlock
+    val readyToSubmit = !missingClose && !missingWide && !missingLoc && !formBusy &&
+        !duplicateBlock && !metroBlock && !lowGpsAccuracyBlock
+    val submitButtonActive = readyToSubmit || submitting
 
     if (showDuplicateDialog) {
         val blocking = duplicateBlockingReport
@@ -476,7 +515,7 @@ fun NewReportScreen(
                             modifier = Modifier
                                 .size(36.dp)
                                 .background(AccentRed)
-                                .clickable { onClose() },
+                                .clickable(enabled = !submitting) { onClose() },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(Icons.Default.Close, contentDescription = "Close", tint = DarkBlue)
@@ -495,7 +534,7 @@ fun NewReportScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     PhotoDropZone(
-                        enabled = !photoValidating,
+                        enabled = !formBusy,
                         label = when {
                             photoValidating && photoChoiceTarget == 1 -> "ANALYZING PHOTO..."
                             closeUpVerified -> "CLOSE-UP VERIFIED · TAP TO RETAKE"
@@ -517,7 +556,7 @@ fun NewReportScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     PhotoDropZone(
-                        enabled = closeUpVerified && !photoValidating,
+                        enabled = closeUpVerified && !formBusy,
                         label = when {
                             !closeUpVerified -> "COMPLETE STEP 01 FIRST"
                             photoValidating && photoChoiceTarget == 2 -> "ANALYZING PHOTO..."
@@ -551,6 +590,8 @@ fun NewReportScreen(
                         loading = locationLoading,
                         blockedReason = locationBlockedReason,
                         gpsOk = gpsOk,
+                        gpsAccuracyM = gpsAccuracyM,
+                        usingManualLocation = useManualLocation,
                         latDisplay = latEffective,
                         lngDisplay = lngEffective,
                         onRetryGps = {
@@ -572,11 +613,43 @@ fun NewReportScreen(
                         onOpenGpsSettings = { showEnableGpsDialog = true },
                     )
 
+                    if (lowGpsAccuracyWarn) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "GPS accuracy is +/-${gpsAccuracyM!!.toInt()}m - move outdoors for a better fix, " +
+                                "or use manual entry below.",
+                            color = Color(0xFFB45309),
+                            fontSize = 8.sp,
+                            lineHeight = 10.sp,
+                        )
+                    }
+
+                    if (lowGpsAccuracyBlock) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "GPS accuracy is +/-${gpsAccuracyM!!.toInt()}m - too low to auto-tag. " +
+                                "Retry GPS, enable location, or paste coordinates manually.",
+                            color = Color(0xFFB71C1C),
+                            fontSize = 8.sp,
+                            lineHeight = 10.sp,
+                        )
+                    }
+
                     if (duplicateBlock) {
                         Spacer(Modifier.height(4.dp))
                         Text(
                             "You already reported this pothole here (${duplicateBlockingReport?.status?.displayLabel}). " +
                                 "Submit again only after it is resolved (Completed).",
+                            color = Color(0xFFB45309),
+                            fontSize = 8.sp,
+                            lineHeight = 10.sp,
+                        )
+                    }
+
+                    if (metroBlock && metroSubmitBlock != null) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            metroSubmitBlock,
                             color = Color(0xFFB45309),
                             fontSize = 8.sp,
                             lineHeight = 10.sp,
@@ -602,6 +675,7 @@ fun NewReportScreen(
                                     manualCoordLng = null
                                 },
                                 modifier = Modifier.weight(1f),
+                                enabled = !submitting,
                                 placeholder = { Text("Maps URL", fontSize = 10.sp) },
                                 singleLine = true,
                                 textStyle = TextStyle(fontSize = 10.sp),
@@ -620,6 +694,7 @@ fun NewReportScreen(
                                     manualCoordLng = null
                                 },
                                 modifier = Modifier.width(88.dp),
+                                enabled = !submitting,
                                 placeholder = { Text("lng", fontSize = 10.sp) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -641,6 +716,7 @@ fun NewReportScreen(
                                     locationBlockedReason = null
                                 }
                             },
+                            enabled = !submitting,
                             colors = ButtonDefaults.buttonColors(containerColor = DarkBlue, contentColor = Color.White),
                             shape = RoundedCornerShape(0.dp),
                             modifier = Modifier.align(Alignment.End)
@@ -660,9 +736,9 @@ fun NewReportScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        PositionTile(Modifier.weight(1f), PotholePosition.LEFT, selectedPosition) { selectedPosition = it }
-                        PositionTile(Modifier.weight(1f), PotholePosition.MIDDLE, selectedPosition) { selectedPosition = it }
-                        PositionTile(Modifier.weight(1f), PotholePosition.RIGHT, selectedPosition) { selectedPosition = it }
+                        PositionTile(Modifier.weight(1f), PotholePosition.LEFT, selectedPosition, enabled = !submitting) { selectedPosition = it }
+                        PositionTile(Modifier.weight(1f), PotholePosition.MIDDLE, selectedPosition, enabled = !submitting) { selectedPosition = it }
+                        PositionTile(Modifier.weight(1f), PotholePosition.RIGHT, selectedPosition, enabled = !submitting) { selectedPosition = it }
                     }
 
                     Spacer(Modifier.height(6.dp))
@@ -670,19 +746,20 @@ fun NewReportScreen(
                     SectionTitle("05 HOW BAD IS IT?")
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        SeverityTile(Modifier.weight(1f), PotholeSeverity.MINOR, selectedSeverity) { selectedSeverity = it }
-                        SeverityTile(Modifier.weight(1f), PotholeSeverity.MODERATE, selectedSeverity) { selectedSeverity = it }
+                        SeverityTile(Modifier.weight(1f), PotholeSeverity.MINOR, selectedSeverity, enabled = !submitting) { selectedSeverity = it }
+                        SeverityTile(Modifier.weight(1f), PotholeSeverity.MODERATE, selectedSeverity, enabled = !submitting) { selectedSeverity = it }
                     }
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        SeverityTile(Modifier.weight(1f), PotholeSeverity.SEVERE, selectedSeverity) { selectedSeverity = it }
-                        SeverityTile(Modifier.weight(1f), PotholeSeverity.CRITICAL, selectedSeverity) { selectedSeverity = it }
+                        SeverityTile(Modifier.weight(1f), PotholeSeverity.SEVERE, selectedSeverity, enabled = !submitting) { selectedSeverity = it }
+                        SeverityTile(Modifier.weight(1f), PotholeSeverity.CRITICAL, selectedSeverity, enabled = !submitting) { selectedSeverity = it }
                     }
 
                     aiRiskInsight?.let { insight ->
                         Spacer(Modifier.height(6.dp))
                         AiRiskSuggestionCard(
                             insight = insight,
+                            enabled = !submitting,
                             onUseSuggested = { selectedSeverity = insight.suggestedSeverity },
                         )
                     }
@@ -694,6 +771,7 @@ fun NewReportScreen(
                         value = note,
                         onValueChange = { if (it.length <= noteMax) note = it },
                         modifier = Modifier.fillMaxWidth(),
+                        enabled = !submitting,
                         placeholder = { Text("e.g. Near bus stop, gets worse after rain...", fontSize = 10.sp) },
                         maxLines = 2,
                         textStyle = TextStyle(fontSize = 11.sp),
@@ -719,76 +797,116 @@ fun NewReportScreen(
                 ) {
                     Button(
                         onClick = {
-                            if (!readyToSubmit) return@Button
+                            if (!readyToSubmit || submitting) return@Button
                             val closeUri = closeUpUri ?: return@Button
                             val wideShotUri = wideUri ?: return@Button
                             val lat = latEffective ?: return@Button
                             val lng = lngEffective ?: return@Button
+                            val metroError = CityMetroLocation.validateSubmitLocation(reportCityKey, lat, lng)
+                            if (metroError != null) return@Button
+                            submitting = true
                             scope.launch {
-                                val result = withContext(Dispatchers.IO) {
-                                    RecentReportsRepository.addReport(
-                                        cityKey = reportCityKey,
-                                        closeUpUri = closeUri,
-                                        wideUri = wideShotUri,
-                                        latitude = lat,
-                                        longitude = lng,
-                                        severity = selectedSeverity,
-                                        note = note,
-                                        reporterUserId = reporterUserId,
-                                        submittedSignedIn = submittedWhileSignedIn,
-                                    )
-                                }
-                                when (result) {
-                                    is AddReportResult.Success -> {
-                                        if (submittedWhileSignedIn) {
-                                            if (!SupabaseClientProvider.isConfigured) {
-                                                onSyncMessage(
-                                                    "Report saved on this device only. " +
-                                                        "Rebuild with SUPABASE_URL and SUPABASE_ANON_KEY in local.properties.",
-                                                )
-                                            } else {
-                                                val pushed = withContext(Dispatchers.IO) {
-                                                    ReportSyncRepository.pushReport(result.report)
-                                                }
-                                                if (pushed) {
-                                                    onSyncMessage("Report submitted to the municipality.")
-                                                } else {
-                                                    ReportSyncRepository.enqueuePush(result.report)
+                                try {
+                                    val result = withContext(Dispatchers.IO) {
+                                        RecentReportsRepository.addReport(
+                                            cityKey = reportCityKey,
+                                            closeUpUri = closeUri,
+                                            wideUri = wideShotUri,
+                                            latitude = lat,
+                                            longitude = lng,
+                                            severity = selectedSeverity,
+                                            note = note,
+                                            reporterUserId = reporterUserId,
+                                            submittedSignedIn = submittedWhileSignedIn,
+                                        )
+                                    }
+                                    when (result) {
+                                        is AddReportResult.Success -> {
+                                            val routingMsg =
+                                                BengaluruMunicipalRouting.formatSubmitRoutingMessage(result.report)
+                                            if (submittedWhileSignedIn) {
+                                                if (!SupabaseClientProvider.isConfigured) {
                                                     onSyncMessage(
-                                                        "Report saved on device. Cloud upload failed — " +
-                                                            "sign in with your Supabase account and try again.",
+                                                        "$routingMsg Saved on this device only — " +
+                                                            "rebuild with SUPABASE_URL and SUPABASE_ANON_KEY in local.properties.",
                                                     )
+                                                } else {
+                                                    val pushed = withContext(Dispatchers.IO) {
+                                                        ReportSyncRepository.pushReport(result.report)
+                                                    }
+                                                    if (pushed) {
+                                                        onSyncMessage(routingMsg)
+                                                    } else {
+                                                        ReportSyncRepository.enqueuePush(result.report)
+                                                        onSyncMessage(
+                                                            "$routingMsg Cloud upload failed — " +
+                                                                "sign in with your Supabase account and try again.",
+                                                        )
+                                                    }
                                                 }
+                                            } else {
+                                                onSyncMessage(routingMsg)
                                             }
+                                            onReportPersisted()
+                                            onClose()
                                         }
-                                        onReportPersisted()
-                                        onClose()
+                                        is AddReportResult.DuplicateActive -> {
+                                            duplicateBlockingReport = result.existing
+                                            showDuplicateDialog = true
+                                        }
+                                        AddReportResult.Failed -> {
+                                            onSyncMessage("Could not save report. Try again.")
+                                        }
                                     }
-                                    is AddReportResult.DuplicateActive -> {
-                                        duplicateBlockingReport = result.existing
-                                        showDuplicateDialog = true
-                                    }
-                                    AddReportResult.Failed -> { /* keep form open */ }
+                                } finally {
+                                    submitting = false
                                 }
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = readyToSubmit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp),
+                        enabled = readyToSubmit && !submitting,
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (readyToSubmit) DarkBlue else GrayButton,
-                            contentColor = if (readyToSubmit) Color.White else Color.White.copy(alpha = 0.85f),
-                            disabledContainerColor = GrayButton,
+                            containerColor = if (submitButtonActive) DarkBlue else GrayButton,
+                            contentColor = if (submitButtonActive) Color.White else Color.White.copy(alpha = 0.85f),
+                            disabledContainerColor = if (submitting) DarkBlue else GrayButton,
                             disabledContentColor = Color.White.copy(alpha = 0.85f)
                         ),
-                        shape = RoundedCornerShape(0.dp)
+                        shape = ReportActionPillShape,
+                        border = BorderStroke(
+                            1.dp,
+                            if (submitButtonActive || submitting) Color(0xFF0F0F1A) else Color(0xFF616161),
+                        ),
                     ) {
-                        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(footerLabel, fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 2, textAlign = TextAlign.Center)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (submitting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                footerLabel,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                maxLines = 2,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
                     }
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "NO EMAIL · NO ACCOUNT · NO IP STORED",
+                        "REPORT ANONYMOUSLY · NO IP STORED",
                         color = Color.Gray,
                         fontSize = 8.sp,
                         modifier = Modifier.fillMaxWidth(),
@@ -811,6 +929,7 @@ fun NewReportScreen(
 private fun AiRiskSuggestionCard(
     insight: PotholeRiskInsight,
     onUseSuggested: () -> Unit,
+    enabled: Boolean = true,
 ) {
     val severityColor = when (insight.suggestedSeverity) {
         PotholeSeverity.MINOR -> Color(0xFF1B5E20)
@@ -855,6 +974,7 @@ private fun AiRiskSuggestionCard(
         Spacer(Modifier.height(4.dp))
         TextButton(
             onClick = onUseSuggested,
+            enabled = enabled,
             modifier = Modifier.align(Alignment.End),
         ) {
             Text("Use AI suggested severity", fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -922,6 +1042,8 @@ private fun LocationBlock(
     loading: Boolean,
     blockedReason: String?,
     gpsOk: Boolean,
+    gpsAccuracyM: Float?,
+    usingManualLocation: Boolean,
     latDisplay: Double?,
     lngDisplay: Double?,
     onRetryGps: () -> Unit,
@@ -948,12 +1070,28 @@ private fun LocationBlock(
             when {
                 loading -> Text("LOCATING…", color = DarkBlue, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 gpsOk -> {
-                    Text("LOCATION ATTACHED", color = Color(0xFF2E7D32), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    val title = if (usingManualLocation) {
+                        "MANUAL LOCATION"
+                    } else {
+                        "LOCATION ATTACHED"
+                    }
+                    Text(title, color = Color(0xFF2E7D32), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     Text(
                         "${"%.5f".format(latDisplay!!)}, ${"%.5f".format(lngDisplay!!)}",
                         fontSize = 9.sp,
                         color = Color.Gray
                     )
+                    if (!usingManualLocation && gpsAccuracyM != null) {
+                        Text(
+                            "GPS +/-${gpsAccuracyM.toInt()}m",
+                            fontSize = 8.sp,
+                            color = when {
+                                gpsAccuracyM > GPS_SUBMIT_BLOCK_ACCURACY_METERS -> Color(0xFFB71C1C)
+                                gpsAccuracyM > GPS_SUBMIT_WARN_ACCURACY_METERS -> Color(0xFFB45309)
+                                else -> Color(0xFF2E7D32)
+                            },
+                        )
+                    }
                 }
                 blockedReason == "GPS_OFF" -> {
                     Text("GPS DISABLED", color = Color(0xFFB71C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -997,6 +1135,7 @@ private fun SeverityTile(
     modifier: Modifier,
     severity: PotholeSeverity,
     selected: PotholeSeverity,
+    enabled: Boolean = true,
     onSelect: (PotholeSeverity) -> Unit,
 ) {
     val sel = severity == selected
@@ -1005,7 +1144,7 @@ private fun SeverityTile(
             .height(52.dp)
             .border(BorderStroke(1.dp, DarkBlue))
             .background(if (sel) OrangeSelect else Color.White.copy(alpha = 0.85f))
-            .clickable { onSelect(severity) }
+            .clickable(enabled = enabled) { onSelect(severity) }
             .padding(4.dp)
     ) {
         Column {
@@ -1032,6 +1171,7 @@ private fun PositionTile(
     modifier: Modifier,
     position: PotholePosition,
     selected: PotholePosition,
+    enabled: Boolean = true,
     onSelect: (PotholePosition) -> Unit,
 ) {
     val sel = position == selected
@@ -1040,7 +1180,7 @@ private fun PositionTile(
             .height(40.dp)
             .border(BorderStroke(1.dp, DarkBlue))
             .background(if (sel) OrangeSelect else Color.White.copy(alpha = 0.85f))
-            .clickable { onSelect(position) }
+            .clickable(enabled = enabled) { onSelect(position) }
             .padding(4.dp)
     ) {
         Column(

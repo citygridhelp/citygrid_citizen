@@ -124,6 +124,24 @@ object CitizenNotificationsRepository {
         )
     }
 
+    /**
+     * Bell notice when Play has a newer build than the one installed.
+     * Deduped by [availableVersionCode] so we do not spam the inbox.
+     */
+    fun notifyUpdateAvailable(installedVersionName: String, availableVersionCode: Int) {
+        if (availableVersionCode <= 0) return
+        addNotification(
+            CitizenNotification(
+                id = "app-update-available-$availableVersionCode",
+                type = CitizenNotification.Type.APP_UPDATE,
+                title = "Update available",
+                body = "You're on v$installedVersionName. A newer City Grid is on the Play Store — " +
+                    "tap to open the store and update.",
+                createdAtMs = System.currentTimeMillis(),
+            ),
+        )
+    }
+
     private fun addNotification(notification: CitizenNotification) {
         val ctx = appContext ?: return
         synchronized(lock) {

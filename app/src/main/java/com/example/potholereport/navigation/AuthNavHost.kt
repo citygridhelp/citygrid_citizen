@@ -56,6 +56,7 @@ fun AuthNavHost(
 ) {
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
     var isSignedIn by rememberSaveable { mutableStateOf(false) }
     var signedInEmail by rememberSaveable { mutableStateOf("") }
     var anonymousUserId by rememberSaveable { mutableStateOf("") }
@@ -65,6 +66,17 @@ fun AuthNavHost(
     var lastBackgroundAtMs by rememberSaveable { mutableLongStateOf(0L) }
     var sawBackgroundStop by rememberSaveable { mutableStateOf(false) }
     var blockSessionRestore by rememberSaveable { mutableStateOf(false) }
+    var pendingSignupName by rememberSaveable { mutableStateOf("") }
+    var pendingSignupEmail by rememberSaveable { mutableStateOf("") }
+    var pendingSignupPassword by rememberSaveable { mutableStateOf("") }
+    var pendingSignupVerification by rememberSaveable { mutableStateOf(false) }
+
+    fun clearPendingSignup() {
+        pendingSignupName = ""
+        pendingSignupEmail = ""
+        pendingSignupPassword = ""
+        pendingSignupVerification = false
+    }
 
     fun bumpRecentReportsDisplay() {
         recentReportsEpoch++
@@ -171,6 +183,10 @@ fun AuthNavHost(
         if (SupabaseClientProvider.isConfigured) {
             reconcileSessionFromSupabase()
         }
+        withContext(Dispatchers.IO) {
+            AppAutoRefresh.checkPlayStoreUpdate(context)
+        }
+        bumpUiRefresh()
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -184,8 +200,11 @@ fun AuthNavHost(
                     if (!sawBackgroundStop || lastBackgroundAtMs <= 0L) return@LifecycleEventObserver
                     sawBackgroundStop = false
                     val idleMs = System.currentTimeMillis() - lastBackgroundAtMs
-                    if (idleMs >= AppAutoRefresh.RESUME_IDLE_MS) {
-                        scope.launch {
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            AppAutoRefresh.checkPlayStoreUpdate(context)
+                        }
+                        if (idleMs >= AppAutoRefresh.RESUME_IDLE_MS) {
                             withContext(Dispatchers.IO) {
                                 if (isSignedIn) {
                                     AppAutoRefresh.refreshSignedInData(cityKey = null, reporterUserId = anonymousUserId)
@@ -193,8 +212,8 @@ fun AuthNavHost(
                                     AppAutoRefresh.refreshLocalData()
                                 }
                             }
-                            bumpUiRefresh()
                         }
+                        bumpUiRefresh()
                     }
                 }
                 else -> Unit
@@ -341,6 +360,16 @@ fun AuthNavHost(
         }
         composable(AuthRoute.Signup.route) {
             SignupScreen(
+                initialName = pendingSignupName,
+                initialEmail = pendingSignupEmail,
+                initialPassword = pendingSignupPassword,
+                initialVerificationRequested = pendingSignupVerification,
+                onPendingSignupChanged = { name, email, password, verificationRequested ->
+                    pendingSignupName = name
+                    pendingSignupEmail = email
+                    pendingSignupPassword = password
+                    pendingSignupVerification = verificationRequested
+                },
                 onNavigateBackToLogin = { navController.popBackStack() },
                 onStartSignupVerification = { name, email, password ->
                     val result = runBlocking(Dispatchers.IO) {
@@ -354,6 +383,7 @@ fun AuthNavHost(
                     }
                 },
                 onSignupSuccess = { email ->
+                    clearPendingSignup()
                     navController.popBackStack(AuthRoute.Home.route, inclusive = false)
                     completeSignIn(email, "Email verified. You're signed in.")
                 },

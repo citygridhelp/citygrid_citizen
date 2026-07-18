@@ -30,14 +30,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.potholereport.data.AppUpdateChecker
 import com.example.potholereport.data.CitizenNotification
 import com.example.potholereport.data.CitizenNotificationsRepository
 
 @Composable
 fun NotificationsDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
     var refreshToken by remember { mutableIntStateOf(0) }
     val notifications = remember(refreshToken) { CitizenNotificationsRepository.all() }
 
@@ -81,6 +84,12 @@ fun NotificationsDialog(onDismiss: () -> Unit) {
                             onOpen = {
                                 CitizenNotificationsRepository.markRead(item.id)
                                 refreshToken++
+                                if (item.type == CitizenNotification.Type.APP_UPDATE &&
+                                    item.id.startsWith("app-update-available-")
+                                ) {
+                                    AppUpdateChecker.openPlayStoreListing(context)
+                                    closeDialog()
+                                }
                             },
                         )
                     }

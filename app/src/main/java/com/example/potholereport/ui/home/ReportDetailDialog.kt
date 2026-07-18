@@ -159,11 +159,24 @@ fun ReportDetailDialog(
                 }
 
                 if (report.hasAssignee()) {
-                    DetailSectionTitle("ASSIGNED OFFICER")
-                    DetailLine("Name", report.assigneeName)
-                    DetailLine("Position", report.assigneePosition)
-                    DetailLine("Corporation", report.assigneeCorporation)
-                    DetailLine("Zone", report.assigneeZone)
+                    DetailSectionTitle("ACCOUNTABILITY (REFERENCE ONLY)")
+                    Text(
+                        ReportAssigneeDisplay.routingDisclaimer(report),
+                        fontSize = 10.sp,
+                        lineHeight = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    DetailLine(ReportAssigneeDisplay.authorityLabel(), report.assigneeCorporation)
+                    DetailLine(
+                        ReportAssigneeDisplay.municipalUnitLabel(report),
+                        report.assigneeZone,
+                    )
+                    ReportAssigneeDisplay.wardLabel(report)?.let { ward ->
+                        DetailLine("Ward", ward)
+                    }
+                    DetailLine("Officer", report.assigneeName)
+                    DetailLine("Role", report.assigneePosition)
                     DetailLine("Office", report.assigneeOfficeAddress)
                     Spacer(Modifier.height(12.dp))
                 }
@@ -364,15 +377,15 @@ private fun DetailLine(
 }
 
 private val ReportDetailMapTiles: XYTileSource = XYTileSource(
-    "CartoPositronNoLabels",
+    "CartoPositronLabeled18",
     0,
-    19,
+    CartoBasemapUsefulMaxZoom.toInt(),
     256,
     ".png",
     arrayOf(
-        "https://a.basemaps.cartocdn.com/light_nolabels/",
-        "https://b.basemaps.cartocdn.com/light_nolabels/",
-        "https://c.basemaps.cartocdn.com/light_nolabels/",
+        "https://a.basemaps.cartocdn.com/light_all/",
+        "https://b.basemaps.cartocdn.com/light_all/",
+        "https://c.basemaps.cartocdn.com/light_all/",
     ),
     "\u00a9 OpenStreetMap contributors \u00b7 \u00a9 CARTO",
 )
@@ -408,10 +421,11 @@ private fun ReportLocationMapPreview(
             factory = { ctx ->
                 MapView(ctx).apply {
                     setTileSource(ReportDetailMapTiles)
+                    installCartoLabelDarkeningTilesOverlay()
                     setMultiTouchControls(true)
                     isHorizontalMapRepetitionEnabled = false
                     isVerticalMapRepetitionEnabled = false
-                    maxZoomLevel = 19.0
+                    maxZoomLevel = CartoBasemapUsefulMaxZoom
                     minZoomLevel = 5.0
                     controller.setZoom(16.0)
                     controller.setCenter(point)

@@ -108,6 +108,9 @@ object ReportSyncRepository {
                 assigneeName = report.assigneeName,
                 assigneeRole = report.assigneePosition,
                 assigneeAddr = report.assigneeOfficeAddress,
+                wardKey = report.wardKey,
+                wardNumber = report.wardNumber,
+                wardName = report.wardName,
             )
             try {
                 client.from(REPORTS_TABLE).insert(row)

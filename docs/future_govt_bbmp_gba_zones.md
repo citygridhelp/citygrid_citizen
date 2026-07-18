@@ -7,18 +7,20 @@ Government + citizen alignment: improve **accountability routing**, **officer ro
 
 ---
 
-## Current state (as of app v1.0)
+## Current state (as of app v1.0.3)
 
-| Layer | Official count | In app today | Where in code |
-|-------|----------------|--------------|---------------|
-| BBMP zones (pre-2025 model) | **8** | **8** (complete) | `MunicipalContactsRegistry.kt` → `bbmpZones()` |
-| Zone head officers | 8 Joint Commissioners | 8 in seed | `supabase/seed/officers.json` |
-| Map locality labels | N/A (UX only) | ~200 neighborhoods | `HomeScreen.kt` → `bengaluruRegionLabelSpecs` |
-| BBMP wards (old) | 198 | **0** | — |
-| GBA city corporations (2025) | **5** | **0** | — |
-| GBA wards (2025) | **369** | **0** | — |
+| Layer | Official count | Citizen app | Gov app | Where in code |
+|-------|----------------|-------------|---------|---------------|
+| **GBA outer boundary (2025)** | 1 polygon | **Yes** | — | `BengaluruGbaBoundary.kt`, `assets/bengaluru_gba_boundary.json` |
+| **GBA city corporations (2025)** | **5** | **Yes** (submit routing) | **No** — parked G2 | `MunicipalContactsRegistry.kt` → `gbaCorporationZones()` |
+| BBMP zones (pre-2025 model) | **8** | lookup only (old reports) | legacy | `MunicipalContactsRegistry.kt` → `bbmpZones()` |
+| GBA wards (2025) | **369** | **Yes** (submit only, not on map) | **No** — parked G5/G6 | `BengaluruGbaWards.kt`, `assets/bengaluru_gba_wards.json` |
+| Zone head officers | 8 JC (legacy) + **5 named GBA corp commissioners** | seed + registry | seed | [`gba_official_contacts.md`](gba_official_contacts.md) — **G3 partially done**; ward officers still **G6** |
+| Map locality labels | N/A (UX only) | ~200 neighborhoods | — | `HomeScreen.kt` → `bengaluruRegionLabelSpecs` |
 
-**Routing today:** GPS → nearest of 8 zone centroids (`MunicipalAssignmentResolver` / `MunicipalContactsRegistry.nearestAssignee`) → assignee stored on report → shown in Accountability tab and report detail.
+**Citizen routing today (v1.0.3):** GPS → point-in-polygon **369 wards** → **5 GBA corporation** assignee + ward snapshot on report → Accountability tab + submit snackbar. Home map shows GBA red outline only (no corp/ward overlays).
+
+**Government app:** Parked — see [government_app_handover.md](government_app_handover.md) § Government enhancements backlog.
 
 **Why it can feel “incomplete” in the UI:**
 
@@ -46,22 +48,27 @@ No missing zones for this model. Officer names/addresses should be re-verified f
 
 ---
 
-## Official reference — GBA (2025) — not in app yet
+## Official reference — GBA (2025+) — structure + contacts
 
-Karnataka replaced BBMP with the **Greater Bengaluru Authority (GBA)** and **five city corporations** (369 wards total, notified Nov 2025).
+Karnataka replaced BBMP with the **Greater Bengaluru Authority (GBA)** and **five city corporations** (369 wards total).
 
-| Corporation | HQ | Wards |
-|-------------|-----|-------|
-| Bengaluru Central City Corporation | Hudson Circle | 63 |
+| Corporation | HQ | Wards (approx.) |
+|-------------|-----|-----------------|
+| Bengaluru Central City Corporation | Hudson Circle / PUB | 63 |
 | Bengaluru North City Corporation | Yelahanka | 72 |
 | Bengaluru South City Corporation | Jayanagar | 72 |
 | Bengaluru East City Corporation | Mahadevapura | 50 |
 | Bengaluru West City Corporation | Rajarajeshwari Nagar | 112 |
 
-**Data sources (for implementation):**
+**Commissioners (verified snapshot):** see **[`gba_official_contacts.md`](gba_official_contacts.md)** (as of **16 July 2026**). Wired into `MunicipalContactsRegistry.kt` + `supabase/seed/officers.json`.
+
+**Ward officers:** not in app — legacy BBMP contact CSV kept under [`reference/`](reference/README.md) for research only.
+
+**Data sources:**
 
 - [GBA / BBMP portal](https://bbmp.gov.in/)
-- [OpenCity — GBA Wards Delimitation 2025](https://data.opencity.in/dataset/gba-wards-delimitation-2025) — KML/PDF, 369 wards
+- [OpenCity — GBA Wards Delimitation 2025](https://data.opencity.in/dataset/gba-wards-delimitation-2025)
+- Public transfer / press coverage listed in `gba_official_contacts.md`
 
 ---
 
@@ -140,13 +147,34 @@ Karnataka replaced BBMP with the **Greater Bengaluru Authority (GBA)** and **fiv
 
 ---
 
-## Recommended phasing
+## Recommended phasing (updated July 2026)
 
 ```text
-Phase 1 (now)           → Option A: zone reference UI + copy clarity
-Phase 2 (pre-pilot)     → Option B: 5 GBA corporations + officer seed update
-Phase 3 (with GBA data) → Option C: ward polygons + ward officers (if available)
-Parallel (optional)     → Option D: locality labels JSON + UX polish
+Done (v1.0.2)          → GBA outer boundary (#10.0): map outline, pan limits, submit validation
+Next (v1.0.3 target)   → GBA corporation routing (#10.1–10.4): assignee keys → officers → UI labels
+                         (Phase 3 backfill: decide before Supabase seed deploy)
+Then                   → #17 heat map (needs corporation geometry from #10.1)
+Parallel (optional)    → #14 locality labels, #10.6 zone reference UI (Option A)
+Later                  → #10.5 ward polygons + ward officers (Option C)
+```
+
+### GBA corporation routing — detailed phases (#10.1–10.4)
+
+| Phase | Work | Deliverables |
+|-------|------|--------------|
+| **1** | Add 5 GBA corporation assignee keys + centroids | `MunicipalContactsRegistry.kt`, `MunicipalAssignmentResolver.kt`; nearest-assignee uses corp centroids or rough corp bboxes |
+| **2** | Update `officers.json` / Supabase seed with GBA commissioners | Verified names from BBMP/GBA directory; deploy seed; sync CG GOVT app registry |
+| **3** | Re-map existing reports (optional backfill) or only new reports | **Decision:** SQL `UPDATE reports SET assignee_key = …` from lat/lng + old→new mapping, **or** forward-only (historical rows keep 8-zone keys) |
+| **4** | Accountability UI labels (“East Corporation” vs “East Zone”) | `AccountabilitySection.kt`, `ReportDetailDialog.kt`, email/confirmation copy |
+
+**Implementation order:** 1 → 2 → 4 in one citizen + gov release; confirm Phase 3 policy before Phase 2 deploy.
+
+### Earlier options (still valid)
+
+```text
+Phase A (optional)      → Option A: zone/corp reference UI + copy clarity (#10.6)
+Phase C (with GBA data) → Option C: ward polygons + ward officers (#10.5)
+Parallel (optional)     → Option D: locality labels JSON (#14)
 ```
 
 ---

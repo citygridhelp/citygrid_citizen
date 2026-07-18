@@ -3,6 +3,7 @@ package com.example.potholereport.ui.home
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,19 +21,24 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.potholereport.data.CityLaunchConfig
 import com.example.potholereport.data.PersistedPotholeReport
 import com.example.potholereport.data.PotholeReportStatus
 import com.example.potholereport.data.RecentReportsRepository
 import com.example.potholereport.data.formatRecentReportCaption
 import java.util.Locale
+
+private const val GBA_DIRECTORY_URL = "https://bbmp.gov.in/"
 
 @Composable
 fun AccountabilitySection(
@@ -41,7 +47,9 @@ fun AccountabilitySection(
 ) {
     val reports = remember(recentReportsEpoch) {
         RecentReportsRepository.reportsForAccountability()
+            .filter { CityLaunchConfig.isCityEnabled(it.cityKey) }
     }
+    val uriHandler = LocalUriHandler.current
 
     Column(
         modifier = modifier
@@ -65,8 +73,8 @@ fun AccountabilitySection(
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            "Each report is routed to the municipal zone officer responsible for road maintenance in that area. " +
-                "Officer details are taken from official corporation directories.",
+            "Bengaluru reports are tagged with the GBA city corporation and public officer contact from the official directory below. " +
+                "City Grid is not a government app — data is for citizen reference only.",
             fontSize = 11.sp,
             lineHeight = 14.sp,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.62f),
@@ -91,7 +99,7 @@ fun AccountabilitySection(
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Submit a pothole report with location to see the assigned municipal officer here.",
+                        "Submit a Bengaluru pothole report with location to see the assigned GBA corporation officer here.",
                         fontSize = 12.sp,
                         color = Color(0xFF7B7B7B),
                     )
@@ -108,7 +116,24 @@ fun AccountabilitySection(
 
         Spacer(Modifier.height(12.dp))
         Text(
-            "Source: BBMP, BMC, MCD, Greater Chennai Corporation, and GHMC public officer directories.",
+            "Official source — Bengaluru (GBA / BBMP) city corporations:",
+            fontSize = 9.sp,
+            lineHeight = 12.sp,
+            color = Color(0xFF7B7B7B),
+        )
+        TextButton(
+            onClick = { uriHandler.openUri(GBA_DIRECTORY_URL) },
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier.height(28.dp),
+        ) {
+            Text(
+                GBA_DIRECTORY_URL,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Text(
+            "More cities will list their corporation sources when enabled in a future release.",
             fontSize = 9.sp,
             lineHeight = 12.sp,
             color = Color(0xFF7B7B7B),
@@ -187,12 +212,31 @@ private fun AccountabilityReportCard(report: PersistedPotholeReport) {
             )
 
             Text(
-                "ASSIGNED TO",
+                "ASSIGNED FOR ACCOUNTABILITY",
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.8.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                report.assigneeCorporation,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            )
+            Text(
+                report.assigneeZone,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+            ReportAssigneeDisplay.wardLabel(report)?.let { ward ->
+                Text(
+                    ward,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
             Spacer(Modifier.height(6.dp))
             Text(
                 report.assigneeName,
@@ -207,19 +251,7 @@ private fun AccountabilityReportCard(report: PersistedPotholeReport) {
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.primary,
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                report.assigneeCorporation,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-            )
-            Text(
-                report.assigneeZone,
-                fontSize = 10.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
                 report.assigneeOfficeAddress,
                 fontSize = 10.sp,

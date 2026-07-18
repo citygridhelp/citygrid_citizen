@@ -12,7 +12,8 @@ object IndiaCityMapCatalog {
 
     /** Explicit metro boxes (north, east, south, west). */
     private val metroBounds: Map<String, BoundingBox> = mapOf(
-        "BENGALURU" to BoundingBox(13.16, 77.92, 12.63, 77.33),
+        // Official GBA outer boundary bbox (Sept 2025); polygon in bengaluru_gba_boundary.json
+        "BENGALURU" to BoundingBox(13.14266, 77.784361, 12.833625, 77.460051),
         "MUMBAI" to BoundingBox(19.28, 73.05, 18.86, 72.76),
         "DELHI" to BoundingBox(28.88, 77.45, 28.38, 76.84),
         "CHENNAI" to BoundingBox(13.24, 80.33, 12.90, 80.08),

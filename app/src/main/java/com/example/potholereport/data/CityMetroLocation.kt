@@ -33,14 +33,13 @@ object CityMetroLocation {
         return IndiaCityMapCatalog.metroBoundsFor(key)
     }
 
-    /** Metro key whose bounding box contains the coordinates, or null if outside supported metros. */
+    /** Metro key whose boundary contains the coordinates, or null if outside supported metros. */
     fun resolveMetroCity(latitude: Double, longitude: Double): String? {
         for ((city, bbox) in dynamicMetroBounds) {
-            if (bbox.contains(latitude, longitude)) return city
+            if (coordinatesInMetroCity(city, latitude, longitude)) return city
         }
         for (city in IndiaCityMapCatalog.allCityKeys()) {
-            val bbox = metroBoundsFor(city) ?: continue
-            if (bbox.contains(latitude, longitude)) {
+            if (coordinatesInMetroCity(city, latitude, longitude)) {
                 return CityMetroKeys.canonical(city)
             }
         }
@@ -51,7 +50,11 @@ object CityMetroLocation {
         resolveMetroCity(location.latitude, location.longitude)
 
     fun coordinatesInMetroCity(cityKey: String, latitude: Double, longitude: Double): Boolean {
-        val bbox = metroBoundsFor(cityKey) ?: return false
+        val key = CityMetroKeys.canonical(cityKey)
+        if (key == "BENGALURU" && BengaluruGbaBoundary.isInitialized()) {
+            return BengaluruGbaBoundary.contains(latitude, longitude)
+        }
+        val bbox = metroBoundsFor(key) ?: return false
         return bbox.contains(latitude, longitude)
     }
 
@@ -70,6 +73,28 @@ object CityMetroLocation {
             else ->
                 "You are in ${formatDisplayName(gpsMetroCity)}. " +
                     "Change city to ${formatDisplayName(gpsMetroCity)} to report here."
+        }
+    }
+
+    /**
+     * Citizen-facing error when report coordinates cannot be submitted under [cityKey],
+     * or null when the point lies inside that city's metro boundary.
+     */
+    fun validateSubmitLocation(cityKey: String, latitude: Double, longitude: Double): String? {
+        val city = CityMetroKeys.canonical(cityKey)
+        if (!CityLaunchConfig.isCityEnabled(city)) {
+            return "Reporting is not yet available for ${formatDisplayName(city)}."
+        }
+        if (coordinatesInMetroCity(city, latitude, longitude)) return null
+
+        val detectedMetro = resolveMetroCity(latitude, longitude)
+        return when {
+            detectedMetro != null ->
+                "This location is in ${formatDisplayName(detectedMetro)}, not ${formatDisplayName(city)}. " +
+                    "Go back home, select ${formatDisplayName(detectedMetro)}, and open New Report again."
+            else ->
+                "This location is outside the ${formatDisplayName(city)} area. " +
+                    "Move inside the city boundary or enter coordinates within ${formatDisplayName(city)}."
         }
     }
 
