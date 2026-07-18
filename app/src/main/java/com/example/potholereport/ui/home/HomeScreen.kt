@@ -1291,7 +1291,7 @@ private fun ReportAndTrackSection(
     val nextTripAlert = tripAlerts.firstOrNull()
 
     @Composable
-    fun MapSection(modifier: Modifier, showExpand: Boolean) {
+    fun MapSection(modifier: Modifier, showExpand: Boolean, showCollapse: Boolean = false) {
         Box(modifier = modifier.background(Color(0xFFFDFCF9))) {
             OsmDensityMap(
                 selectedCity = selectedCity,
@@ -1372,20 +1372,41 @@ private fun ReportAndTrackSection(
                     onNavigate = { tripNavActive = true },
                 )
             }
-            if (tripModeEnabled && tripNavActive) {
-                Button(
-                    onClick = { tripNavActive = false },
+            if (tripModeEnabled && tripNavActive || showCollapse) {
+                Row(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFB91C1C),
-                        contentColor = Color.White,
-                    ),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Stop", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    if (tripModeEnabled && tripNavActive) {
+                        Button(
+                            onClick = { tripNavActive = false },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFB91C1C),
+                                contentColor = Color.White,
+                            ),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Text("Stop", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    if (showCollapse) {
+                        IconButton(
+                            onClick = { mapFullscreen = false },
+                            modifier = Modifier
+                                .background(Color.White.copy(alpha = 0.92f), CircleShape)
+                                .size(36.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.FullscreenExit,
+                                contentDescription = "Exit fullscreen",
+                                tint = DarkBlue,
+                            )
+                        }
+                    }
                 }
             }
             if (showExpand) {
@@ -1441,16 +1462,11 @@ private fun ReportAndTrackSection(
                     .fillMaxSize()
                     .background(Color(0xFFFDFCF9)),
             ) {
-                MapSection(Modifier.fillMaxSize(), showExpand = false)
-                IconButton(
-                    onClick = { mapFullscreen = false },
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(8.dp)
-                        .background(Color.White.copy(alpha = 0.92f), CircleShape),
-                ) {
-                    Icon(Icons.Filled.FullscreenExit, contentDescription = "Exit fullscreen", tint = DarkBlue)
-                }
+                MapSection(
+                    modifier = Modifier.fillMaxSize(),
+                    showExpand = false,
+                    showCollapse = true,
+                )
             }
         }
     }
