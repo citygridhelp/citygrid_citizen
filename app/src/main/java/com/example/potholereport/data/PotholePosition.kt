@@ -14,6 +14,11 @@ enum class PotholePosition(val displayLabel: String, val code: String) {
     RIGHT("Right", "R"),
     ;
 
+    companion object {
+        fun fromCode(code: String?): PotholePosition =
+            entries.find { it.code.equals(code?.trim(), ignoreCase = true) } ?: MIDDLE
+    }
+
     /** Vertical band [start, end] (normalised to image width 0..1). */
     val laneRange: ClosedFloatingPointRange<Float>
         get() = when (this) {

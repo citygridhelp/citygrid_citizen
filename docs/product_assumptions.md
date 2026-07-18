@@ -77,6 +77,20 @@ Related docs:
 | Default selected city | **BENGALURU** | `HomeScreen`, `CityMetroKeys.NAV_FALLBACK_CITY` |
 | Metro bbox (Bengaluru) | Official **GBA** outer boundary (Sept 2025): N 13.14266, E 77.784361, S 12.833625, W 77.460051; red outline = simplified polygon from OpenCity KML | `BengaluruGbaBoundary.kt`, `bengaluru_gba_boundary.json` |
 
+### Trip navigation (shipped in progress — v1.1.0)
+
+| Assumption | Value | Source |
+|------------|-------|--------|
+| Trip vs Heat | **Mutually exclusive** on home map — Heat disabled while Trip is on | `HomeScreen.kt` |
+| Ahead cone (no route) | Half-angle **35°**, max **2500 m**, min **5 m** | `TripNavigationMatcher.matchAheadCone` |
+| Route corridor | Perpendicular distance ≤ **28 m** from OSRM polyline | `TripNavigationMatcher.ROUTE_CORRIDOR_M` |
+| Max alert distance | **2500 m** ahead along route or cone | `TripNavigationMatcher.MAX_AHEAD_M` |
+| Lane side label | Only when GPS accuracy ≤ **25 m** | `TripNavigationMatcher.SIDE_MIN_ACCURACY_M` |
+| Route provider | Public OSRM demo (`router.project-osrm.org`); empty route on failure | `OsrmRouteClient.kt` |
+| Destination pick | Search fields on map (start + destination); defaults start to GPS | `TripPlannerPanel` |
+| Vehicle | Car / Bike selector; bike falls back to driving geometry on public OSRM | `TripVehicle`, `OsrmRouteClient` |
+| Direction metadata | `pothole_position`, `report_bearing_deg`, `traffic_bearing_deg`, `traffic_faces_camera` | migration `0012`, `PersistedPotholeReport` |
+
 ---
 
 ## 5. Recent reports & local storage

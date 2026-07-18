@@ -502,6 +502,33 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 ---
 
+### 22. Trip navigation — ahead pothole alerts on route
+
+**Status:** **In progress** (v1.1.0 target) — Phase 1–3 implemented in app; run Supabase migration `0012_report_direction_metadata.sql` before sync.
+
+**Behaviour:**
+
+| Piece | Detail |
+|-------|--------|
+| Report metadata | Lane position (L/M/R), device bearing, wide-shot traffic direction → stored on report |
+| Trip toggle | Home map **Trip** chip (outside map frame); disables **Heat** while active |
+| No destination | Ahead **cone** along GPS bearing (~35° half-angle, 2.5 km) |
+| With destination | Start + Destination search on map → OSRM route; alerts within **28 m** corridor, **2.5 km** ahead |
+| Vehicle | Car / Bike chips on planner panel |
+| Lane side label | Shown when GPS accuracy ≤ **25 m** and report has traffic bearing |
+| Fullscreen map | Expand / collapse dialog on home map |
+
+**Key files:** `TripNavigationMatcher.kt`, `OsrmRouteClient.kt`, `TripNavigationOverlay.kt`, `ReportDirectionMetadata.kt`, `NewReportScreen.kt` (`TrafficDirectionConfirmRow`), `HomeScreen.kt`, `0012_report_direction_metadata.sql`.
+
+**Open / follow-up:**
+
+- [ ] Apply migration `0012` on Supabase
+- [ ] Smoke test on device (bearing updates, OSRM offline fallback)
+- [ ] Optional: show lane/traffic metadata in `ReportDetailDialog`
+- [ ] Play Store release notes for trip feature
+
+---
+
 ## How to use this list
 
 ### Release roadmap (July 2026)

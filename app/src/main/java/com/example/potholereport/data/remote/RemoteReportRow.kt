@@ -38,6 +38,11 @@ data class RemoteReportRow(
     @SerialName("ward_number") val wardNumber: Int = 0,
     @SerialName("ward_name") val wardName: String = "",
 
+    @SerialName("pothole_position") val potholePosition: String = "",
+    @SerialName("report_bearing_deg") val reportBearingDeg: Float? = null,
+    @SerialName("traffic_bearing_deg") val trafficBearingDeg: Float? = null,
+    @SerialName("traffic_faces_camera") val trafficFacesCamera: Boolean? = null,
+
     @SerialName("completion_top_path") val completionTopPath: String = "",
     @SerialName("completion_wide_path") val completionWidePath: String = "",
     @SerialName("completed_at_ms") val completedAtMs: Long? = null,
@@ -52,6 +57,7 @@ data class RemoteReportRow(
             "assignee_key", "assignee_corp", "assignee_zone", "assignee_name",
             "assignee_role", "assignee_addr",
             "ward_key", "ward_number", "ward_name",
+            "pothole_position", "report_bearing_deg", "traffic_bearing_deg", "traffic_faces_camera",
             "completion_top_path", "completion_wide_path", "completed_at_ms",
             "commissioner_completion_note",
         ).joinToString(",")

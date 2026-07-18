@@ -3,6 +3,7 @@ package com.example.potholereport.data.remote
 import android.util.Log
 import com.example.potholereport.data.PersistedPotholeReport
 import com.example.potholereport.data.RecentReportsRepository
+import com.example.potholereport.data.remote.trafficFacesCameraForStorage
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
@@ -111,6 +112,10 @@ object ReportSyncRepository {
                 wardKey = report.wardKey,
                 wardNumber = report.wardNumber,
                 wardName = report.wardName,
+                potholePosition = report.potholePosition,
+                reportBearingDeg = report.reportBearingDeg.takeIf { !it.isNaN() },
+                trafficBearingDeg = report.trafficBearingDeg.takeIf { !it.isNaN() },
+                trafficFacesCamera = trafficFacesCameraForStorage(report.trafficFacing),
             )
             try {
                 client.from(REPORTS_TABLE).insert(row)

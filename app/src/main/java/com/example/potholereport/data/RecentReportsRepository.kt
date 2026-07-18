@@ -2,6 +2,9 @@ package com.example.potholereport.data
 
 import android.content.Context
 import android.net.Uri
+import com.example.potholereport.data.remote.RemoteReportRow
+import com.example.potholereport.data.remote.trafficFacingStorageKey
+import com.example.potholereport.data.remote.withRemoteDirection
 import io.github.jan.supabase.auth.auth
 import org.json.JSONArray
 import org.json.JSONObject
@@ -37,6 +40,14 @@ data class PersistedPotholeReport(
     val wardKey: String = "",
     val wardNumber: Int = 0,
     val wardName: String = "",
+    /** Close-up lane: L / M / R ([PotholePosition.code]). */
+    val potholePosition: String = PotholePosition.MIDDLE.code,
+    /** GPS / device heading at submit (degrees). NaN if unknown. */
+    val reportBearingDeg: Float = Float.NaN,
+    /** Traffic flow toward (degrees). NaN if unknown. */
+    val trafficBearingDeg: Float = Float.NaN,
+    /** Wide-shot traffic confirmation; empty = unknown. */
+    val trafficFacing: String = TrafficFacingMode.UNKNOWN.storageKey,
     /** Stable reporter id ([UserProfile.anonymousUserId] or [DeviceReporterId]). */
     val reporterUserId: String = "",
     /** True once this row exists in Supabase (successful push or server restore). */
@@ -51,6 +62,12 @@ data class PersistedPotholeReport(
     fun hasAssignee(): Boolean = assigneeName.isNotBlank() || assigneeZone.isNotBlank()
 
     fun hasWard(): Boolean = wardNumber > 0 && wardName.isNotBlank()
+
+    fun potholePositionEnum(): PotholePosition = PotholePosition.fromCode(potholePosition)
+
+    fun trafficFacingMode(): TrafficFacingMode = TrafficFacingMode.fromStorage(trafficFacing)
+
+    fun hasTrafficBearing(): Boolean = !trafficBearingDeg.isNaN()
 
     fun withAssignee(assignee: MunicipalAssignee): PersistedPotholeReport {
         val fields = assignee.toPersistedFields()
@@ -213,6 +230,9 @@ object RecentReportsRepository {
         note: String,
         reporterUserId: String,
         submittedSignedIn: Boolean = false,
+        potholePosition: PotholePosition = PotholePosition.MIDDLE,
+        reportBearingDeg: Float = Float.NaN,
+        trafficFacing: TrafficFacingMode = TrafficFacingMode.UNKNOWN,
     ): AddReportResult {
         val ctx = appContext ?: return AddReportResult.Failed
         return synchronized(lock) {
@@ -235,6 +255,10 @@ object RecentReportsRepository {
             }
             val areaLabel = resolveAreaLabel(ctx, latitude, longitude).takeIf { isMeaningfulAreaName(it) }.orEmpty()
             val routing = BengaluruMunicipalRouting.resolve(cityKey, latitude, longitude)
+            val trafficBearing = resolveTrafficBearingDeg(
+                reportBearingDeg.takeIf { !it.isNaN() },
+                trafficFacing,
+            )
             var entry = PersistedPotholeReport(
                 id = id,
                 cityKey = cityKey,
@@ -249,6 +273,10 @@ object RecentReportsRepository {
                 submittedSignedIn = submittedSignedIn,
                 status = PotholeReportStatus.OPEN,
                 reporterUserId = reporterUserId,
+                potholePosition = potholePosition.code,
+                reportBearingDeg = reportBearingDeg,
+                trafficBearingDeg = trafficBearing ?: Float.NaN,
+                trafficFacing = trafficFacing.storageKey,
             ).withAssignee(routing.assignee)
             routing.ward?.let { entry = entry.withWard(it) }
             cache.add(0, entry)
@@ -413,6 +441,10 @@ object RecentReportsRepository {
                         wardKey = row.wardKey,
                         wardNumber = row.wardNumber,
                         wardName = row.wardName,
+                        potholePosition = row.potholePosition.ifBlank { PotholePosition.MIDDLE.code },
+                        reportBearingDeg = row.reportBearingDeg ?: Float.NaN,
+                        trafficBearingDeg = row.trafficBearingDeg ?: Float.NaN,
+                        trafficFacing = row.trafficFacingStorageKey(),
                     )
                     if (row.assigneeName.isBlank()) {
                         entry = entry.withAssignee(MunicipalAssignmentResolver.resolve(row.cityKey, lat, lon))
@@ -439,7 +471,7 @@ object RecentReportsRepository {
                     wardKey = row.wardKey.ifBlank { existing.wardKey },
                     wardNumber = row.wardNumber.takeIf { it > 0 } ?: existing.wardNumber,
                     wardName = row.wardName.ifBlank { existing.wardName },
-                )
+                ).withRemoteDirection(row)
                 if (merged != existing) {
                     if (existing.status != visibleStatus) {
                         CitizenNotificationsRepository.addStatusChange(
@@ -537,7 +569,7 @@ object RecentReportsRepository {
                         wardKey = row.wardKey.ifBlank { existing.wardKey },
                         wardNumber = row.wardNumber.takeIf { it > 0 } ?: existing.wardNumber,
                         wardName = row.wardName.ifBlank { existing.wardName },
-                    )
+                    ).withRemoteDirection(row)
                     if (merged != existing) {
                         cache[idx] = merged
                         changed = true
@@ -582,6 +614,10 @@ object RecentReportsRepository {
                     wardKey = row.wardKey,
                     wardNumber = row.wardNumber,
                     wardName = row.wardName,
+                    potholePosition = row.potholePosition.ifBlank { PotholePosition.MIDDLE.code },
+                    reportBearingDeg = row.reportBearingDeg ?: Float.NaN,
+                    trafficBearingDeg = row.trafficBearingDeg ?: Float.NaN,
+                    trafficFacing = row.trafficFacingStorageKey(),
                 )
                 if (assignee != null && row.assigneeName.isBlank()) {
                     entry = entry.withAssignee(assignee)
@@ -677,6 +713,10 @@ object RecentReportsRepository {
                             wardKey = o.optString("wardKey", ""),
                             wardNumber = o.optInt("wardNumber", 0),
                             wardName = o.optString("wardName", ""),
+                            potholePosition = o.optString("potholePosition", PotholePosition.MIDDLE.code),
+                            reportBearingDeg = o.optDouble("reportBearingDeg", Double.NaN).toFloat(),
+                            trafficBearingDeg = o.optDouble("trafficBearingDeg", Double.NaN).toFloat(),
+                            trafficFacing = o.optString("trafficFacing", ""),
                             reporterUserId = o.optString("reporterId", ""),
                             cloudSynced = o.optBoolean("cloudSynced", false),
                             storageClosePath = o.optString("storageClose", ""),
@@ -734,6 +774,18 @@ object RecentReportsRepository {
                         put("wardKey", r.wardKey)
                         put("wardNumber", r.wardNumber)
                         put("wardName", r.wardName)
+                    }
+                    if (r.potholePosition.isNotBlank() && r.potholePosition != PotholePosition.MIDDLE.code) {
+                        put("potholePosition", r.potholePosition)
+                    }
+                    if (!r.reportBearingDeg.isNaN()) {
+                        put("reportBearingDeg", r.reportBearingDeg.toDouble())
+                    }
+                    if (!r.trafficBearingDeg.isNaN()) {
+                        put("trafficBearingDeg", r.trafficBearingDeg.toDouble())
+                    }
+                    if (r.trafficFacing.isNotBlank()) {
+                        put("trafficFacing", r.trafficFacing)
                     }
                     if (r.reporterUserId.isNotBlank()) {
                         put("reporterId", r.reporterUserId)

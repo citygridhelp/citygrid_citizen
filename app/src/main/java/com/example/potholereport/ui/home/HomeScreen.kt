@@ -60,11 +60,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.TwoWheeler
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Whatshot
@@ -139,6 +144,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import androidx.core.os.CancellationSignal
@@ -159,7 +165,11 @@ import com.example.potholereport.data.PotholeSeverity
 import com.example.potholereport.data.PotholeReportStatus
 import com.example.potholereport.data.RainCriticality
 import com.example.potholereport.data.RecentReportsRepository
+import com.example.potholereport.data.TripNavigationMatcher
+import com.example.potholereport.data.TripPotholeAlert
 import com.example.potholereport.data.formatRecentReportCaption
+import com.example.potholereport.data.remote.OsrmRouteClient
+import com.example.potholereport.data.remote.TripVehicle
 import com.example.potholereport.data.isMeaningfulAreaName
 import com.example.potholereport.data.resolveAreaLabel
 import com.example.potholereport.data.SignupStartResult
@@ -193,6 +203,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
+
+private val DarkBlue = Color(0xFF1A1A2E)
 
 @Composable
 fun HomeScreen(
@@ -885,9 +897,56 @@ private fun ReportAndTrackSection(
     }
     var severityMenuExpanded by remember { mutableStateOf(false) }
     var areaHeatEnabled by rememberSaveable { mutableStateOf(false) }
+    var tripModeEnabled by rememberSaveable { mutableStateOf(false) }
+    var mapFullscreen by remember { mutableStateOf(false) }
+    var tripDestLat by rememberSaveable { mutableStateOf<Double?>(null) }
+    var tripDestLon by rememberSaveable { mutableStateOf<Double?>(null) }
+    var tripDestLabel by rememberSaveable { mutableStateOf("") }
+    /** null lat/lon = start from current GPS location. */
+    var tripStartLat by rememberSaveable { mutableStateOf<Double?>(null) }
+    var tripStartLon by rememberSaveable { mutableStateOf<Double?>(null) }
+    var tripStartLabel by rememberSaveable { mutableStateOf("") }
+    /** Reverse-geocoded label for GPS start (“My location”). */
+    var tripMyLocationLabel by remember { mutableStateOf("") }
+    var tripVehicleName by rememberSaveable { mutableStateOf(TripVehicle.CAR.name) }
+    val tripVehicle = remember(tripVehicleName) {
+        TripVehicle.entries.find { it.name == tripVehicleName } ?: TripVehicle.CAR
+    }
+    /** False until user taps Navigate — selecting places alone does not route. */
+    var tripNavActive by rememberSaveable { mutableStateOf(false) }
+    val tripStartUsesMyLocation = tripStartLat == null && tripStartLon == null
     val heatAvailable = CityMetroKeys.canonical(selectedCity) == "BENGALURU"
     LaunchedEffect(heatAvailable) {
         if (!heatAvailable) areaHeatEnabled = false
+    }
+    LaunchedEffect(tripModeEnabled) {
+        if (!tripModeEnabled) {
+            tripDestLat = null
+            tripDestLon = null
+            tripDestLabel = ""
+            tripStartLat = null
+            tripStartLon = null
+            tripStartLabel = ""
+            tripMyLocationLabel = ""
+            tripNavActive = false
+        }
+    }
+    LaunchedEffect(
+        tripModeEnabled,
+        tripStartUsesMyLocation,
+        gpsPinLocation?.latitude,
+        gpsPinLocation?.longitude,
+    ) {
+        if (!tripModeEnabled || !tripStartUsesMyLocation) return@LaunchedEffect
+        val gps = gpsPinLocation
+        if (gps == null) {
+            tripMyLocationLabel = "My location (searching…)"
+            return@LaunchedEffect
+        }
+        val label = withContext(Dispatchers.IO) {
+            reverseGeocodeTripPlace(context, gps.latitude, gps.longitude)
+        }
+        tripMyLocationLabel = label.ifBlank { "My location" }
     }
     var citySearchQuery by rememberSaveable { mutableStateOf("") }
     var searchedPlaces by remember { mutableStateOf<List<Pair<String, GeoPoint>>>(emptyList()) }
@@ -1044,9 +1103,8 @@ private fun ReportAndTrackSection(
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
             Text(
                 "Severity",
                 fontSize = 12.sp,
@@ -1112,6 +1170,34 @@ private fun ReportAndTrackSection(
                 }
             }
         }
+        FilterChip(
+            selected = tripModeEnabled,
+            onClick = { tripModeEnabled = !tripModeEnabled },
+            label = {
+                Text("Trip", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Filled.Navigation,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+            },
+            shape = RoundedCornerShape(50),
+            border = BorderStroke(
+                1.dp,
+                if (tripModeEnabled) Color(0xFFB91C1C) else Color(0xFF9CA3AF),
+            ),
+            colors = FilterChipDefaults.filterChipColors(
+                containerColor = Color.Transparent,
+                labelColor = MaterialTheme.colorScheme.onBackground,
+                iconColor = MaterialTheme.colorScheme.onBackground,
+                selectedContainerColor = Color(0xFFB91C1C),
+                selectedLabelColor = Color.White,
+                selectedLeadingIconColor = Color.White,
+            ),
+            modifier = Modifier.padding(end = 8.dp),
+        )
         if (heatAvailable) {
             FilterChip(
                 selected = areaHeatEnabled,
@@ -1149,39 +1235,224 @@ private fun ReportAndTrackSection(
 
     Spacer(Modifier.height(8.dp))
 
+    var tripAlerts by remember { mutableStateOf<List<TripPotholeAlert>>(emptyList()) }
+    var tripRoutePoints by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
+    val bbox = remember(selectedCity) { metroBboxForCity(selectedCity) }
+    LaunchedEffect(
+        tripModeEnabled,
+        tripNavActive,
+        tripStartLat,
+        tripStartLon,
+        tripDestLat,
+        tripDestLon,
+        tripVehicle,
+        gpsPinLocation?.latitude,
+        gpsPinLocation?.longitude,
+        gpsPinLocation?.bearing,
+        recentReportsEpoch,
+        mapSeverityFilter,
+    ) {
+        if (!tripModeEnabled || !tripNavActive) {
+            tripAlerts = emptyList()
+            tripRoutePoints = emptyList()
+            return@LaunchedEffect
+        }
+        val gps = gpsPinLocation
+        val metroBbox = bbox ?: return@LaunchedEffect
+        val originLat = tripStartLat ?: gps?.latitude
+        val originLon = tripStartLon ?: gps?.longitude
+        val reports = withContext(Dispatchers.IO) {
+            RecentReportsRepository.reportsForMapInMetro(selectedCity, metroBbox)
+                .filter { r -> mapSeverityFilter == null || r.severity == mapSeverityFilter }
+        }
+        val destLat = tripDestLat
+        val destLon = tripDestLon
+        if (originLat != null && originLon != null && destLat != null && destLon != null) {
+            val route = OsrmRouteClient.fetchRoute(
+                originLat, originLon, destLat, destLon, tripVehicle,
+            )
+            tripRoutePoints = route
+            val driverLat = gps?.latitude ?: originLat
+            val driverLon = gps?.longitude ?: originLon
+            tripAlerts = if (route.size >= 2) {
+                TripNavigationMatcher.matchAlongRoute(
+                    route, reports, driverLat, driverLon,
+                    gps?.bearing?.takeIf { gps.hasBearing() },
+                    gps?.accuracy?.takeIf { gps.hasAccuracy() },
+                )
+            } else {
+                emptyList()
+            }
+        } else {
+            tripRoutePoints = emptyList()
+            tripAlerts = emptyList()
+        }
+    }
+    val nextTripAlert = tripAlerts.firstOrNull()
+
+    @Composable
+    fun MapSection(modifier: Modifier, showExpand: Boolean) {
+        Box(modifier = modifier.background(Color(0xFFFDFCF9))) {
+            OsmDensityMap(
+                selectedCity = selectedCity,
+                userLocation = userLocation,
+                onLocateMe = {
+                    resetMapCameraToDefault()
+                    onLocateMe()
+                },
+                onMapViewControlUsed = { },
+                onMapTouchChanged = onMapTouchChanged,
+                onMapPanEndedAtCenter = onMapPanEndedAtCenter,
+                mapLocateEpoch = mapLocateEpoch,
+                lastConsumedMapLocateEpoch = lastConsumedMapLocateEpoch,
+                onMapLocateEpochConsumed = { lastConsumedMapLocateEpoch = it },
+                mapCameraUserPositioned = mapCameraUserPositioned,
+                savedMapCenterLat = savedMapCenterLat,
+                savedMapCenterLon = savedMapCenterLon,
+                savedMapZoom = savedMapZoom,
+                onMapCameraSnapshot = ::snapshotMapCamera,
+                onResetMapCamera = ::resetMapCameraToDefault,
+                gpsPinLocation = gpsPinLocation,
+                gpsAccuracyText = gpsAccuracyText,
+                mapSeverityFilter = mapSeverityFilter,
+                areaHeatEnabled = areaHeatEnabled && !tripModeEnabled,
+                tripModeEnabled = tripModeEnabled,
+                tripNavActive = tripNavActive,
+                tripRoutePoints = tripRoutePoints,
+                tripAlerts = tripAlerts,
+                tripStartLat = tripStartLat
+                    ?: tripRoutePoints.firstOrNull()?.first
+                    ?: gpsPinLocation?.latitude?.takeIf { tripNavActive },
+                tripStartLon = tripStartLon
+                    ?: tripRoutePoints.firstOrNull()?.second
+                    ?: gpsPinLocation?.longitude?.takeIf { tripNavActive },
+                tripDestinationLat = tripDestLat,
+                tripDestinationLon = tripDestLon,
+                recentReportsEpoch = recentReportsEpoch,
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (tripModeEnabled && !tripNavActive) {
+                TripPlannerPanel(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .fillMaxWidth()
+                        .padding(start = 8.dp, top = 8.dp, end = 52.dp),
+                    selectedCity = selectedCity,
+                    startText = if (tripStartUsesMyLocation) tripMyLocationLabel else tripStartLabel,
+                    destText = tripDestLabel,
+                    vehicle = tripVehicle,
+                    startUsesMyLocation = tripStartUsesMyLocation,
+                    canNavigate = tripDestLat != null && tripDestLon != null &&
+                        (tripStartLat != null || gpsPinLocation != null),
+                    onVehicleChange = { tripVehicleName = it.name },
+                    onStartSelected = { label, lat, lon ->
+                        tripStartLat = lat
+                        tripStartLon = lon
+                        tripStartLabel = label
+                        tripNavActive = false
+                    },
+                    onDestSelected = { label, lat, lon ->
+                        tripDestLat = lat
+                        tripDestLon = lon
+                        tripDestLabel = label
+                        tripNavActive = false
+                    },
+                    onUseMyLocation = {
+                        tripStartLat = null
+                        tripStartLon = null
+                        tripStartLabel = ""
+                        tripNavActive = false
+                    },
+                    onClearDestination = {
+                        tripDestLat = null
+                        tripDestLon = null
+                        tripDestLabel = ""
+                        tripNavActive = false
+                    },
+                    onNavigate = { tripNavActive = true },
+                )
+            }
+            if (tripModeEnabled && tripNavActive) {
+                Button(
+                    onClick = { tripNavActive = false },
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFB91C1C),
+                        contentColor = Color.White,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Text("Stop", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            if (showExpand) {
+                IconButton(
+                    onClick = { mapFullscreen = true },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .background(Color.White.copy(alpha = 0.92f), CircleShape)
+                        .size(36.dp),
+                ) {
+                    Icon(Icons.Filled.Fullscreen, contentDescription = "Expand map", tint = DarkBlue)
+                }
+            }
+            nextTripAlert?.let { alert ->
+                val side = alert.sideLabel?.let { " · $it" }.orEmpty()
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(8.dp)
+                        .fillMaxWidth(),
+                    color = Color(0xFF1F2937).copy(alpha = 0.92f),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Text(
+                        "Next pothole in ${alert.distanceMeters.toInt()} m$side",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(375.dp) // +20% from 312.dp (prior step from 260.dp)
-            .padding(horizontal = 16.dp)
-            .background(Color(0xFFFDFCF9))
+            .height(375.dp)
+            .padding(horizontal = 16.dp),
     ) {
-        OsmDensityMap(
-            selectedCity = selectedCity,
-            userLocation = userLocation,
-            onLocateMe = {
-                resetMapCameraToDefault()
-                onLocateMe()
-            },
-            onMapViewControlUsed = { },
-            onMapTouchChanged = onMapTouchChanged,
-            onMapPanEndedAtCenter = onMapPanEndedAtCenter,
-            mapLocateEpoch = mapLocateEpoch,
-            lastConsumedMapLocateEpoch = lastConsumedMapLocateEpoch,
-            onMapLocateEpochConsumed = { lastConsumedMapLocateEpoch = it },
-            mapCameraUserPositioned = mapCameraUserPositioned,
-            savedMapCenterLat = savedMapCenterLat,
-            savedMapCenterLon = savedMapCenterLon,
-            savedMapZoom = savedMapZoom,
-            onMapCameraSnapshot = ::snapshotMapCamera,
-            onResetMapCamera = ::resetMapCameraToDefault,
-            gpsPinLocation = gpsPinLocation,
-            gpsAccuracyText = gpsAccuracyText,
-            mapSeverityFilter = mapSeverityFilter,
-            areaHeatEnabled = areaHeatEnabled,
-            recentReportsEpoch = recentReportsEpoch,
-            modifier = Modifier.fillMaxSize()
-        )
+        MapSection(Modifier.fillMaxSize(), showExpand = true)
+    }
+
+    if (mapFullscreen) {
+        Dialog(
+            onDismissRequest = { mapFullscreen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFFFDFCF9)),
+            ) {
+                MapSection(Modifier.fillMaxSize(), showExpand = false)
+                IconButton(
+                    onClick = { mapFullscreen = false },
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                        .background(Color.White.copy(alpha = 0.92f), CircleShape),
+                ) {
+                    Icon(Icons.Filled.FullscreenExit, contentDescription = "Exit fullscreen", tint = DarkBlue)
+                }
+            }
+        }
     }
 
     RecentReportsStrip(
@@ -1189,6 +1460,296 @@ private fun ReportAndTrackSection(
         recentReportsEpoch = recentReportsEpoch,
         onReportsMutated = onReportsMutated,
     )
+}
+
+/**
+ * On-map trip planner: start + destination search, Car / Bike, and Navigate.
+ * Start defaults to the device GPS location when left blank.
+ * Routing runs only after [onNavigate].
+ */
+@Composable
+private fun TripPlannerPanel(
+    modifier: Modifier = Modifier,
+    selectedCity: String,
+    startText: String,
+    destText: String,
+    vehicle: TripVehicle,
+    startUsesMyLocation: Boolean,
+    canNavigate: Boolean,
+    onVehicleChange: (TripVehicle) -> Unit,
+    onStartSelected: (label: String, lat: Double, lon: Double) -> Unit,
+    onDestSelected: (label: String, lat: Double, lon: Double) -> Unit,
+    onUseMyLocation: () -> Unit,
+    onClearDestination: () -> Unit,
+    onNavigate: () -> Unit,
+) {
+    val context = LocalContext.current
+    var startQuery by remember { mutableStateOf("") }
+    var destQuery by remember { mutableStateOf("") }
+    var startResults by remember { mutableStateOf<List<Pair<String, GeoPoint>>>(emptyList()) }
+    var destResults by remember { mutableStateOf<List<Pair<String, GeoPoint>>>(emptyList()) }
+    /** 0 = none, 1 = start, 2 = destination. */
+    var activeField by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(startUsesMyLocation) {
+        if (startUsesMyLocation) {
+            startQuery = ""
+            startResults = emptyList()
+            activeField = 0
+        }
+    }
+
+    LaunchedEffect(startQuery, activeField, selectedCity) {
+        if (activeField != 1) return@LaunchedEffect
+        val q = startQuery.trim()
+        if (q.length < 2) {
+            startResults = emptyList()
+            return@LaunchedEffect
+        }
+        delay(280)
+        startResults = withContext(Dispatchers.IO) {
+            searchTripPlaces(context, q, selectedCity, limit = 18)
+        }
+    }
+    LaunchedEffect(destQuery, activeField, selectedCity) {
+        if (activeField != 2) return@LaunchedEffect
+        val q = destQuery.trim()
+        if (q.length < 2) {
+            destResults = emptyList()
+            return@LaunchedEffect
+        }
+        delay(280)
+        destResults = withContext(Dispatchers.IO) {
+            searchTripPlaces(context, q, selectedCity, limit = 18)
+        }
+    }
+
+    val fieldText = DarkBlue
+    val placeholderColor = Color(0xFF6B7280)
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedTextColor = fieldText,
+        unfocusedTextColor = fieldText,
+        disabledTextColor = fieldText,
+        focusedBorderColor = DarkBlue,
+        unfocusedBorderColor = Color(0xFFB0B4BD),
+        focusedContainerColor = Color.White,
+        unfocusedContainerColor = Color.White,
+        cursorColor = DarkBlue,
+        focusedPlaceholderColor = placeholderColor,
+        unfocusedPlaceholderColor = placeholderColor,
+        focusedLeadingIconColor = DarkBlue,
+        unfocusedLeadingIconColor = DarkBlue,
+        focusedTrailingIconColor = Color(0xFF4B5563),
+        unfocusedTrailingIconColor = Color(0xFF4B5563),
+    )
+
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = Color.White.copy(alpha = 0.97f),
+        shadowElevation = 4.dp,
+        contentColor = DarkBlue,
+    ) {
+        Column(Modifier.padding(10.dp)) {
+            OutlinedTextField(
+                value = when {
+                    startQuery.isNotBlank() -> startQuery
+                    startUsesMyLocation && startText.isNotBlank() -> startText
+                    else -> ""
+                },
+                onValueChange = {
+                    startQuery = it
+                    activeField = 1
+                },
+                singleLine = true,
+                placeholder = {
+                    Text(
+                        when {
+                            startUsesMyLocation -> "My location"
+                            startText.isNotBlank() -> startText
+                            else -> "Choose start"
+                        },
+                        fontSize = 12.sp,
+                        color = placeholderColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                textStyle = MaterialTheme.typography.bodySmall.copy(color = fieldText),
+                leadingIcon = {
+                    Icon(
+                        Icons.Filled.MyLocation,
+                        contentDescription = if (startUsesMyLocation) {
+                            "My location active"
+                        } else {
+                            "Custom start location"
+                        },
+                        tint = if (startUsesMyLocation) Color(0xFF15803D) else Color(0xFF2563EB),
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+                trailingIcon = {
+                    if (startQuery.isNotBlank() || !startUsesMyLocation) {
+                        IconButton(onClick = {
+                            startQuery = ""
+                            startResults = emptyList()
+                            activeField = 0
+                            onUseMyLocation()
+                        }) {
+                            Icon(
+                                if (startUsesMyLocation) Icons.Outlined.Close else Icons.Filled.MyLocation,
+                                contentDescription = "Use my location",
+                                tint = if (startUsesMyLocation) Color(0xFF4B5563) else Color(0xFF15803D),
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                },
+                colors = fieldColors,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (activeField == 1 && startResults.isNotEmpty()) {
+                TripSuggestionList(startResults) { label, gp ->
+                    startQuery = label
+                    startResults = emptyList()
+                    activeField = 0
+                    onStartSelected(label, gp.latitude, gp.longitude)
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            OutlinedTextField(
+                value = destQuery,
+                onValueChange = {
+                    destQuery = it
+                    activeField = 2
+                },
+                singleLine = true,
+                placeholder = {
+                    Text(
+                        destText.ifBlank { "Choose destination" },
+                        fontSize = 12.sp,
+                        color = placeholderColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                textStyle = MaterialTheme.typography.bodySmall.copy(color = fieldText),
+                leadingIcon = {
+                    Icon(Icons.Filled.Navigation, contentDescription = "Destination", tint = Color(0xFFB91C1C), modifier = Modifier.size(18.dp))
+                },
+                trailingIcon = {
+                    if (destQuery.isNotBlank() || destText.isNotBlank()) {
+                        IconButton(onClick = {
+                            destQuery = ""
+                            destResults = emptyList()
+                            activeField = 0
+                            onClearDestination()
+                        }) {
+                            Icon(Icons.Outlined.Close, contentDescription = "Clear destination", tint = Color(0xFF4B5563), modifier = Modifier.size(16.dp))
+                        }
+                    }
+                },
+                colors = fieldColors,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (activeField == 2 && destResults.isNotEmpty()) {
+                TripSuggestionList(destResults) { label, gp ->
+                    destQuery = label
+                    destResults = emptyList()
+                    activeField = 0
+                    onDestSelected(label, gp.latitude, gp.longitude)
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TripVehicle.entries.forEach { option ->
+                    val selected = vehicle == option
+                    FilterChip(
+                        selected = selected,
+                        onClick = { onVehicleChange(option) },
+                        label = { Text(option.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = if (option == TripVehicle.CAR) Icons.Filled.DirectionsCar else Icons.Filled.TwoWheeler,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        },
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.dp, if (selected) DarkBlue else Color(0xFF9CA3AF)),
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = Color.Transparent,
+                            labelColor = DarkBlue,
+                            iconColor = DarkBlue,
+                            selectedContainerColor = DarkBlue,
+                            selectedLabelColor = Color.White,
+                            selectedLeadingIconColor = Color.White,
+                        ),
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = onNavigate,
+                    enabled = canNavigate,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFB91C1C),
+                        contentColor = Color.White,
+                        disabledContainerColor = Color(0xFFD1D5DB),
+                        disabledContentColor = Color(0xFF6B7280),
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Navigation,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Navigate", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TripSuggestionList(
+    results: List<Pair<String, GeoPoint>>,
+    onPick: (String, GeoPoint) -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp)
+            .background(Color(0xFFF8F9FA), RoundedCornerShape(6.dp)),
+    ) {
+        results.take(8).forEach { (label, gp) ->
+            Text(
+                text = label,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onPick(label, gp) }
+                    .padding(horizontal = 8.dp, vertical = 9.dp),
+                fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = DarkBlue,
+                fontWeight = FontWeight.Medium,
+            )
+            HorizontalDivider(color = Color(0xFFE5E7EB))
+        }
+    }
 }
 
 @Composable
@@ -1390,6 +1951,22 @@ private fun resolvePlaceLabelFromAddress(address: android.location.Address): Str
     return preferred.trim()
 }
 
+/** Richer street / landmark label for trip place search (not city-only). */
+private fun resolveTripPlaceLabel(address: android.location.Address): String {
+    val line = address.getAddressLine(0)?.trim().orEmpty()
+    if (line.length >= 4) return line
+    val parts = listOf(
+        address.featureName,
+        address.thoroughfare,
+        address.subLocality,
+        address.locality,
+        address.subAdminArea,
+    ).mapNotNull { it?.trim()?.takeIf { s -> s.isNotEmpty() } }
+        .distinct()
+        .filter { it !in setOf("Unnamed Road", "India") }
+    return parts.joinToString(", ").ifBlank { "Unknown place" }
+}
+
 private fun searchIndianPlaces(context: Context, query: String, limit: Int = 40): List<Pair<String, GeoPoint>> {
     if (query.trim().length < 2) return emptyList()
     return runCatching {
@@ -1403,6 +1980,61 @@ private fun searchIndianPlaces(context: Context, query: String, limit: Int = 40)
             val lon = address.longitude
             if (label.length < 2) continue
             out.putIfAbsent(label, GeoPoint(lat, lon))
+        }
+        out.entries.map { it.key to it.value }
+    }.getOrDefault(emptyList())
+}
+
+/** Reverse-geocode lat/lng into a readable trip place label. */
+private fun reverseGeocodeTripPlace(context: Context, lat: Double, lon: Double): String {
+    if (!lat.isFinite() || !lon.isFinite()) return ""
+    return runCatching {
+        val geocoder = Geocoder(context, Locale.Builder().setLanguage("en").setRegion("IN").build())
+        @Suppress("DEPRECATION")
+        val addresses = geocoder.getFromLocation(lat, lon, 1) ?: emptyList()
+        val address = addresses.firstOrNull() ?: return ""
+        resolveTripPlaceLabel(address)
+    }.getOrDefault("")
+}
+
+/**
+ * Trip start/destination search: city-biased, keeps distinct street/landmark results.
+ * Tries city-scoped query first, then India-wide to fill gaps.
+ */
+private fun searchTripPlaces(
+    context: Context,
+    query: String,
+    selectedCity: String,
+    limit: Int = 18,
+): List<Pair<String, GeoPoint>> {
+    val q = query.trim()
+    if (q.length < 2) return emptyList()
+    return runCatching {
+        val geocoder = Geocoder(context, Locale.Builder().setLanguage("en").setRegion("IN").build())
+        val cityLabel = formatCityDisplayName(selectedCity)
+        val queries = listOf(
+            "$q, $cityLabel, India",
+            "$q, $selectedCity, India",
+            "$q, India",
+        ).distinct()
+        val out = linkedMapOf<String, GeoPoint>()
+        val seenCoords = mutableSetOf<String>()
+        for (search in queries) {
+            if (out.size >= limit) break
+            @Suppress("DEPRECATION")
+            val addresses = geocoder.getFromLocationName(search, limit) ?: emptyList()
+            for (address in addresses) {
+                if (!address.hasLatitude() || !address.hasLongitude()) continue
+                val lat = address.latitude
+                val lon = address.longitude
+                val coordKey = String.format(Locale.US, "%.4f,%.4f", lat, lon)
+                if (!seenCoords.add(coordKey)) continue
+                val label = resolveTripPlaceLabel(address)
+                if (label.length < 3) continue
+                // Prefer first (usually city-biased) hit for a given display label.
+                out.putIfAbsent(label, GeoPoint(lat, lon))
+                if (out.size >= limit) break
+            }
         }
         out.entries.map { it.key to it.value }
     }.getOrDefault(emptyList())
@@ -1765,6 +2397,7 @@ private class CityOutlineDecor(
     var areaHeat: AreaDensityHeatOverlay? = null,
     var cityName: CityNameOverlay? = null,
     var clusters: ReportClusterMarkersOverlay? = null,
+    var tripNav: TripNavigationOverlay? = null,
 )
 
 private fun removeAreaHeatOverlay(map: MapView, decor: CityOutlineDecor) {
@@ -1845,6 +2478,78 @@ private fun refreshReportClusterOverlayOnly(
         map.overlays.add(clusters)
     }
     map.invalidate()
+}
+
+private fun refreshTripNavigationOverlay(
+    map: MapView,
+    decor: CityOutlineDecor,
+    tripModeEnabled: Boolean,
+    routePoints: List<Pair<Double, Double>>,
+    alerts: List<TripPotholeAlert>,
+) {
+    if (!tripModeEnabled) {
+        decor.tripNav?.let { overlay ->
+            overlay.clear(map)
+            overlay.detachFrom(map)
+        }
+        decor.tripNav = null
+        return
+    }
+    val overlay = decor.tripNav ?: TripNavigationOverlay().also { decor.tripNav = it }
+    overlay.attachTo(map)
+    overlay.routePoints = routePoints.map { (lat, lon) -> GeoPoint(lat, lon) }
+    overlay.alerts = alerts
+    overlay.syncMarkers(map)
+    decor.clusters?.let { clusters ->
+        map.overlays.remove(clusters)
+        map.overlays.add(clusters)
+    }
+    map.invalidate()
+}
+
+private fun syncTripEndpointDots(
+    map: MapView,
+    startSlot: Array<Marker?>,
+    destSlot: Array<Marker?>,
+    show: Boolean,
+    startLat: Double?,
+    startLon: Double?,
+    destLat: Double?,
+    destLon: Double?,
+) {
+    fun syncDot(
+        slot: Array<Marker?>,
+        lat: Double?,
+        lon: Double?,
+        title: String,
+        colorHex: String,
+    ) {
+        val existing = slot[0]
+        if (!show || lat == null || lon == null) {
+            existing?.let { map.overlays.remove(it) }
+            slot[0] = null
+            return
+        }
+        val point = GeoPoint(lat, lon)
+        if (existing == null) {
+            val marker = Marker(map).apply {
+                position = point
+                this.title = title
+                setInfoWindow(null)
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                setIcon(buildTripDotDrawable(map.context, colorHex))
+            }
+            slot[0] = marker
+            map.overlays.add(marker)
+        } else {
+            existing.position = point
+            if (existing.icon == null) {
+                existing.setIcon(buildTripDotDrawable(map.context, colorHex))
+            }
+        }
+    }
+    syncDot(startSlot, startLat, startLon, "Start", "#22C55E")
+    syncDot(destSlot, destLat, destLon, "Destination", "#EF4444")
 }
 
 /**
@@ -2232,20 +2937,68 @@ private val CartoPositronLabeled: XYTileSource = XYTileSource(
 )
 
 /** Small solid green dot for GPS (replaces default osmdroid marker). */
-private fun buildGpsPinDrawable(context: Context): BitmapDrawable {
+private fun buildGpsPinDrawable(context: Context): BitmapDrawable =
+    buildTripDotDrawable(context, "#4ADE80", sizeDp = 11f)
+
+/** Solid colored map dot for trip start / destination. */
+private fun buildTripDotDrawable(
+    context: Context,
+    colorHex: String,
+    sizeDp: Float = 14f,
+): BitmapDrawable {
     val d = context.resources.displayMetrics.density
-    val size = (11f * d).toInt().coerceIn(10, 26)
+    val size = (sizeDp * d).toInt().coerceIn(12, 32)
     val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bmp)
     val cx = size / 2f
     val cy = size / 2f
-    val r = (size / 2f - 0.5f * d).coerceAtLeast(3f)
-    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = AndroidColor.parseColor("#4ADE80")
+    val r = (size / 2f - 0.6f * d).coerceAtLeast(3.5f)
+    val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.WHITE
         style = Paint.Style.FILL
     }
+    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.parseColor(colorHex)
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(cx, cy, r + 1.2f * d, ring)
     canvas.drawCircle(cx, cy, r, fill)
     return BitmapDrawable(context.resources, bmp).apply { setBounds(0, 0, size, size) }
+}
+
+/** Navigation chevron (points up / north); rotate with [Marker.setRotation]. */
+private fun buildTripMovePointerDrawable(context: Context): BitmapDrawable {
+    val d = context.resources.displayMetrics.density
+    val w = (22f * d).toInt().coerceIn(18, 48)
+    val h = (28f * d).toInt().coerceIn(22, 56)
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+    val path = android.graphics.Path().apply {
+        moveTo(w / 2f, 1.5f * d)
+        lineTo(w - 2f * d, h - 2f * d)
+        lineTo(w / 2f, h - 7f * d)
+        lineTo(2f * d, h - 2f * d)
+        close()
+    }
+    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.parseColor("#2563EB")
+        style = Paint.Style.FILL
+    }
+    val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 1.6f * d
+        strokeJoin = Paint.Join.ROUND
+    }
+    canvas.drawPath(path, fill)
+    canvas.drawPath(path, stroke)
+    return BitmapDrawable(context.resources, bmp).apply { setBounds(0, 0, w, h) }
+}
+
+private fun Location.isTripMoving(): Boolean {
+    if (!hasSpeed()) return false
+    // ~1.5 km/h — walking or faster counts as moving.
+    return speed >= 0.4f
 }
 
 private fun cancelGpsPinAutoHide(map: MapView, hideRunnableSlot: Array<Runnable?>) {
@@ -2276,6 +3029,14 @@ private fun OsmDensityMap(
     gpsAccuracyText: String,
     mapSeverityFilter: PotholeSeverity?,
     areaHeatEnabled: Boolean,
+    tripModeEnabled: Boolean,
+    tripNavActive: Boolean,
+    tripRoutePoints: List<Pair<Double, Double>>,
+    tripAlerts: List<TripPotholeAlert>,
+    tripStartLat: Double?,
+    tripStartLon: Double?,
+    tripDestinationLat: Double?,
+    tripDestinationLon: Double?,
     onLocateMe: () -> Unit,
     onMapViewControlUsed: () -> Unit,
     onMapTouchChanged: (Boolean) -> Unit,
@@ -2305,8 +3066,14 @@ private fun OsmDensityMap(
     val lastSyncedReportEpoch = remember { mutableIntStateOf(-1) }
     val lastMapSeverityFilter = remember { mutableStateOf<PotholeSeverity?>(null) }
     val lastAreaHeatEnabled = remember { mutableStateOf(false) }
+    val lastTripModeEnabled = remember { mutableStateOf(false) }
+    val lastTripRouteSize = remember { mutableIntStateOf(-1) }
+    val lastTripAlertsSize = remember { mutableIntStateOf(-1) }
     val areaHeatEnabledHolder = remember { object { var enabled: Boolean = false } }
     areaHeatEnabledHolder.enabled = areaHeatEnabled
+    val tripDestMarkerRef = remember { arrayOfNulls<Marker>(1) }
+    val tripStartMarkerRef = remember { arrayOfNulls<Marker>(1) }
+    val tripMovingPointerActive = remember { booleanArrayOf(false) }
     val gpsMarkerRef = remember { arrayOfNulls<Marker>(1) }
     val gpsPinHideRunnable = remember { arrayOfNulls<Runnable>(1) }
     /** Latest GPS fix for map touch hit-test (factory listener reads this each frame). */
@@ -2344,11 +3111,20 @@ private fun OsmDensityMap(
                 cityOutlineDecor.areaHeat?.let { m.overlays.remove(it) }
                 cityOutlineDecor.dim?.let { m.overlays.remove(it) }
                 cityOutlineDecor.edge?.let { m.overlays.remove(it) }
+                cityOutlineDecor.tripNav?.let { overlay ->
+                    overlay.clear(m)
+                    overlay.detachFrom(m)
+                }
+                tripDestMarkerRef[0]?.let { m.overlays.remove(it) }
+                tripDestMarkerRef[0] = null
+                tripStartMarkerRef[0]?.let { m.overlays.remove(it) }
+                tripStartMarkerRef[0] = null
                 cityOutlineDecor.cityName = null
                 cityOutlineDecor.clusters = null
                 cityOutlineDecor.areaHeat = null
                 cityOutlineDecor.dim = null
                 cityOutlineDecor.edge = null
+                cityOutlineDecor.tripNav = null
             }
         }
     }
@@ -2377,6 +3153,49 @@ private fun OsmDensityMap(
         map.invalidate()
         map.postInvalidate()
     }
+    LaunchedEffect(
+        tripModeEnabled,
+        tripNavActive,
+        tripRoutePoints,
+        tripAlerts,
+        tripStartLat,
+        tripStartLon,
+        tripDestinationLat,
+        tripDestinationLon,
+        mapSessionId,
+    ) {
+        var map = mapHolder.map
+        var tries = 0
+        while (map == null && tries < 30) {
+            delay(16)
+            map = mapHolder.map
+            tries++
+        }
+        map ?: return@LaunchedEffect
+        refreshTripNavigationOverlay(
+            map = map,
+            decor = cityOutlineDecor,
+            tripModeEnabled = tripModeEnabled,
+            routePoints = tripRoutePoints,
+            alerts = tripAlerts,
+        )
+        syncTripEndpointDots(
+            map = map,
+            startSlot = tripStartMarkerRef,
+            destSlot = tripDestMarkerRef,
+            show = tripModeEnabled && tripNavActive,
+            startLat = tripStartLat,
+            startLon = tripStartLon,
+            destLat = tripDestinationLat,
+            destLon = tripDestinationLon,
+        )
+        lastTripModeEnabled.value = tripModeEnabled
+        lastTripRouteSize.intValue = tripRoutePoints.size
+        lastTripAlertsSize.intValue = tripAlerts.size
+        map.invalidate()
+        map.postInvalidate()
+    }
+
     val zoomHideJob = remember { object { var job: Job? = null } }
     val programmaticCameraMoveRef = remember { booleanArrayOf(false) }
     fun runProgrammaticCamera(action: (MapView) -> Unit) {
@@ -2385,6 +3204,75 @@ private fun OsmDensityMap(
         action(map)
         map.post { programmaticCameraMoveRef[0] = false }
     }
+
+    /** Trip Navigate / first movement → leave city overview for street-level tracking. */
+    var tripStreetFocusDone by remember { mutableStateOf(false) }
+    LaunchedEffect(tripNavActive) {
+        if (!tripNavActive) {
+            tripStreetFocusDone = false
+            return@LaunchedEffect
+        }
+        var map = mapHolder.map
+        var tries = 0
+        while (map == null && tries < 40) {
+            delay(16)
+            map = mapHolder.map
+            tries++
+        }
+        map ?: return@LaunchedEffect
+        delay(100)
+        if (!tripNavActive || tripStreetFocusDone) return@LaunchedEffect
+        val focus = gpsPinLocation
+            ?: tripStartLat?.let { lat ->
+                tripStartLon?.let { lon ->
+                    Location("trip-start").apply {
+                        latitude = lat
+                        longitude = lon
+                    }
+                }
+            }
+            ?: return@LaunchedEffect
+        runProgrammaticCamera { it.scheduleFocusOnGps(selectedCity, focus) }
+        onMapCameraSnapshot(focus.latitude, focus.longitude, STREET_VIEW_ZOOM)
+        tripStreetFocusDone = true
+    }
+    // If Navigate ran before GPS was ready, zoom to street once a fix arrives.
+    LaunchedEffect(
+        tripNavActive,
+        tripStreetFocusDone,
+        gpsPinLocation?.latitude,
+        gpsPinLocation?.longitude,
+    ) {
+        if (!tripNavActive || tripStreetFocusDone) return@LaunchedEffect
+        val gps = gpsPinLocation ?: return@LaunchedEffect
+        var map = mapHolder.map
+        var tries = 0
+        while (map == null && tries < 30) {
+            delay(16)
+            map = mapHolder.map
+            tries++
+        }
+        map ?: return@LaunchedEffect
+        runProgrammaticCamera { it.scheduleFocusOnGps(selectedCity, gps) }
+        onMapCameraSnapshot(gps.latitude, gps.longitude, STREET_VIEW_ZOOM)
+        tripStreetFocusDone = true
+    }
+    // If still on city overview when the user begins moving, force street view.
+    LaunchedEffect(
+        tripNavActive,
+        gpsPinLocation?.speed,
+        gpsPinLocation?.bearing,
+    ) {
+        if (!tripNavActive) return@LaunchedEffect
+        val gps = gpsPinLocation ?: return@LaunchedEffect
+        if (!gps.isTripMoving()) return@LaunchedEffect
+        val map = mapHolder.map ?: return@LaunchedEffect
+        if (!map.isAtCityOverviewZoom() && tripStreetFocusDone) return@LaunchedEffect
+        runProgrammaticCamera { it.scheduleFocusOnGps(selectedCity, gps) }
+        onMapCameraSnapshot(gps.latitude, gps.longitude, STREET_VIEW_ZOOM)
+        tripStreetFocusDone = true
+    }
+
     val touchCallbacks = remember {
         object {
             var onMapTouchChanged: (Boolean) -> Unit = {}
@@ -2833,6 +3721,44 @@ private fun OsmDensityMap(
                     view.invalidate()
                     view.postInvalidate()
                 }
+                if (
+                    tripModeEnabled != lastTripModeEnabled.value ||
+                    tripRoutePoints.size != lastTripRouteSize.intValue ||
+                    tripAlerts.size != lastTripAlertsSize.intValue
+                ) {
+                    refreshTripNavigationOverlay(
+                        map = view,
+                        decor = cityOutlineDecor,
+                        tripModeEnabled = tripModeEnabled,
+                        routePoints = tripRoutePoints,
+                        alerts = tripAlerts,
+                    )
+                    syncTripEndpointDots(
+                        map = view,
+                        startSlot = tripStartMarkerRef,
+                        destSlot = tripDestMarkerRef,
+                        show = tripModeEnabled && tripNavActive,
+                        startLat = tripStartLat,
+                        startLon = tripStartLon,
+                        destLat = tripDestinationLat,
+                        destLon = tripDestinationLon,
+                    )
+                    lastTripModeEnabled.value = tripModeEnabled
+                    lastTripRouteSize.intValue = tripRoutePoints.size
+                    lastTripAlertsSize.intValue = tripAlerts.size
+                    view.invalidate()
+                } else if (tripModeEnabled) {
+                    syncTripEndpointDots(
+                        map = view,
+                        startSlot = tripStartMarkerRef,
+                        destSlot = tripDestMarkerRef,
+                        show = tripNavActive,
+                        startLat = tripStartLat,
+                        startLon = tripStartLon,
+                        destLat = tripDestinationLat,
+                        destLon = tripDestinationLon,
+                    )
+                }
                 cityOutlineDecor.cityName?.let { cityLabel ->
                     val show = revealCityLabel && selectedCity.isNotBlank()
                     if (cityLabel.labelVisible != show) {
@@ -2842,11 +3768,13 @@ private fun OsmDensityMap(
                 }
                 val gps = gpsPinLocation
                 val slot = gpsMarkerRef[0]
+                val showMovePointer = tripNavActive && gps != null && gps.isTripMoving() && gps.hasBearing()
                 when {
                     gps == null -> {
                         cancelGpsPinAutoHide(view, gpsPinHideRunnable)
                         lastGpsPinScheduleKey.value = null
                         lastMapLocateEpochForGpsPin.intValue = mapLocateEpoch
+                        tripMovingPointerActive[0] = false
                         if (slot != null) {
                             view.overlays.remove(slot)
                             gpsMarkerRef[0] = null
@@ -2858,10 +3786,20 @@ private fun OsmDensityMap(
                             position = GeoPoint(gps.latitude, gps.longitude)
                             title = "Your location (GPS)"
                             snippet = "From device GPS"
-                            setIcon(buildGpsPinDrawable(view.context))
                             setInfoWindow(null)
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                             isEnabled = true
+                            if (showMovePointer) {
+                                setIcon(buildTripMovePointerDrawable(view.context))
+                                setFlat(true)
+                                setRotation(gps.bearing)
+                                tripMovingPointerActive[0] = true
+                            } else {
+                                setIcon(buildGpsPinDrawable(view.context))
+                                setFlat(false)
+                                setRotation(0f)
+                                tripMovingPointerActive[0] = false
+                            }
                         }
                         gpsMarkerRef[0] = m
                         view.overlays.add(m)
@@ -2873,12 +3811,27 @@ private fun OsmDensityMap(
                             abs(slot.position.longitude - next.longitude) > 1e-7
                         ) {
                             slot.position = next
-                            view.invalidate()
                         }
+                        if (showMovePointer) {
+                            if (!tripMovingPointerActive[0]) {
+                                slot.setIcon(buildTripMovePointerDrawable(view.context))
+                                slot.setFlat(true)
+                                tripMovingPointerActive[0] = true
+                            }
+                            slot.setRotation(gps.bearing)
+                            slot.isEnabled = true
+                            cancelGpsPinAutoHide(view, gpsPinHideRunnable)
+                        } else if (tripMovingPointerActive[0]) {
+                            slot.setIcon(buildGpsPinDrawable(view.context))
+                            slot.setFlat(false)
+                            slot.setRotation(0f)
+                            tripMovingPointerActive[0] = false
+                        }
+                        view.invalidate()
                     }
                 }
                 latestGpsPinForTouch[0] = gps?.let { Location(it) }
-                if (gps != null) {
+                if (gps != null && !showMovePointer) {
                     val marker = gpsMarkerRef[0]
                     if (marker != null) {
                         var scheduled = false
@@ -2902,6 +3855,8 @@ private fun OsmDensityMap(
                             scheduleGpsPinAutoHide(view, gpsMarkerRef, gpsPinHideRunnable)
                         }
                     }
+                } else if (showMovePointer) {
+                    lastGpsPinScheduleKey.value = null
                 }
             }
         )

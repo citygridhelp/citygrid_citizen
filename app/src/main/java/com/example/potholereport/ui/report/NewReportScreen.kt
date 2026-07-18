@@ -79,6 +79,7 @@ import com.example.potholereport.data.PersistedPotholeReport
 import com.example.potholereport.data.PotholePosition
 import com.example.potholereport.data.PotholeSeverity
 import com.example.potholereport.data.RecentReportsRepository
+import com.example.potholereport.data.TrafficFacingMode
 import com.example.potholereport.data.remote.ReportSyncRepository
 import com.example.potholereport.data.remote.SupabaseClientProvider
 import com.example.potholereport.ml.PhotoCaptureKind
@@ -142,6 +143,8 @@ fun NewReportScreen(
     var deviceLat by remember { mutableStateOf<Double?>(null) }
     var deviceLng by remember { mutableStateOf<Double?>(null) }
     var deviceLocationAccuracyM by remember { mutableStateOf<Float?>(null) }
+    var deviceBearingDeg by remember { mutableStateOf<Float?>(null) }
+    var trafficFacing by remember { mutableStateOf(TrafficFacingMode.FACING_CAMERA) }
     var manualCoordLat by remember { mutableStateOf<Double?>(null) }
     var manualCoordLng by remember { mutableStateOf<Double?>(null) }
     var useManualLocation by remember { mutableStateOf(false) }
@@ -169,6 +172,7 @@ fun NewReportScreen(
             deviceLat = null
             deviceLng = null
             deviceLocationAccuracyM = null
+            deviceBearingDeg = null
             return
         }
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -179,6 +183,7 @@ fun NewReportScreen(
             deviceLat = null
             deviceLng = null
             deviceLocationAccuracyM = null
+            deviceBearingDeg = null
             return
         }
         scope.launch {
@@ -192,12 +197,14 @@ fun NewReportScreen(
                 deviceLat = loc.latitude
                 deviceLng = loc.longitude
                 deviceLocationAccuracyM = loc.accuracy.takeIf { it > 0f }
+                deviceBearingDeg = loc.bearing.takeIf { loc.hasBearing() }
                 if (!useManualLocation) locationBlockedReason = null
             } else if (!useManualLocation) {
                 locationBlockedReason = "NO_FIX"
                 deviceLat = null
                 deviceLng = null
                 deviceLocationAccuracyM = null
+                deviceBearingDeg = null
             }
         }
     }
@@ -279,6 +286,7 @@ fun NewReportScreen(
                     } else {
                         wideUri = capturedUri
                         wideVerified = true
+                        trafficFacing = TrafficFacingMode.FACING_CAMERA
                     }
                 }
                 is PhotoValidationResult.Rejected -> {
@@ -567,6 +575,22 @@ fun NewReportScreen(
                         onClick = { if (closeUpVerified) launchCamera(2) },
                     )
 
+                    if (wideVerified) {
+                        Spacer(Modifier.height(6.dp))
+                        TrafficDirectionConfirmRow(
+                            facing = trafficFacing,
+                            enabled = !formBusy,
+                            onRotate = {
+                                trafficFacing = when (trafficFacing) {
+                                    TrafficFacingMode.FACING_CAMERA -> TrafficFacingMode.AWAY_FROM_CAMERA
+                                    TrafficFacingMode.AWAY_FROM_CAMERA -> TrafficFacingMode.FACING_CAMERA
+                                    TrafficFacingMode.UNKNOWN -> TrafficFacingMode.FACING_CAMERA
+                                }
+                            },
+                            onNotSure = { trafficFacing = TrafficFacingMode.UNKNOWN },
+                        )
+                    }
+
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "Photos are checked on-device with TensorFlow Lite before you can submit.",
@@ -818,6 +842,9 @@ fun NewReportScreen(
                                             note = note,
                                             reporterUserId = reporterUserId,
                                             submittedSignedIn = submittedWhileSignedIn,
+                                            potholePosition = selectedPosition,
+                                            reportBearingDeg = deviceBearingDeg ?: Float.NaN,
+                                            trafficFacing = trafficFacing,
                                         )
                                     }
                                     when (result) {
@@ -1195,6 +1222,62 @@ private fun PositionTile(
                 fontSize = 11.sp,
                 color = if (sel) Color.White else DarkBlue,
             )
+        }
+    }
+}
+
+@Composable
+private fun TrafficDirectionConfirmRow(
+    facing: TrafficFacingMode,
+    enabled: Boolean,
+    onRotate: () -> Unit,
+    onNotSure: () -> Unit,
+) {
+    val label = when (facing) {
+        TrafficFacingMode.FACING_CAMERA -> "Traffic flows toward camera top"
+        TrafficFacingMode.AWAY_FROM_CAMERA -> "Traffic flows away from camera"
+        TrafficFacingMode.UNKNOWN -> "Traffic direction not set"
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(BorderStroke(1.dp, DarkBlue))
+            .background(Color.White.copy(alpha = 0.92f))
+            .padding(8.dp),
+    ) {
+        Text(
+            "TRAFFIC DIRECTION (WIDE SHOT)",
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 9.sp,
+            color = DarkBlue,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Frame the road the way vehicles travel. Tap rotate if the arrow points the wrong way.",
+            fontSize = 8.sp,
+            lineHeight = 10.sp,
+            color = Color.Gray,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("↑", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = DarkBlue)
+                Spacer(Modifier.width(8.dp))
+                Text(label, fontSize = 9.sp, color = DarkBlue, modifier = Modifier.weight(1f, fill = false))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TextButton(onClick = onRotate, enabled = enabled) {
+                    Text("Rotate", fontSize = 10.sp)
+                }
+                TextButton(onClick = onNotSure, enabled = enabled) {
+                    Text("Not sure", fontSize = 10.sp)
+                }
+            }
         }
     }
 }
