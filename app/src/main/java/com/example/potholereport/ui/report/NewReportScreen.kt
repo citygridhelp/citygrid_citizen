@@ -76,6 +76,7 @@ import com.example.potholereport.data.AddReportResult
 import com.example.potholereport.data.BengaluruMunicipalRouting
 import com.example.potholereport.data.CityMetroLocation
 import com.example.potholereport.data.PersistedPotholeReport
+import com.example.potholereport.data.PotholeDuplicateGuard
 import com.example.potholereport.data.PotholePosition
 import com.example.potholereport.data.PotholeSeverity
 import com.example.potholereport.data.RecentReportsRepository
@@ -144,7 +145,7 @@ fun NewReportScreen(
     var deviceLng by remember { mutableStateOf<Double?>(null) }
     var deviceLocationAccuracyM by remember { mutableStateOf<Float?>(null) }
     var deviceBearingDeg by remember { mutableStateOf<Float?>(null) }
-    var trafficFacing by remember { mutableStateOf(TrafficFacingMode.FACING_CAMERA) }
+    var trafficFacing by remember { mutableStateOf(TrafficFacingMode.UNKNOWN) }
     var manualCoordLat by remember { mutableStateOf<Double?>(null) }
     var manualCoordLng by remember { mutableStateOf<Double?>(null) }
     var useManualLocation by remember { mutableStateOf(false) }
@@ -286,7 +287,7 @@ fun NewReportScreen(
                     } else {
                         wideUri = capturedUri
                         wideVerified = true
-                        trafficFacing = TrafficFacingMode.FACING_CAMERA
+                        trafficFacing = TrafficFacingMode.UNKNOWN
                     }
                 }
                 is PhotoValidationResult.Rejected -> {
@@ -422,7 +423,7 @@ fun NewReportScreen(
     }
     val metroBlock = metroSubmitBlock != null
 
-    LaunchedEffect(reportCityKey, reporterUserId, latEffective, lngEffective) {
+    LaunchedEffect(reportCityKey, reporterUserId, latEffective, lngEffective, gpsAccuracyM) {
         val lat = latEffective
         val lng = lngEffective
         duplicateBlockingReport = if (lat != null && lng != null && reporterUserId.isNotBlank()) {
@@ -432,6 +433,7 @@ fun NewReportScreen(
                     cityKey = reportCityKey,
                     latitude = lat,
                     longitude = lng,
+                    gpsAccuracyM = if (useManualLocation) null else gpsAccuracyM,
                 )
             }
         } else {
@@ -472,11 +474,11 @@ fun NewReportScreen(
             text = {
                 Text(
                     if (blocking != null) {
-                        "You already reported this pothole at this location. " +
+                        "You already have an open report within about ${PotholeDuplicateGuard.userFacingRadiusMeters()} m of this spot. " +
                             "Status: ${blocking.status.displayLabel}. " +
                             "You can submit a new report here only after it is marked Completed (resolved)."
                     } else {
-                        "You already have an open report for this pothole nearby."
+                        "You already have an open report within about ${PotholeDuplicateGuard.userFacingRadiusMeters()} m of this spot."
                     },
                     fontSize = 13.sp,
                 )
@@ -556,7 +558,7 @@ fun NewReportScreen(
 
                     SectionTitle("02 WIDE SHOT OF ROAD")
                     Text(
-                        "STEP BACK - CAPTURE THE FULL ROAD WIDTH WITH POTHOLE VISIBLE - USED FOR LANE-POSITION",
+                        "STEP BACK - SHOW THE FULL ROAD AND THE POTHOLE - USED TO CONFIRM TRAFFIC DIRECTION",
                         color = Color.Gray,
                         fontSize = 8.sp,
                         lineHeight = 10.sp,
@@ -580,14 +582,7 @@ fun NewReportScreen(
                         TrafficDirectionConfirmRow(
                             facing = trafficFacing,
                             enabled = !formBusy,
-                            onRotate = {
-                                trafficFacing = when (trafficFacing) {
-                                    TrafficFacingMode.FACING_CAMERA -> TrafficFacingMode.AWAY_FROM_CAMERA
-                                    TrafficFacingMode.AWAY_FROM_CAMERA -> TrafficFacingMode.FACING_CAMERA
-                                    TrafficFacingMode.UNKNOWN -> TrafficFacingMode.FACING_CAMERA
-                                }
-                            },
-                            onNotSure = { trafficFacing = TrafficFacingMode.UNKNOWN },
+                            onSelect = { trafficFacing = it },
                         )
                     }
 
@@ -662,7 +657,7 @@ fun NewReportScreen(
                     if (duplicateBlock) {
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "You already reported this pothole here (${duplicateBlockingReport?.status?.displayLabel}). " +
+                            "Open report within ~${PotholeDuplicateGuard.userFacingRadiusMeters()} m (${duplicateBlockingReport?.status?.displayLabel}). " +
                                 "Submit again only after it is resolved (Completed).",
                             color = Color(0xFFB45309),
                             fontSize = 8.sp,
@@ -752,18 +747,25 @@ fun NewReportScreen(
                     Spacer(Modifier.height(6.dp))
 
                     SectionTitle("04 POTHOLE POSITION IN PHOTO")
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(modifier.height(4.dp))
                     Text(
-                        "Tap the lane where the pothole sits — it helps the analyzer focus on the right area.",
+                        "Tap where the damage sits. Use Full width for a crater covering most of the road.",
                         fontSize = 10.sp,
                         color = Color.DarkGray,
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        PositionTile(Modifier.weight(1f), PotholePosition.LEFT, selectedPosition, enabled = !submitting) { selectedPosition = it }
-                        PositionTile(Modifier.weight(1f), PotholePosition.MIDDLE, selectedPosition, enabled = !submitting) { selectedPosition = it }
-                        PositionTile(Modifier.weight(1f), PotholePosition.RIGHT, selectedPosition, enabled = !submitting) { selectedPosition = it }
+                    Spacer(modifier.height(4.dp))
+                    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        PositionTile(modifier.weight(1f), PotholePosition.LEFT, selectedPosition, enabled = !submitting) { selectedPosition = it }
+                        PositionTile(modifier.weight(1f), PotholePosition.MIDDLE, selectedPosition, enabled = !submitting) { selectedPosition = it }
+                        PositionTile(modifier.weight(1f), PotholePosition.RIGHT, selectedPosition, enabled = !submitting) { selectedPosition = it }
                     }
+                    Spacer(modifier.height(4.dp))
+                    PositionTile(
+                        Modifier.fillMaxWidth(),
+                        PotholePosition.FULL_WIDTH,
+                        selectedPosition,
+                        enabled = !submitting,
+                    ) { selectedPosition = it }
 
                     Spacer(Modifier.height(6.dp))
 
@@ -1216,10 +1218,10 @@ private fun PositionTile(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                position.displayLabel.uppercase(),
+                if (position == PotholePosition.FULL_WIDTH) "FULL WIDTH / CRATER" else position.displayLabel.uppercase(),
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Black,
-                fontSize = 11.sp,
+                fontSize = if (position == PotholePosition.FULL_WIDTH) 10.sp else 11.sp,
                 color = if (sel) Color.White else DarkBlue,
             )
         }
@@ -1230,14 +1232,8 @@ private fun PositionTile(
 private fun TrafficDirectionConfirmRow(
     facing: TrafficFacingMode,
     enabled: Boolean,
-    onRotate: () -> Unit,
-    onNotSure: () -> Unit,
+    onSelect: (TrafficFacingMode) -> Unit,
 ) {
-    val label = when (facing) {
-        TrafficFacingMode.FACING_CAMERA -> "Traffic flows toward camera top"
-        TrafficFacingMode.AWAY_FROM_CAMERA -> "Traffic flows away from camera"
-        TrafficFacingMode.UNKNOWN -> "Traffic direction not set"
-    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1246,7 +1242,7 @@ private fun TrafficDirectionConfirmRow(
             .padding(8.dp),
     ) {
         Text(
-            "TRAFFIC DIRECTION (WIDE SHOT)",
+            "WHICH WAY DO CARS TRAVEL IN THIS PHOTO?",
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
             fontSize = 9.sp,
@@ -1254,7 +1250,7 @@ private fun TrafficDirectionConfirmRow(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "Frame the road the way vehicles travel. Tap rotate if the arrow points the wrong way.",
+            "Look at the wide shot. Which way do cars move in the photo? Used for Left/Right trip alerts.",
             fontSize = 8.sp,
             lineHeight = 10.sp,
             color = Color.Gray,
@@ -1262,23 +1258,80 @@ private fun TrafficDirectionConfirmRow(
         Spacer(Modifier.height(6.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("↑", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = DarkBlue)
-                Spacer(Modifier.width(8.dp))
-                Text(label, fontSize = 9.sp, color = DarkBlue, modifier = Modifier.weight(1f, fill = false))
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                TextButton(onClick = onRotate, enabled = enabled) {
-                    Text("Rotate", fontSize = 10.sp)
-                }
-                TextButton(onClick = onNotSure, enabled = enabled) {
-                    Text("Not sure", fontSize = 10.sp)
-                }
-            }
+            TrafficFacingTile(
+                modifier = Modifier.weight(1f),
+                title = "Toward camera",
+                subtitle = "Flow to camera top",
+                glyph = "↓",
+                selected = facing == TrafficFacingMode.FACING_CAMERA,
+                enabled = enabled,
+                onClick = { onSelect(TrafficFacingMode.FACING_CAMERA) },
+            )
+            TrafficFacingTile(
+                modifier = Modifier.weight(1f),
+                title = "Away",
+                subtitle = "Flow to bottom",
+                glyph = "↑",
+                selected = facing == TrafficFacingMode.AWAY_FROM_CAMERA,
+                enabled = enabled,
+                onClick = { onSelect(TrafficFacingMode.AWAY_FROM_CAMERA) },
+            )
+            TrafficFacingTile(
+                modifier = Modifier.weight(1f),
+                title = "Not sure",
+                subtitle = "Skip for now",
+                glyph = "?",
+                selected = facing == TrafficFacingMode.UNKNOWN,
+                enabled = enabled,
+                onClick = { onSelect(TrafficFacingMode.UNKNOWN) },
+            )
         }
+    }
+}
+
+@Composable
+private fun TrafficFacingTile(
+    modifier: Modifier,
+    title: String,
+    subtitle: String,
+    glyph: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .height(72.dp)
+            .border(BorderStroke(1.dp, DarkBlue))
+            .background(if (selected) OrangeSelect else Color.White.copy(alpha = 0.85f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            glyph,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (selected) Color.White else DarkBlue,
+        )
+        Text(
+            title,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 9.sp,
+            color = if (selected) Color.White else DarkBlue,
+            maxLines = 1,
+        )
+        Text(
+            subtitle,
+            fontSize = 7.sp,
+            lineHeight = 8.sp,
+            color = if (selected) Color.White.copy(alpha = 0.95f) else Color.DarkGray,
+            maxLines = 2,
+        )
     }
 }
 

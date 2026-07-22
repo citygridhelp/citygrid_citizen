@@ -377,15 +377,15 @@ private fun DetailLine(
 }
 
 private val ReportDetailMapTiles: XYTileSource = XYTileSource(
-    "CartoPositronLabeled18",
+    "CartoVoyagerLabeled18",
     0,
     CartoBasemapUsefulMaxZoom.toInt(),
     256,
     ".png",
     arrayOf(
-        "https://a.basemaps.cartocdn.com/light_all/",
-        "https://b.basemaps.cartocdn.com/light_all/",
-        "https://c.basemaps.cartocdn.com/light_all/",
+        "https://a.basemaps.cartocdn.com/rastertiles/voyager/",
+        "https://b.basemaps.cartocdn.com/rastertiles/voyager/",
+        "https://c.basemaps.cartocdn.com/rastertiles/voyager/",
     ),
     "\u00a9 OpenStreetMap contributors \u00b7 \u00a9 CARTO",
 )
@@ -421,7 +421,6 @@ private fun ReportLocationMapPreview(
             factory = { ctx ->
                 MapView(ctx).apply {
                     setTileSource(ReportDetailMapTiles)
-                    installCartoLabelDarkeningTilesOverlay()
                     setMultiTouchControls(true)
                     isHorizontalMapRepetitionEnabled = false
                     isVerticalMapRepetitionEnabled = false

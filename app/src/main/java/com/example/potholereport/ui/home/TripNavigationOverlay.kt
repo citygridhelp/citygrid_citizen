@@ -3,6 +3,7 @@ package com.example.potholereport.ui.home
 import android.graphics.Paint
 import com.example.potholereport.data.PotholeSeverity
 import com.example.potholereport.data.TripPotholeAlert
+import com.example.potholereport.data.formatTripPotholeAlertLine
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
@@ -11,23 +12,45 @@ import org.osmdroid.views.overlay.Polyline
 import android.graphics.Color as AndroidColor
 
 /**
- * Draws trip route polyline and upcoming pothole markers on the home map.
+ * Draws trip route polyline (completed grey + remaining blue) and upcoming pothole markers.
  */
 class TripNavigationOverlay : Overlay() {
 
-    var routePoints: List<GeoPoint> = emptyList()
+    var remainingRoutePoints: List<GeoPoint> = emptyList()
         set(value) {
             field = value
-            routeLine.setPoints(value)
+            remainingLine.setPoints(value)
         }
 
-  var alerts: List<TripPotholeAlert> = emptyList()
+    var completedRoutePoints: List<GeoPoint> = emptyList()
+        set(value) {
+            field = value
+            completedLine.setPoints(value)
+        }
+
+    /** @deprecated Prefer [remainingRoutePoints] + [completedRoutePoints]. */
+    var routePoints: List<GeoPoint>
+        get() = remainingRoutePoints
+        set(value) {
+            completedRoutePoints = emptyList()
+            remainingRoutePoints = value
+        }
+
+    var alerts: List<TripPotholeAlert> = emptyList()
         set(value) {
             field = value
             rebuildMarkers()
         }
 
-    private val routeLine = Polyline().apply {
+    private val completedLine = Polyline().apply {
+        outlinePaint.color = AndroidColor.parseColor("#9CA3AF")
+        outlinePaint.strokeWidth = 8f
+        outlinePaint.style = Paint.Style.STROKE
+        outlinePaint.isAntiAlias = true
+        outlinePaint.alpha = 180
+    }
+
+    private val remainingLine = Polyline().apply {
         outlinePaint.color = AndroidColor.parseColor("#2563EB")
         outlinePaint.strokeWidth = 8f
         outlinePaint.style = Paint.Style.STROKE
@@ -37,13 +60,19 @@ class TripNavigationOverlay : Overlay() {
     private val markers = mutableListOf<Marker>()
 
     fun attachTo(map: MapView) {
-        if (!map.overlays.contains(routeLine)) {
-            map.overlays.add(0, routeLine)
+        if (!map.overlays.contains(completedLine)) {
+            map.overlays.add(0, completedLine)
+        }
+        if (!map.overlays.contains(remainingLine)) {
+            val completedIdx = map.overlays.indexOf(completedLine)
+            val insertAt = if (completedIdx >= 0) completedIdx + 1 else 0
+            map.overlays.add(insertAt, remainingLine)
         }
     }
 
     fun detachFrom(map: MapView) {
-        map.overlays.remove(routeLine)
+        map.overlays.remove(completedLine)
+        map.overlays.remove(remainingLine)
         markers.forEach { map.overlays.remove(it) }
         markers.clear()
     }
@@ -60,11 +89,7 @@ class TripNavigationOverlay : Overlay() {
             if (!r.hasCoordinates()) continue
             val m = Marker(map).apply {
                 position = GeoPoint(r.latitude, r.longitude)
-                title = buildString {
-                    append(alert.distanceMeters.toInt())
-                    append(" m")
-                    alert.sideLabel?.let { append(" · ").append(it) }
-                }
+                title = formatTripPotholeAlertLine(alert)
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                 icon = map.context.getDrawable(
                     when (r.severity) {
@@ -77,13 +102,16 @@ class TripNavigationOverlay : Overlay() {
             markers.add(m)
             map.overlays.add(m)
         }
-        routeLine.setPoints(routePoints)
+        completedLine.setPoints(completedRoutePoints)
+        remainingLine.setPoints(remainingRoutePoints)
     }
 
     fun clear(map: MapView) {
-        routePoints = emptyList()
+        remainingRoutePoints = emptyList()
+        completedRoutePoints = emptyList()
         alerts = emptyList()
-        routeLine.setPoints(emptyList())
+        completedLine.setPoints(emptyList())
+        remainingLine.setPoints(emptyList())
         markers.forEach { map.overlays.remove(it) }
         markers.clear()
     }

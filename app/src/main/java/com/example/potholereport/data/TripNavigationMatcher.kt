@@ -1,5 +1,6 @@
 package com.example.potholereport.data
 
+import com.example.potholereport.data.remote.OsrmRouteStep
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -14,6 +15,22 @@ data class TripPotholeAlert(
     val alongRouteMeters: Double,
 )
 
+/** Driver position projected onto the active route. */
+data class TripRouteProgress(
+    val traveledMeters: Double,
+    val remainingMeters: Double,
+    val totalMeters: Double,
+    val completionFraction: Double,
+    val offRouteMeters: Double,
+)
+
+/** Upcoming turn guidance for the trip banner. */
+data class TripTurnGuidance(
+    val instruction: String,
+    val distanceMeters: Double,
+    val maneuverType: String,
+)
+
 object TripNavigationMatcher {
 
     /** Max perpendicular distance from route polyline to count a report (meters). */
@@ -24,6 +41,141 @@ object TripNavigationMatcher {
 
     /** Minimum GPS accuracy to show lane side (meters). */
     const val SIDE_MIN_ACCURACY_M = 25f
+
+    /** Base distance from the route that triggers a reroute. */
+    const val OFF_ROUTE_REROUTE_M = 60.0
+
+    /** Smaller one-time tolerance used to correct an inaccurate initial route origin. */
+    const val START_CORRECTION_M = 15.0
+
+    fun routeStartNeedsCorrection(
+        routePoints: List<Pair<Double, Double>>,
+        driverLat: Double,
+        driverLon: Double,
+        gpsAccuracyM: Float,
+    ): Boolean {
+        val start = routePoints.firstOrNull() ?: return false
+        if (!driverLat.isFinite() || !driverLon.isFinite() || !gpsAccuracyM.isFinite()) return false
+        val threshold = maxOf(START_CORRECTION_M, gpsAccuracyM * 1.25)
+        return haversineM(start.first, start.second, driverLat, driverLon) > threshold
+    }
+
+    /**
+     * Optionally prepends the live GPS pin when OSRM’s first vertex is only a few meters away.
+     * Long bridges are never drawn — they cut across parks / open land and look like off-road
+     * shortcuts. Prefer a full OSRM re-route from the GPS (caller) instead.
+     *
+     * @param maxBridgeMeters max allowed GPS→road gap to fill (meters). Car/Bike should pass
+     *   a very small value or skip this helper entirely.
+     */
+    fun pinRouteOriginToGps(
+        routePoints: List<Pair<Double, Double>>,
+        gpsLat: Double,
+        gpsLon: Double,
+        maxBridgeMeters: Double = 10.0,
+    ): List<Pair<Double, Double>> {
+        if (!gpsLat.isFinite() || !gpsLon.isFinite()) return routePoints
+        if (routePoints.isEmpty()) return listOf(gpsLat to gpsLon)
+        val start = routePoints.first()
+        val deltaM = haversineM(start.first, start.second, gpsLat, gpsLon)
+        if (deltaM < 1.5) return routePoints
+        if (deltaM > maxBridgeMeters) return routePoints
+        return listOf(gpsLat to gpsLon) + routePoints
+    }
+
+    /**
+     * Picks the next guidance step after the driver has passed previous maneuvers.
+     * [steps] must use cumulative [OsrmRouteStep.alongRouteMeters].
+     */
+    fun nextTurnGuidance(
+        steps: List<OsrmRouteStep>,
+        traveledMeters: Double,
+    ): TripTurnGuidance? {
+        if (steps.isEmpty() || !traveledMeters.isFinite()) return null
+        val upcoming = steps.firstOrNull { step ->
+            val type = step.maneuverType.lowercase()
+            if (type == "depart") return@firstOrNull false
+            step.alongRouteMeters >= traveledMeters - 8.0
+        } ?: return null
+        val distance = (upcoming.alongRouteMeters - traveledMeters).coerceAtLeast(0.0)
+        return TripTurnGuidance(
+            instruction = upcoming.instruction,
+            distanceMeters = distance,
+            maneuverType = upcoming.maneuverType,
+        )
+    }
+
+    /**
+     * Splits [routePoints] into completed (grey) and remaining (blue) polylines at
+     * [traveledMeters] along the route. Both lists share the split vertex so the line joins.
+     */
+    fun splitRouteByTraveled(
+        routePoints: List<Pair<Double, Double>>,
+        traveledMeters: Double,
+    ): Pair<List<Pair<Double, Double>>, List<Pair<Double, Double>>> {
+        if (routePoints.size < 2 || !traveledMeters.isFinite() || traveledMeters <= 0.0) {
+            return emptyList<Pair<Double, Double>>() to routePoints
+        }
+        var remainingBudget = traveledMeters
+        val completed = mutableListOf<Pair<Double, Double>>()
+        completed.add(routePoints.first())
+        for (i in 0 until routePoints.lastIndex) {
+            val a = routePoints[i]
+            val b = routePoints[i + 1]
+            val segLen = haversineM(a.first, a.second, b.first, b.second)
+            if (segLen <= 1e-3) {
+                completed.add(b)
+                continue
+            }
+            if (remainingBudget >= segLen) {
+                remainingBudget -= segLen
+                completed.add(b)
+                continue
+            }
+            val t = (remainingBudget / segLen).coerceIn(0.0, 1.0)
+            val split = (a.first + t * (b.first - a.first)) to (a.second + t * (b.second - a.second))
+            completed.add(split)
+            val remaining = buildList {
+                add(split)
+                for (j in (i + 1)..routePoints.lastIndex) add(routePoints[j])
+            }
+            return completed to remaining
+        }
+        return completed to emptyList()
+    }
+
+    fun routeProgress(
+        routePoints: List<Pair<Double, Double>>,
+        driverLat: Double,
+        driverLon: Double,
+    ): TripRouteProgress? {
+        if (routePoints.size < 2 || !driverLat.isFinite() || !driverLon.isFinite()) return null
+        val segment = nearestSegmentIndex(routePoints, driverLat, driverLon) ?: return null
+        val traveled = alongDistanceAt(routePoints, segment, driverLat, driverLon)
+        var total = 0.0
+        for (index in 0 until routePoints.lastIndex) {
+            total += haversineM(
+                routePoints[index].first,
+                routePoints[index].second,
+                routePoints[index + 1].first,
+                routePoints[index + 1].second,
+            )
+        }
+        val offRoute = perpendicularDistanceM(
+            routePoints[segment],
+            routePoints[segment + 1],
+            driverLat,
+            driverLon,
+        )
+        val clampedTraveled = traveled.coerceIn(0.0, total)
+        return TripRouteProgress(
+            traveledMeters = clampedTraveled,
+            remainingMeters = (total - clampedTraveled).coerceAtLeast(0.0),
+            totalMeters = total,
+            completionFraction = if (total > 0.0) clampedTraveled / total else 0.0,
+            offRouteMeters = offRoute,
+        )
+    }
 
     fun matchAlongRoute(
         routePoints: List<Pair<Double, Double>>,
@@ -77,7 +229,9 @@ object TripNavigationMatcher {
             if (dist < 5.0 || dist > maxAheadM) return@mapNotNull null
             val brg = bearingBetween(driverLat, driverLon, report.latitude, report.longitude)
             if (abs(normalizeBearingDelta(brg - bearing)) > coneHalfAngleDeg) return@mapNotNull null
-            val side = if (gpsAccuracyM != null && gpsAccuracyM <= SIDE_MIN_ACCURACY_M) {
+            val side = if (report.potholePositionEnum() == PotholePosition.FULL_WIDTH) {
+                PotholePosition.FULL_WIDTH.displayLabel
+            } else if (gpsAccuracyM != null && gpsAccuracyM <= SIDE_MIN_ACCURACY_M) {
                 resolveDriverLaneLabel(
                     report.potholePositionEnum(),
                     report.reportBearingDeg.takeIf { !it.isNaN() },
@@ -100,6 +254,9 @@ object TripNavigationMatcher {
         lat: Double,
         lon: Double,
     ): String? {
+        if (report.potholePositionEnum() == PotholePosition.FULL_WIDTH) {
+            return PotholePosition.FULL_WIDTH.displayLabel
+        }
         if (gpsAccuracyM != null && gpsAccuracyM > SIDE_MIN_ACCURACY_M) return null
         val fromMeta = resolveDriverLaneLabel(
             report.potholePositionEnum(),

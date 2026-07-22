@@ -40,7 +40,7 @@ data class PersistedPotholeReport(
     val wardKey: String = "",
     val wardNumber: Int = 0,
     val wardName: String = "",
-    /** Close-up lane: L / M / R ([PotholePosition.code]). */
+    /** Close-up lane: L / M / R / F ([PotholePosition.code]). */
     val potholePosition: String = PotholePosition.MIDDLE.code,
     /** GPS / device heading at submit (degrees). NaN if unknown. */
     val reportBearingDeg: Float = Float.NaN,
@@ -159,14 +159,15 @@ object RecentReportsRepository {
     }
 
     /**
-     * Returns an existing OPEN / IN_PROGRESS report from this reporter within
-     * [PotholeDuplicateGuard.SAME_POTHOLE_RADIUS_METERS] of the coordinates.
+     * Returns an existing OPEN / IN_PROGRESS report from this reporter within the
+     * effective same-pothole radius of the coordinates (see [PotholeDuplicateGuard]).
      */
     fun findActiveDuplicateForReporter(
         reporterUserId: String,
         cityKey: String,
         latitude: Double,
         longitude: Double,
+        gpsAccuracyM: Float? = null,
     ): PersistedPotholeReport? {
         synchronized(lock) {
             return PotholeDuplicateGuard.findActiveDuplicate(
@@ -175,6 +176,7 @@ object RecentReportsRepository {
                 cityKey = cityKey,
                 latitude = latitude,
                 longitude = longitude,
+                gpsAccuracyM = gpsAccuracyM,
             )
         }
     }
