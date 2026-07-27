@@ -6,15 +6,15 @@ package com.example.potholereport.data
  * The risk analyzer constrains its dark-blob search to the corresponding
  * vertical band (with a small overlap) so it picks up the actual pothole
  * the user is reporting and not a wall shadow / drain edge that happens to
- * be in another lane. [FULL_WIDTH] searches the whole frame for craters
- * that cover most of the road.
+ * be in another lane. [FULL_WIDTH] searches the whole frame for damage that
+ * spans most or all of the carriageway.
  */
 enum class PotholePosition(val displayLabel: String, val code: String) {
     LEFT("Left", "L"),
     MIDDLE("Middle", "M"),
     RIGHT("Right", "R"),
-    /** Large crater / damage spanning most of the carriageway. */
-    FULL_WIDTH("Full width", "F"),
+    /** Damage covering the full road width (large crater or many potholes across). */
+    FULL_WIDTH("Full road pothole", "F"),
     ;
 
     companion object {
@@ -25,7 +25,9 @@ enum class PotholePosition(val displayLabel: String, val code: String) {
             entries.find { it.name.equals(raw, ignoreCase = true) }?.let { return it }
             entries.find { it.displayLabel.equals(raw, ignoreCase = true) }?.let { return it }
             return when (raw.lowercase()) {
-                "across", "across road", "whole", "whole road", "full", "w" -> FULL_WIDTH
+                "across", "across road", "whole", "whole road", "full", "w",
+                "full width", "fullwidth", "full road", "full road pothole", "crater",
+                -> FULL_WIDTH
                 else -> MIDDLE
             }
         }

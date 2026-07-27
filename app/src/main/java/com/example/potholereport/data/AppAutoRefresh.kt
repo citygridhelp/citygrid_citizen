@@ -32,6 +32,7 @@ object AppAutoRefresh {
         }
         return withContext(Dispatchers.IO) {
             CitizenNotificationsRepository.checkAppVersion(BuildConfig.VERSION_NAME)
+            com.example.potholereport.data.remote.ReportSyncRepository.flushPendingUploads()
             if (!cityKey.isNullOrBlank()) {
                 RecentReportsRepository.syncPublicCityReportsFromSupabase(cityKey)
             }
@@ -53,6 +54,7 @@ object AppAutoRefresh {
         }
         return withContext(Dispatchers.IO) {
             CitizenNotificationsRepository.checkAppVersion(BuildConfig.VERSION_NAME)
+            com.example.potholereport.data.remote.ReportSyncRepository.flushPendingUploads()
             if (!cityKey.isNullOrBlank()) {
                 RecentReportsRepository.syncPublicCityReportsFromSupabase(cityKey)
             }

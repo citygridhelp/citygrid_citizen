@@ -29,6 +29,8 @@ data class TripTurnGuidance(
     val instruction: String,
     val distanceMeters: Double,
     val maneuverType: String,
+    /** OSRM modifier: left / right / straight / slight left / … */
+    val modifier: String = "",
 )
 
 object TripNavigationMatcher {
@@ -39,11 +41,28 @@ object TripNavigationMatcher {
     /** Max distance along route to show alerts (meters). */
     const val MAX_AHEAD_M = 2_500.0
 
+    /** Street-follow map: only the nearest few hazards, closer ahead. */
+    const val STREET_FOLLOW_MAP_MAX_ALERTS = 2
+    const val STREET_FOLLOW_MAP_MAX_AHEAD_M = 400.0
+
+    /** Map overview: more ahead along the corridor for planning. */
+    const val MAP_OVERVIEW_MAX_ALERTS = 10
+    const val MAP_OVERVIEW_MAX_AHEAD_M = 2_000.0
+
+    /** Lateral offset on the map when side (L/R) is known (meters). */
+    const val MAP_SIDE_OFFSET_M = 7.0
+
     /** Minimum GPS accuracy to show lane side (meters). */
     const val SIDE_MIN_ACCURACY_M = 25f
 
     /** Base distance from the route that triggers a reroute. */
     const val OFF_ROUTE_REROUTE_M = 60.0
+
+    /**
+     * Max lateral GPS drift (meters) we still pull onto the route polyline for the
+     * map cursor / camera. Beyond this, show raw GPS (truly off-route).
+     */
+    const val DRIVER_MAP_SNAP_MAX_M = 45.0
 
     /** Smaller one-time tolerance used to correct an inaccurate initial route origin. */
     const val START_CORRECTION_M = 15.0
@@ -102,6 +121,7 @@ object TripNavigationMatcher {
             instruction = upcoming.instruction,
             distanceMeters = distance,
             maneuverType = upcoming.maneuverType,
+            modifier = upcoming.modifier,
         )
     }
 
@@ -177,6 +197,30 @@ object TripNavigationMatcher {
         )
     }
 
+    /**
+     * Nearest point on [routePoints] for map display when GPS has drifted slightly
+     * off the road (e.g. onto a building). Returns null if farther than [maxSnapMeters]
+     * so a real off-route position is not forced onto the polyline.
+     */
+    fun snapDriverToRoute(
+        routePoints: List<Pair<Double, Double>>,
+        driverLat: Double,
+        driverLon: Double,
+        maxSnapMeters: Double = DRIVER_MAP_SNAP_MAX_M,
+    ): Pair<Double, Double>? {
+        if (routePoints.size < 2 || !driverLat.isFinite() || !driverLon.isFinite()) return null
+        if (!maxSnapMeters.isFinite() || maxSnapMeters <= 0.0) return null
+        val seg = nearestSegmentIndex(routePoints, driverLat, driverLon) ?: return null
+        val (aLat, aLon) = routePoints[seg]
+        val (bLat, bLon) = routePoints[seg + 1]
+        val t = projectT(aLat, aLon, bLat, bLon, driverLat, driverLon).coerceIn(0.0, 1.0)
+        val projLat = aLat + t * (bLat - aLat)
+        val projLon = aLon + t * (bLon - aLon)
+        val drift = haversineM(driverLat, driverLon, projLat, projLon)
+        if (drift > maxSnapMeters) return null
+        return projLat to projLon
+    }
+
     fun matchAlongRoute(
         routePoints: List<Pair<Double, Double>>,
         reports: List<PersistedPotholeReport>,
@@ -210,6 +254,87 @@ object TripNavigationMatcher {
                 alongRouteMeters = along,
             )
         }.sortedBy { it.distanceMeters }
+    }
+
+    /**
+     * Subset of [alerts] for drawing on the map: denser in overview, sparse in street follow.
+     * Voice / banner should keep using the full sorted [alerts] list.
+     */
+    fun alertsForMapDisplay(
+        alerts: List<TripPotholeAlert>,
+        streetFollow: Boolean,
+    ): List<TripPotholeAlert> {
+        val maxAhead = if (streetFollow) STREET_FOLLOW_MAP_MAX_AHEAD_M else MAP_OVERVIEW_MAX_AHEAD_M
+        val maxCount = if (streetFollow) STREET_FOLLOW_MAP_MAX_ALERTS else MAP_OVERVIEW_MAX_ALERTS
+        return alerts
+            .asSequence()
+            .filter { it.distanceMeters.isFinite() && it.distanceMeters <= maxAhead }
+            .sortedBy { it.distanceMeters }
+            .take(maxCount)
+            .toList()
+    }
+
+    /**
+     * Map pin lat/lon for [alert]: report coordinates, nudged left/right of the route
+     * when placement is known so the driver can see approximate lane side.
+     */
+    fun displayPositionForAlert(
+        routePoints: List<Pair<Double, Double>>,
+        alert: TripPotholeAlert,
+        offsetMeters: Double = MAP_SIDE_OFFSET_M,
+    ): Pair<Double, Double> {
+        val lat = alert.report.latitude
+        val lon = alert.report.longitude
+        if (!lat.isFinite() || !lon.isFinite()) return lat to lon
+        val side = normalizeSideKey(alert.sideLabel) ?: return lat to lon
+        if (side == "middle" || side == "full") return lat to lon
+        if (routePoints.size < 2 || offsetMeters <= 0.0) return lat to lon
+        val seg = nearestSegmentIndex(routePoints, lat, lon) ?: return lat to lon
+        val (aLat, aLon) = routePoints[seg]
+        val (bLat, bLon) = routePoints[seg + 1]
+        val routeBearing = bearingBetween(aLat, aLon, bLat, bLon)
+        val perpBearing = when (side) {
+            "left" -> routeBearing - 90f
+            "right" -> routeBearing + 90f
+            else -> return lat to lon
+        }
+        return destinationPoint(lat, lon, perpBearing, offsetMeters)
+    }
+
+    internal fun normalizeSideKey(sideLabel: String?): String? {
+        val raw = sideLabel?.trim()?.lowercase().orEmpty()
+        if (raw.isEmpty()) return null
+        return when (raw) {
+            "left", "l", "on your left" -> "left"
+            "right", "r", "on your right" -> "right"
+            "middle", "m", "center", "centre", "in the middle of the road" -> "middle"
+            "full width", "fullwidth", "f", "across", "across the road", "whole road",
+            "full road", "full road pothole", "crater",
+            -> "full"
+            else -> when {
+                raw.contains("left") -> "left"
+                raw.contains("right") -> "right"
+                raw.contains("middle") || raw.contains("center") || raw.contains("centre") -> "middle"
+                raw.contains("full") || raw.contains("across") -> "full"
+                else -> null
+            }
+        }
+    }
+
+    /** Move [distanceM] along [bearingDeg] from [lat]/[lon] (approx local tangent). */
+    fun destinationPoint(
+        lat: Double,
+        lon: Double,
+        bearingDeg: Float,
+        distanceM: Double,
+    ): Pair<Double, Double> {
+        if (!lat.isFinite() || !lon.isFinite() || !bearingDeg.isFinite() || !distanceM.isFinite()) {
+            return lat to lon
+        }
+        val br = Math.toRadians(bearingDeg.toDouble())
+        val dLat = (distanceM * cos(br)) / 111_320.0
+        val dLon = (distanceM * sin(br)) / (111_320.0 * cos(Math.toRadians(lat)).coerceAtLeast(1e-6))
+        return (lat + dLat) to (lon + dLon)
     }
 
     /** Ahead corridor when no destination route — cone along current bearing. */

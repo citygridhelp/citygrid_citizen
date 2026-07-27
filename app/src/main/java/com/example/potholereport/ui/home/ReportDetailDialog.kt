@@ -377,9 +377,9 @@ private fun DetailLine(
 }
 
 private val ReportDetailMapTiles: XYTileSource = XYTileSource(
-    "CartoVoyagerLabeled18",
+    "CartoVoyagerLabeled20",
     0,
-    CartoBasemapUsefulMaxZoom.toInt(),
+    CartoBasemapNativeMaxZoom.toInt(),
     256,
     ".png",
     arrayOf(

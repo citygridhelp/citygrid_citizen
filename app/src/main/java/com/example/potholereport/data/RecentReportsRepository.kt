@@ -325,6 +325,15 @@ object RecentReportsRepository {
         }
     }
 
+    /** Signed-in reports saved on-device that still need a Supabase push. */
+    fun listUnsyncedSignedInReports(): List<PersistedPotholeReport> {
+        return synchronized(lock) {
+            cache.filter { it.submittedSignedIn && !it.cloudSynced && it.photoPath.isNotBlank() }
+                .sortedByDescending { it.createdAtMs }
+                .toList()
+        }
+    }
+
     private data class PhotoDownloadJob(
         val reportId: Long,
         val storageClose: String,

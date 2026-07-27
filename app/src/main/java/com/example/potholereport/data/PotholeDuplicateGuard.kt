@@ -9,10 +9,9 @@ import kotlin.math.sqrt
 /**
  * One user may report the same physical pothole only once until it is resolved (COMPLETED).
  *
- * Radius is intentionally moderate (~30 m): distinct holes a short walk apart should still
- * be reportable, while GPS jitter at the same spot still collides. When GPS accuracy is
- * worse than the base radius, the effective radius expands so a coarse fix cannot bypass
- * an open report a few meters away.
+ * Radius is ~30 ft (**9.144 m**): nearby distinct holes stay reportable, while GPS jitter
+ * at the same spot still collides. When GPS accuracy is worse than the base radius, the
+ * effective radius expands so a coarse fix cannot bypass an open report a few meters away.
  *
  * MAJOR FIELD-TUNABLE: [SAME_POTHOLE_RADIUS_METERS] will be adjusted after more outdoor
  * field tests — treat changes here as a product calibration, not a casual tweak.
@@ -20,13 +19,14 @@ import kotlin.math.sqrt
 object PotholeDuplicateGuard {
 
     /**
-     * Base same-pothole radius (meters).
-     * FIELD CALIBRATION — Jul 2026 retune: 40 → 25 → **30 m** (25 felt tight for nearby distinct holes).
+     * Base same-pothole radius (meters) = **30 feet**.
+     * FIELD CALIBRATION — Jul 2026: 40 → 25 → 30 m → 15.24 m (50 ft) → 12.192 m (40 ft)
+     * → **9.144 m (30 ft)**.
      */
-    const val SAME_POTHOLE_RADIUS_METERS = 30.0
+    const val SAME_POTHOLE_RADIUS_METERS = 9.144
 
-    /** Cap so a terrible GPS fix does not block an entire street. */
-    const val MAX_DUPLICATE_RADIUS_METERS = 60.0
+    /** Cap so a terrible GPS fix does not block an entire street (~60 ft). */
+    const val MAX_DUPLICATE_RADIUS_METERS = 18.288
 
     /** Integer meters for user-facing copy (always keep UI in sync with [SAME_POTHOLE_RADIUS_METERS]). */
     fun userFacingRadiusMeters(): Int = SAME_POTHOLE_RADIUS_METERS.toInt()

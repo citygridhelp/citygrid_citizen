@@ -27,6 +27,151 @@ Do **not** rely on chat or memory alone — **this backlog is the source of trut
 
 ---
 
+## ★ Highest priority (do next — user reminder 27 Jul 2026)
+
+### 23. Trip alternate-route quality (MOST IMPORTANT — revisit)
+
+**Status:** **Deferred — #1 next trip task.** User reconfirmed (27 Jul 2026) as an active enhancement — keep working on alternate routes.
+
+**Problem:** Alternates sometimes missing, or include waste / meaningless diversions; quality filters and via-probes need a better Google-like balance.
+
+**When resuming:** Re-read `docs/product_assumptions.md` §5 and `OsrmRouteClient.kt`; treat this as the **most important** open trip item.
+
+**Key files:** `OsrmRouteClient.kt`, `OsrmRouteAlternatesTest.kt`, `TripNavigationOverlay.kt`, `docs/product_assumptions.md` §5.
+
+---
+
+### 24. Separate home map vs trip fullscreen map (UX — agreed, not coded yet)
+
+**Status:** **Implemented** (25 Jul 2026) — verify on device; tweak if needed.
+
+**Rules (confirmed with user):**
+
+| Surface | Behaviour |
+|---------|-----------|
+| **Home page map** | **Reports only.** Never draw trip/navigation polylines, ETA bubbles, or nav chrome — even if a trip is still active and the user **minimized** fullscreen. |
+| **Fullscreen trip / navigation map** | Owns all navigation UI. User may **pan the whole map** (not locked to city boundary). |
+| **Minimize while Navigate is on** | Fullscreen collapses; **Trip chip stays red** only if Navigate already started (`tripNavActive`). Home map = reports only. |
+| **Minimize while only planning** (no dest / dest cleared / Navigate not pressed) | Fullscreen collapses and **Trip turns off** — chip is **not** red on home. |
+| **Tap Trip again while minimized + Navigate active** | **Resume** the same trip fullscreen — do **not** end or restart. |
+| **Turning Trip off** | Explicit off while in fullscreen Navigate ends the session; or start a new plan when chip is not red. |
+
+**Intent:** Home = city reports / heat / clusters. Trip = dedicated navigation surface with free pan. Minimize hides the trip map but keeps the trip alive via the Trip chip.
+
+**Key files:** `HomeScreen.kt` (fullscreen vs embedded map, trip overlay gate, metro pan bounds).
+
+---
+
+### 25. Clearer map labels when zoomed in
+
+**Status:** Not implemented — **enhancement** (captured 27 Jul 2026).
+
+**Ask:** Increase place / street label font size and clarity at higher zoom so names stay readable (especially in street-follow / trip zoom).
+
+**Notes:** Basemap labels already come from CARTO Voyager (#14). Options to explore: zoom-linked label emphasis, stronger contrast (existing darkener), alternate labeled tile style, or a light vector/label overlay only at high zoom. Avoid making overview zoom look crowded.
+
+**Key files:** `CartoBasemapLabelDarkener.kt`, `HomeScreen.kt` (tile source / trip zoom), possibly trip-only chrome.
+
+---
+
+### 26. Adopt more Google Maps–like traits (product think)
+
+**Status:** Not implemented — **exploration / product** (captured 27 Jul 2026).
+
+**Ask:** Study and selectively copy useful Google Maps behaviours for trip + city map (without claiming to be GMaps or requiring their SDK).
+
+**Draft trait candidates (pick later):**
+
+- [ ] Camera feel (follow lag, bearing settle, overview ↔ street morph)
+- [ ] Route card / ETA / alternate chips presentation
+- [ ] Recenter / compass / traffic-like affordances (as far as OSM/OSRM allow)
+- [ ] Search result titles vs address hierarchy (partially done)
+- [ ] Gesture polish (two-finger tilt N/A on osmdroid 2D — document limits)
+
+**Reminder:** Capture a short “keep / skip / can’t do on osmdroid” list before coding large UI changes.
+
+---
+
+### 27. Soft edge “danger blink” for severe / critical ahead (Witcher-style)
+
+**Status:** Not implemented — **enhancement** (captured 27 Jul 2026).
+
+**Ask:** During navigation, when a **Severe** or **Critical** pothole is ahead, show a soft game-like blink / pulse on roughly **three screen edges** (e.g. left, right, and top — not a full red overlay), inspired by damage/danger vignettes (Witcher-style), not a harsh full-screen flash.
+
+**Intent:** Peripheral danger cue without blocking the road view or the speed/turn capsule.
+
+**Open questions:**
+
+- [ ] Trigger distance (e.g. only inside alert window / next ahead pothole)?
+- [ ] Severity-only vs Critical stronger pulse?
+- [ ] Respect mute / reduced-motion if we add accessibility later?
+
+**Key files:** `HomeScreen.kt` (trip fullscreen chrome), `TripNavigationMatcher.kt` / alert state.
+
+---
+
+### 28. Wide-shot on-screen L / M / R side selection (combine steps)
+
+**Status:** Not implemented — **enhancement** (captured 27 Jul 2026).
+
+**Ask:** While taking the **wide shot**, let the user tap **Left / Middle / Right** on the camera preview (where the pothole sits in the photo). One step then covers both “capture wide shot” and “pothole position in photo.”
+
+**Wins:**
+
+1. Faster report flow (less scrolling to section 04).
+2. Position is chosen **while looking at the photo**, matching the “as per the photo, tap that side” guidance.
+
+**Notes:** Keep section 04 as edit/confirm fallback; Full road pothole can stay on the form or as a fourth on-screen control. Traffic-facing confirm can stay after wide verify.
+
+**Key files:** `NewReportScreen.kt` (camera / wide-shot UI), `PotholePosition.kt`.
+
+---
+
+### 29. Turn-aware, speed-scaled pothole alerts
+
+**Status:** Not implemented — **enhancement** (captured 27 Jul 2026).
+
+**Ask:** When both a **turn** and a **pothole** are approaching, schedule alerts from **order on the route** and **driving speed**.
+
+| Situation | Behaviour |
+|-----------|-----------|
+| **Pothole before the turn** | Warn about the pothole **earlier** (before the turn cue dominates). Low speed → **1–2** alerts. Higher speed → **multiple** alerts before reaching it. |
+| **Pothole after the turn** | **Once before the turn** (preview what’s next after turning), then after the turn **1 / 2 / multiple** times depending on speed. |
+
+**Accepted product extras (user OK 27 Jul 2026):**
+
+1. **Coalesce when close** — If turn and pothole are very close along the route (draft: &lt; ~40 m), use **one short combined cue** (e.g. “Pothole, then left”) instead of two competing alerts.
+2. **Severity weighting** — **Severe / Critical** get earlier / stronger / more repeats; **Minor** stays quieter. Pair voice/capsule with **#27** edge blink for severe/critical only.
+
+**Recommended implementation approach (refine on build):**
+
+Prefer **time-to-event** (or distance ÷ speed) over fixed “N beeps”:
+
+- Alert budget ≈ how many reminders fit before ETA to the pothole (e.g. slow ≈ 1–2, fast ≈ 3–4), with a **minimum gap** between repeats so it doesn’t nag.
+- **Turn vs pothole order** from route geometry (meters along remaining path), not screen order.
+- Shared alert scheduler with **#22** / **#27** (one brain for voice + capsule + edge blink).
+- Optional stretch: several potholes in one segment → one summary (“3 potholes ahead”) then side/severity for the next one.
+
+**Key files:** `TripNavigationMatcher.kt`, `TripPotholeAlertFeedback.kt`, `HomeScreen.kt` (nav chrome / TTS), step list from OSRM.
+
+---
+
+### Review notes — better possibilities (27 Jul 2026, no code yet)
+
+Cross-check of open enhancements. Treat as **proposals** until promoted to numbered items.
+
+| # | Idea | Why it helps |
+|---|------|--------------|
+| **A** | One **alert scheduler** for #22 + #27 + #29 (voice, capsule, edge blink) | Avoids three systems fighting for attention at a turn |
+| **B** | On **#23** alternates: prefer corridors with **fewer severe/critical** ahead when time delta is small | Unique City Grid value vs plain GMaps ETA |
+| **C** | **#25** labels: boost contrast / native z20 tiles first; don’t invent a second font overlay unless needed | Less work, fewer clutter bugs at overview zoom |
+| **D** | **#26** GMaps traits — ship only: strong **Recenter**, clear **next-maneuver priority**, better **alternate chips**; skip 3D tilt on osmdroid | Highest UX return, honest about 2D limits |
+| **E** | **#28** wide-shot L/M/R: optional **auto-suggest** side from photo blob, user taps to confirm | Faster + still “as per the photo” |
+| **F** | Cluster of potholes before a turn → **one count cue**, then detail the next hole | Stops alert spam on bad stretches |
+| **G** | Edge blink (#27) / repeats (#29) must **respect mute / volume** | Accessibility + night driving |
+
+---
+
 ## Auth & citizen identity
 
 ### 1. Separate account per email (current design — no app work)
@@ -516,7 +661,7 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 | With destination | Start + Destination search on map → OSRM route; alerts within **28 m** corridor, **2.5 km** ahead |
 | Vehicle | Car / Bike chips on planner panel |
 | Lane side label | Shown when GPS accuracy ≤ **25 m** and report has traffic bearing |
-| Fullscreen map | Expand / collapse dialog on home map |
+| Fullscreen map | In-composition expand/collapse (not a Dialog — Dialog was sending the app to background) |
 
 **Key files:** `TripNavigationMatcher.kt`, `OsrmRouteClient.kt`, `TripNavigationOverlay.kt`, `ReportDirectionMetadata.kt`, `NewReportScreen.kt` (`TrafficDirectionConfirmRow`), `HomeScreen.kt`, `0012_report_direction_metadata.sql`.
 
@@ -526,6 +671,11 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 - [ ] Smoke test on device (bearing updates, OSRM offline fallback)
 - [ ] Optional: show lane/traffic metadata in `ReportDetailDialog`
 - [ ] Play Store release notes for trip feature
+- [ ] **Parked — in-nav trip banner:** restore bottom nav card (remaining distance, ETA %, next turn, ahead pothole line). Removed from live UI to free the map; replace with a new bottom control when designed. Logic helpers still in `HomeScreen.kt` (`remainingTripSeconds`, `formatTripEta`, `formatTripDistance`, turn/alert state).
+- [ ] **Parked — responsive map chrome:** scale trip/map chrome (FABs, compass, GPS chip, search fields, fonts) from screen width so small phones stay compact; keep labels single-line (ellipsis, no wrap). Partial `MapUiScale` may already exist in `HomeScreen.kt` — revisit and finish as polish later (not a major product feature).
+- [ ] Street-follow POV + speed-linked zoom polish (deferred)
+- [ ] Offline nav: GPS progress continues; map/info when online
+- [ ] Pending-upload UX message when network is slow during report submit
 
 ---
 
@@ -536,6 +686,7 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 | When | Focus | Items |
 |------|--------|-------|
 | **Now** | Ship **1.0.6** to Play closed test | Basemap place/street names (#14); stronger label contrast |
+| **Next (trip)** | **#23** alternate routes; then **#25–#29** trip/report UX enhancements | User list 27 Jul 2026 |
 | **Next (citizen)** | **#17.2** area tap + name popup; optional **#10.6** | After 1.0.6 |
 | **Later (citizen)** | **#20** weekly digest; **#21** Accountability overview toggle | Needs product design |
 | **Last (citizen)** | Testing polish | **#19** tap cluster → view reports |
@@ -546,6 +697,9 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 | Priority | Suggested order |
 |----------|-----------------|
+| **★ Next (trip — #1)** | **#23** alternate-route quality (user: most important; reconfirmed 27 Jul) |
+| **Next (trip / map UX)** | **#25** clearer zoomed labels · **#26** GMaps-like traits · **#27** edge blink · **#28** wide-shot L/M/R · **#29** turn-aware pothole alerts |
+| **Next (trip UX shipped)** | **#24** home map = reports only; fullscreen trip = free pan / nav only |
 | Shipping now | **#14** basemap labels — **1.0.6** |
 | **Next (citizen)** | **#17.2** area tap + name popup + heat legend; optional **#10.6** |
 | Later (citizen) | **#20** weekly digest; **#21** Accountability overview |

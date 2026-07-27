@@ -14,6 +14,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,7 +59,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -586,14 +593,6 @@ fun NewReportScreen(
                         )
                     }
 
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Photos are checked on-device with TensorFlow Lite before you can submit.",
-                        color = Color(0xFF5A5A5A),
-                        fontSize = 8.sp,
-                        lineHeight = 10.sp,
-                    )
-
                     Spacer(Modifier.height(8.dp))
 
                     SectionTitle("03 ATTACH LOCATION")
@@ -747,19 +746,21 @@ fun NewReportScreen(
                     Spacer(Modifier.height(6.dp))
 
                     SectionTitle("04 POTHOLE POSITION IN PHOTO")
-                    Spacer(modifier.height(4.dp))
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        "Tap where the damage sits. Use Full width for a crater covering most of the road.",
+                        "As per the photo, tap the side where the pothole lies (Left, Middle, or Right). " +
+                            "Use Full road pothole when the whole road width is damaged.",
                         fontSize = 10.sp,
                         color = Color.DarkGray,
+                        lineHeight = 13.sp,
                     )
-                    Spacer(modifier.height(4.dp))
+                    Spacer(Modifier.height(4.dp))
                     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         PositionTile(modifier.weight(1f), PotholePosition.LEFT, selectedPosition, enabled = !submitting) { selectedPosition = it }
                         PositionTile(modifier.weight(1f), PotholePosition.MIDDLE, selectedPosition, enabled = !submitting) { selectedPosition = it }
                         PositionTile(modifier.weight(1f), PotholePosition.RIGHT, selectedPosition, enabled = !submitting) { selectedPosition = it }
                     }
-                    Spacer(modifier.height(4.dp))
+                    Spacer(Modifier.height(4.dp))
                     PositionTile(
                         Modifier.fillMaxWidth(),
                         PotholePosition.FULL_WIDTH,
@@ -793,12 +794,51 @@ fun NewReportScreen(
                     Spacer(Modifier.height(6.dp))
 
                     SectionTitle("06 NOTE (OPTIONAL)")
+                    Text(
+                        "Add a location clue if you can — landmark, road name, street number, junction, or nearby shop.",
+                        fontSize = 9.sp,
+                        lineHeight = 11.sp,
+                        color = Color.DarkGray,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        listOf(
+                            "Near …" to "Near ",
+                            "Road …" to "On … Road, ",
+                            "Street no. …" to "Street no. ",
+                            "Landmark …" to "Landmark: ",
+                        ).forEach { (label, insert) ->
+                            val chipEnabled = !submitting && note.length + insert.length <= noteMax
+                            Text(
+                                text = label,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (chipEnabled) DarkBlue else GrayDisabled,
+                                modifier = Modifier
+                                    .border(BorderStroke(1.dp, if (chipEnabled) DarkBlue else GrayDisabled))
+                                    .background(Color.White.copy(alpha = 0.9f))
+                                    .clickable(enabled = chipEnabled) {
+                                        note = (note + insert).take(noteMax)
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
                     OutlinedTextField(
                         value = note,
                         onValueChange = { if (it.length <= noteMax) note = it },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !submitting,
-                        placeholder = { Text("e.g. Near bus stop, gets worse after rain...", fontSize = 10.sp) },
+                        placeholder = {
+                            Text(
+                                "e.g. Near MG Road metro, opp. Café Coffee Day, Street no. 12…",
+                                fontSize = 10.sp,
+                            )
+                        },
                         maxLines = 2,
                         textStyle = TextStyle(fontSize = 11.sp),
                         supportingText = {
@@ -860,18 +900,12 @@ fun NewReportScreen(
                                                             "rebuild with SUPABASE_URL and SUPABASE_ANON_KEY in local.properties.",
                                                     )
                                                 } else {
-                                                    val pushed = withContext(Dispatchers.IO) {
-                                                        ReportSyncRepository.pushReport(result.report)
-                                                    }
-                                                    if (pushed) {
-                                                        onSyncMessage(routingMsg)
-                                                    } else {
-                                                        ReportSyncRepository.enqueuePush(result.report)
-                                                        onSyncMessage(
-                                                            "$routingMsg Cloud upload failed — " +
-                                                                "sign in with your Supabase account and try again.",
-                                                        )
-                                                    }
+                                                    // Local save is enough to close; cloud push runs in
+                                                    // app scope so a slow upload cannot hang or cancel mid-trip.
+                                                    ReportSyncRepository.enqueuePush(result.report)
+                                                    onSyncMessage(
+                                                        "$routingMsg Saved — uploading to cloud in the background.",
+                                                    )
                                                 }
                                             } else {
                                                 onSyncMessage(routingMsg)
@@ -1204,9 +1238,10 @@ private fun PositionTile(
     onSelect: (PotholePosition) -> Unit,
 ) {
     val sel = position == selected
+    val isFullRoad = position == PotholePosition.FULL_WIDTH
     Box(
         modifier = modifier
-            .height(40.dp)
+            .height(if (isFullRoad) 52.dp else 40.dp)
             .border(BorderStroke(1.dp, DarkBlue))
             .background(if (sel) OrangeSelect else Color.White.copy(alpha = 0.85f))
             .clickable(enabled = enabled) { onSelect(position) }
@@ -1218,12 +1253,24 @@ private fun PositionTile(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                if (position == PotholePosition.FULL_WIDTH) "FULL WIDTH / CRATER" else position.displayLabel.uppercase(),
+                if (isFullRoad) "FULL ROAD POTHOLE" else position.displayLabel.uppercase(),
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Black,
-                fontSize = if (position == PotholePosition.FULL_WIDTH) 10.sp else 11.sp,
+                fontSize = if (isFullRoad) 10.sp else 11.sp,
                 color = if (sel) Color.White else DarkBlue,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
             )
+            if (isFullRoad) {
+                Text(
+                    "Entire road width damaged",
+                    fontSize = 8.sp,
+                    lineHeight = 9.sp,
+                    color = if (sel) Color.White.copy(alpha = 0.95f) else Color.DarkGray,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
@@ -1250,7 +1297,7 @@ private fun TrafficDirectionConfirmRow(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "Look at the wide shot. Which way do cars move in the photo? Used for Left/Right trip alerts.",
+            "Look at the wide shot. Match the picture to how cars move in your photo. Used for Left/Right trip alerts.",
             fontSize = 8.sp,
             lineHeight = 10.sp,
             color = Color.Gray,
@@ -1263,8 +1310,8 @@ private fun TrafficDirectionConfirmRow(
             TrafficFacingTile(
                 modifier = Modifier.weight(1f),
                 title = "Toward camera",
-                subtitle = "Flow to camera top",
-                glyph = "↓",
+                subtitle = "Cars coming at you",
+                mode = TrafficFacingMode.FACING_CAMERA,
                 selected = facing == TrafficFacingMode.FACING_CAMERA,
                 enabled = enabled,
                 onClick = { onSelect(TrafficFacingMode.FACING_CAMERA) },
@@ -1272,8 +1319,8 @@ private fun TrafficDirectionConfirmRow(
             TrafficFacingTile(
                 modifier = Modifier.weight(1f),
                 title = "Away",
-                subtitle = "Flow to bottom",
-                glyph = "↑",
+                subtitle = "Cars going away",
+                mode = TrafficFacingMode.AWAY_FROM_CAMERA,
                 selected = facing == TrafficFacingMode.AWAY_FROM_CAMERA,
                 enabled = enabled,
                 onClick = { onSelect(TrafficFacingMode.AWAY_FROM_CAMERA) },
@@ -1282,7 +1329,7 @@ private fun TrafficDirectionConfirmRow(
                 modifier = Modifier.weight(1f),
                 title = "Not sure",
                 subtitle = "Skip for now",
-                glyph = "?",
+                mode = TrafficFacingMode.UNKNOWN,
                 selected = facing == TrafficFacingMode.UNKNOWN,
                 enabled = enabled,
                 onClick = { onSelect(TrafficFacingMode.UNKNOWN) },
@@ -1296,45 +1343,223 @@ private fun TrafficFacingTile(
     modifier: Modifier,
     title: String,
     subtitle: String,
-    glyph: String,
+    mode: TrafficFacingMode,
     selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
+    val ink = if (selected) Color.White else DarkBlue
+    val mute = if (selected) Color.White.copy(alpha = 0.95f) else Color.DarkGray
     Column(
         modifier = modifier
-            .height(72.dp)
+            .height(118.dp)
             .border(BorderStroke(1.dp, DarkBlue))
             .background(if (selected) OrangeSelect else Color.White.copy(alpha = 0.85f))
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+        verticalArrangement = Arrangement.Top,
     ) {
-        Text(
-            glyph,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (selected) Color.White else DarkBlue,
+        TrafficFacingDiagram(
+            mode = mode,
+            ink = ink,
+            accent = if (selected) Color.White else OrangeSelect,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
         )
+        Spacer(Modifier.height(4.dp))
         Text(
             title,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Black,
             fontSize = 9.sp,
-            color = if (selected) Color.White else DarkBlue,
+            color = ink,
             maxLines = 1,
+            textAlign = TextAlign.Center,
         )
         Text(
             subtitle,
             fontSize = 7.sp,
             lineHeight = 8.sp,
-            color = if (selected) Color.White.copy(alpha = 0.95f) else Color.DarkGray,
+            color = mute,
             maxLines = 2,
+            textAlign = TextAlign.Center,
         )
     }
 }
 
+/**
+ * Mini road + camera sketch so reporters can match traffic direction at a glance.
+ * Camera sits at the bottom of the frame (photographer); arrows show car travel.
+ */
+@Composable
+private fun TrafficFacingDiagram(
+    mode: TrafficFacingMode,
+    ink: Color,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val roadTop = h * 0.08f
+        val roadBottom = h * 0.62f
+        val road = Path().apply {
+            moveTo(w * 0.34f, roadTop)
+            lineTo(w * 0.66f, roadTop)
+            lineTo(w * 0.88f, roadBottom)
+            lineTo(w * 0.12f, roadBottom)
+            close()
+        }
+        drawPath(road, color = ink.copy(alpha = 0.12f))
+        drawPath(road, color = ink, style = Stroke(width = 1.6f))
+        val dashPaint = ink.copy(alpha = 0.55f)
+        val midX = w * 0.5f
+        var y = roadTop + 4f
+        while (y < roadBottom - 6f) {
+            drawLine(
+                color = dashPaint,
+                start = Offset(midX, y),
+                end = Offset(midX, y + 5f),
+                strokeWidth = 1.4f,
+                cap = StrokeCap.Round,
+            )
+            y += 9f
+        }
+        val camW = w * 0.22f
+        val camH = h * 0.22f
+        val camLeft = (w - camW) / 2f
+        val camTop = h * 0.72f
+        drawRoundRect(
+            color = ink,
+            topLeft = Offset(camLeft, camTop),
+            size = Size(camW, camH),
+            cornerRadius = CornerRadius(3f, 3f),
+            style = Stroke(width = 1.8f),
+        )
+        drawCircle(
+            color = accent,
+            radius = camH * 0.22f,
+            center = Offset(w * 0.5f, camTop + camH * 0.5f),
+        )
+        when (mode) {
+            TrafficFacingMode.FACING_CAMERA -> {
+                drawTrafficCar(
+                    center = Offset(midX, roadTop + (roadBottom - roadTop) * 0.28f),
+                    bodyW = w * 0.16f,
+                    bodyH = h * 0.12f,
+                    ink = ink,
+                    accent = accent,
+                )
+                drawTrafficArrow(
+                    tip = Offset(midX, roadBottom - 4f),
+                    from = Offset(midX, roadTop + (roadBottom - roadTop) * 0.48f),
+                    color = accent,
+                )
+            }
+            TrafficFacingMode.AWAY_FROM_CAMERA -> {
+                drawTrafficCar(
+                    center = Offset(midX, roadTop + (roadBottom - roadTop) * 0.72f),
+                    bodyW = w * 0.16f,
+                    bodyH = h * 0.12f,
+                    ink = ink,
+                    accent = accent,
+                )
+                drawTrafficArrow(
+                    tip = Offset(midX, roadTop + 4f),
+                    from = Offset(midX, roadTop + (roadBottom - roadTop) * 0.52f),
+                    color = accent,
+                )
+            }
+            TrafficFacingMode.UNKNOWN -> {
+                drawTrafficArrow(
+                    tip = Offset(midX - w * 0.12f, roadBottom - 6f),
+                    from = Offset(midX - w * 0.12f, roadTop + 8f),
+                    color = ink.copy(alpha = 0.35f),
+                )
+                drawTrafficArrow(
+                    tip = Offset(midX + w * 0.12f, roadTop + 8f),
+                    from = Offset(midX + w * 0.12f, roadBottom - 6f),
+                    color = ink.copy(alpha = 0.35f),
+                )
+                drawCircle(
+                    color = ink.copy(alpha = 0.15f),
+                    radius = h * 0.14f,
+                    center = Offset(midX, roadTop + (roadBottom - roadTop) * 0.45f),
+                )
+                val qCenter = Offset(midX, roadTop + (roadBottom - roadTop) * 0.42f)
+                drawArc(
+                    color = ink,
+                    startAngle = 200f,
+                    sweepAngle = 220f,
+                    useCenter = false,
+                    topLeft = Offset(qCenter.x - 7f, qCenter.y - 10f),
+                    size = Size(14f, 14f),
+                    style = Stroke(width = 2f, cap = StrokeCap.Round),
+                )
+                drawCircle(color = ink, radius = 1.6f, center = Offset(qCenter.x, qCenter.y + 10f))
+            }
+        }
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrafficCar(
+    center: Offset,
+    bodyW: Float,
+    bodyH: Float,
+    ink: Color,
+    accent: Color,
+) {
+    drawRoundRect(
+        color = accent.copy(alpha = 0.85f),
+        topLeft = Offset(center.x - bodyW / 2f, center.y - bodyH / 2f),
+        size = Size(bodyW, bodyH),
+        cornerRadius = CornerRadius(2.5f, 2.5f),
+    )
+    drawRoundRect(
+        color = ink,
+        topLeft = Offset(center.x - bodyW / 2f, center.y - bodyH / 2f),
+        size = Size(bodyW, bodyH),
+        cornerRadius = CornerRadius(2.5f, 2.5f),
+        style = Stroke(width = 1.2f),
+    )
+    drawRect(
+        color = ink.copy(alpha = 0.35f),
+        topLeft = Offset(center.x - bodyW * 0.28f, center.y - bodyH * 0.28f),
+        size = Size(bodyW * 0.56f, bodyH * 0.28f),
+    )
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrafficArrow(
+    tip: Offset,
+    from: Offset,
+    color: Color,
+) {
+    drawLine(
+        color = color,
+        start = from,
+        end = tip,
+        strokeWidth = 2.4f,
+        cap = StrokeCap.Round,
+    )
+    val dx = tip.x - from.x
+    val dy = tip.y - from.y
+    val len = kotlin.math.sqrt((dx * dx + dy * dy).toDouble()).toFloat().coerceAtLeast(1f)
+    val ux = dx / len
+    val uy = dy / len
+    val head = 7f
+    val left = Offset(
+        tip.x - ux * head - uy * head * 0.55f,
+        tip.y - uy * head + ux * head * 0.55f,
+    )
+    val right = Offset(
+        tip.x - ux * head + uy * head * 0.55f,
+        tip.y - uy * head - ux * head * 0.55f,
+    )
+    drawLine(color, tip, left, strokeWidth = 2.4f, cap = StrokeCap.Round)
+    drawLine(color, tip, right, strokeWidth = 2.4f, cap = StrokeCap.Round)
+}
 private fun createImageFile(context: Context): File {
     val time = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
     return File.createTempFile("JPEG_${time}_", ".jpg", context.cacheDir)

@@ -38,12 +38,47 @@ object ReportSyncRepository {
      */
     fun enqueuePush(report: PersistedPotholeReport) {
         syncScope.launch {
-            if (pushReport(report)) return@launch
-            kotlinx.coroutines.delay(1_500)
-            if (pushReport(report)) return@launch
-            kotlinx.coroutines.delay(3_000)
-            pushReport(report)
+            rememberPending(report.id)
+            if (pushWithRetries(report)) {
+                forgetPending(report.id)
+            }
         }
+    }
+
+    /**
+     * Retries any signed-in local reports that never reached Supabase
+     * (e.g. user closed the screen while upload was slow).
+     */
+    fun flushPendingUploads() {
+        syncScope.launch {
+            val pending = RecentReportsRepository.listUnsyncedSignedInReports()
+            for (report in pending) {
+                rememberPending(report.id)
+                if (pushWithRetries(report)) {
+                    forgetPending(report.id)
+                }
+            }
+        }
+    }
+
+    private suspend fun pushWithRetries(report: PersistedPotholeReport): Boolean {
+        if (pushReport(report)) return true
+        kotlinx.coroutines.delay(1_500)
+        if (pushReport(report)) return true
+        kotlinx.coroutines.delay(3_000)
+        if (pushReport(report)) return true
+        kotlinx.coroutines.delay(6_000)
+        return pushReport(report)
+    }
+
+    private val pendingIds = java.util.Collections.synchronizedSet(mutableSetOf<Long>())
+
+    private fun rememberPending(id: Long) {
+        pendingIds.add(id)
+    }
+
+    private fun forgetPending(id: Long) {
+        pendingIds.remove(id)
     }
 
     /**

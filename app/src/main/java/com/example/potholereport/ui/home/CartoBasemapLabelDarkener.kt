@@ -115,6 +115,8 @@ class CartoLabelDarkeningTilesOverlay(
 
     override fun onTileReadyToDraw(c: Canvas, currentMapTile: Drawable, tileRect: Rect) {
         if (currentMapTile is BitmapDrawable) {
+            // Bilinear when overzooming past native tile levels — softer road edges.
+            currentMapTile.isFilterBitmap = true
             currentMapTile.bitmap?.let { bmp ->
                 if (bmp.isMutable) {
                     CartoBasemapLabelDarkener.darkenLabelsInPlace(bmp)
@@ -142,7 +144,14 @@ fun MapView.installCartoLabelDarkeningTilesOverlay() {
 }
 
 /**
- * Prefer native street detail over overscaled tiles.
- * Soft-zooming past the provider’s sharp range is what makes residential streets vanish.
+ * Prefer native street detail over overscaled tiles on the home / city map.
+ * Soft-zooming past this range makes residential streets vanish — keep camera here.
  */
 const val CartoBasemapUsefulMaxZoom = 18.0
+
+/**
+ * Highest zoom CARTO Voyager raster tiles are served at.
+ * Trip street-follow may zoom the camera past this; native tiles up to here
+ * keep road boundaries sharper than stretching z18 alone.
+ */
+const val CartoBasemapNativeMaxZoom = 20.0

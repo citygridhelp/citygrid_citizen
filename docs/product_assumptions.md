@@ -1,6 +1,6 @@
 # City Grid citizen app — product & technical assumptions
 
-Central reference for **defaults, thresholds, and design decisions** baked into the citizen app (`potholereport`). Values below are taken from the current codebase unless marked *planned* (backlog only, not shipped).
+Central reference for **defaults, thresholds, and design decisions** baked into the citizen app (`in.citygrid.citizen` / package `potholereport`). Values below are taken from the current codebase unless marked *planned* (backlog only, not shipped).
 
 Related docs:
 
@@ -11,7 +11,7 @@ Related docs:
 - [`ml_models_and_evaluation.md`](ml_models_and_evaluation.md) — full ML pipeline, risk analyzer, evaluation
 - `tools/train_pothole_model/CALIBRATION_NOTES.md` — ML / photo-validation thresholds (detailed)
 
-*Last reviewed: July 2026 · app `in.citygrid.citizen` · `versionName` 1.0*
+*Last reviewed: 25 July 2026 · app `in.citygrid.citizen`*
 
 ---
 
@@ -21,14 +21,15 @@ Related docs:
 
 | Assumption | Value | Source |
 |------------|-------|--------|
-| Same-pothole radius | **40 m** | `PotholeDuplicateGuard.SAME_POTHOLE_RADIUS_METERS` |
-| Rationale (in code) | ~40 m covers same pothole + GPS jitter; avoids blocking the **opposite lane** | Comment in `PotholeDuplicateGuard.kt` |
-| Scope | Same `reporterUserId` + same `cityKey` + distance ≤ 40 m | `findActiveDuplicate` |
+| Same-pothole radius | **30 m** (field-tunable; was 25 m then 40 m) | `PotholeDuplicateGuard.SAME_POTHOLE_RADIUS_METERS` |
+| Effective radius | `max(30 m, GPS accuracy × 1.25)` | `effectiveRadiusMeters` |
+| Rationale | Covers same pothole + GPS jitter; avoid blocking a distinct nearby hole or the opposite lane | Comments / Phase F |
+| Scope | Same `reporterUserId` + same `cityKey` + distance ≤ effective radius | `findActiveDuplicate` |
 | Blocking statuses | **Open**, **In progress** block a new report | `blocksNewReportAtSamePlace()` |
 | Allowed after | **Completed** — user may report again at same coordinates | `PotholeDuplicateGuard.kt` |
 | User message | “You already reported this pothole here (status)…” | `NewReportScreen.kt` |
 
-**Not assumed today:** Server-side duplicate enforcement (guard is **client + local cache** before push). Metro/city boundary check on submit is *planned* (backlog §5), not enforced yet.
+**Not assumed today:** Server-side duplicate enforcement (guard is **client + local cache** before push). Metro/city boundary check on submit is *planned* (backlog), not enforced yet.
 
 ---
 
@@ -40,10 +41,18 @@ Related docs:
 | GPS providers tried (report screen) | Last-known from GPS, network, passive; then fresh GPS (**6.5 s** timeout), then network (**3.5 s**) | `fetchBestCalibratedLocation` |
 | Location quality score | `accuracy (m) + ageSeconds × 0.35` — lower is better; age capped at **180 s** | `locationQualityScore` |
 | Map home GPS (similar pipeline) | GPS timeout **6500 ms**, network **3000 ms**, passive fallback **2800 ms** | `HomeScreen.kt` |
-| Accuracy shown on home map | Overlay **top-right on map card**: `GPS ±Xm` or `GPS searching…` | `HomeScreen.kt` (`OsmDensityMap`) |
+| Accuracy shown on home map | Overlay: `GPS ±Xm` or `GPS searching…` | `HomeScreen.kt` (`OsmDensityMap`) |
 | Manual location override | User may paste Maps URL / lat,lng on report screen | `parseMapsInput` |
 | Max accuracy for submit | **Warn** if GPS > **50 m**; **block** auto-GPS submit if > **100 m** (manual coords bypass) | `NewReportScreen.kt` |
 | Accuracy on report screen | `GPS ±Xm` with green / amber / red by threshold | `LocationBlock` in `NewReportScreen.kt` |
+
+### Trip / navigation GPS accept rules
+
+| Assumption | Value | Source |
+|------------|-------|--------|
+| Reject coarse fixes | GPS accuracy > **40 m**; network > **25 m** | `shouldAcceptNavigationLocation` |
+| Prefer fresh GPS | Stale / implausible jumps rejected | `HomeScreen.kt` |
+| Lane side label on alerts | Only when GPS accuracy ≤ **25 m** | `TripNavigationMatcher.SIDE_MIN_ACCURACY_M` |
 
 ---
 
@@ -56,9 +65,9 @@ Related docs:
 | Note max length | **240** characters | `noteMax` in `NewReportScreen.kt` |
 | Default severity | **Moderate** | `selectedSeverity` initial state |
 | Severity levels | Minor, Moderate, Severe, Critical | `PotholeSeverity.kt` |
-| Lane / position | User selects position (affects ML risk path) | `PotholePosition`, `NewReportScreen.kt` |
+| Lane / position | **L / M / R / Full width (F)** — full width for craters spanning most of the road | `PotholePosition` |
+| Direction metadata | `pothole_position`, `report_bearing_deg`, `traffic_bearing_deg`, `traffic_faces_camera` | migration `0012` |
 | Cloud upload | Only when **signed in** + Supabase configured; else local save + message | `NewReportScreen` submit branch |
-| Submit loading UI | **None** — button stays “SUBMIT REPORT” during IO (*planned* §13) |
 
 ---
 
@@ -67,33 +76,107 @@ Related docs:
 | Assumption | Value | Source |
 |------------|-------|--------|
 | Reports on map | Same `cityKey` and coordinates **inside city boundary** (GBA polygon for Bengaluru; bbox for others) | `RecentReportsRepository.reportsForMapInMetro` |
-| Normal map clustering | Screen-overlap merge: one marker per report; clusters form when circles touch at current zoom | `buildReportScreenOverlapClusters` |
-| Map severity filter | Dropdown: All / Minor / Moderate / Severe / Critical (`mapSeverityFilter`) | `ReportAndTrackSection`, `attachReportClusterOverlay` |
-| Pan/zoom vs severity filter | Severity filter **persists** during pan/zoom | `HomeScreen.kt` |
-| Cluster tap | **No action** — display only (*planned* §19) |
-| Region labels (Bengaluru) | ~215 curated locality points; G-lite tiering (min/max zoom, priority) | `HomeScreen.kt` `RegionNameLabelsOverlay` |
+| Normal map clustering | Screen-overlap merge at current zoom | `buildReportScreenOverlapClusters` |
+| Map severity filter | Dropdown: All / Minor / Moderate / Severe / Critical | `HomeScreen.kt` |
+| Region labels (Bengaluru) | Curated locality points; G-lite tiering | `RegionNameLabelsOverlay` |
 | Basemap | CARTO **light_nolabels** — no tile place names (by design) | `CartoPositronNoLabels` |
-| City view vs street view | City label at min zoom band; `CITY_VIEW_ZOOM_EPSILON` controls “at city zoom” | `HomeScreen.kt` |
-| Default selected city | **BENGALURU** | `HomeScreen`, `CityMetroKeys.NAV_FALLBACK_CITY` |
-| Metro bbox (Bengaluru) | Official **GBA** outer boundary (Sept 2025): N 13.14266, E 77.784361, S 12.833625, W 77.460051; red outline = simplified polygon from OpenCity KML | `BengaluruGbaBoundary.kt`, `bengaluru_gba_boundary.json` |
-
-### Trip navigation (shipped in progress — v1.1.0)
-
-| Assumption | Value | Source |
-|------------|-------|--------|
-| Trip vs Heat | **Mutually exclusive** on home map — Heat disabled while Trip is on | `HomeScreen.kt` |
-| Ahead cone (no route) | Half-angle **35°**, max **2500 m**, min **5 m** | `TripNavigationMatcher.matchAheadCone` |
-| Route corridor | Perpendicular distance ≤ **28 m** from OSRM polyline | `TripNavigationMatcher.ROUTE_CORRIDOR_M` |
-| Max alert distance | **2500 m** ahead along route or cone | `TripNavigationMatcher.MAX_AHEAD_M` |
-| Lane side label | Only when GPS accuracy ≤ **25 m** | `TripNavigationMatcher.SIDE_MIN_ACCURACY_M` |
-| Route provider | Public OSRM demo (`router.project-osrm.org`); empty route on failure | `OsrmRouteClient.kt` |
-| Destination pick | Search fields on map (start + destination); defaults start to GPS | `TripPlannerPanel` |
-| Vehicle | Car / Bike selector; bike falls back to driving geometry on public OSRM | `TripVehicle`, `OsrmRouteClient` |
-| Direction metadata | `pothole_position`, `report_bearing_deg`, `traffic_bearing_deg`, `traffic_faces_camera` | migration `0012`, `PersistedPotholeReport` |
+| Default selected city | **BENGALURU** | `CityMetroKeys.NAV_FALLBACK_CITY` |
+| Metro bbox (Bengaluru) | Official **GBA** outer boundary (Sept 2025) | `BengaluruGbaBoundary.kt` |
 
 ---
 
-## 5. Recent reports & local storage
+## 5. Trip navigation & alternate routes
+
+**Product intent:** Show **usable, connected** ways to the same destination so the user can compare and pick. Do **not** invent disconnected or pointless paths. Slightly slower options are kept (Bengaluru traffic can make a few minutes irrelevant). There is **no hard “only 3 routes”** product rule — soft UI/probe cap only.
+
+### 5.1 Modes & engine
+
+| Assumption | Value | Source |
+|------------|-------|--------|
+| Modes | **Car**, **Bike**, **Walk** | `TripVehicle` |
+| Route engine | FOSSGIS public OSRM `routing.openstreetmap.de` (`routed-car` / `routed-bike` / `routed-foot`) | `OsrmRouteClient` |
+| Live traffic | **Not used** — ETAs are static network times (OSRM). Do not claim “less traffic” in UI until a traffic source exists | Product decision Jul 2026 |
+| Request throttle | ≥ **~400 ms** between OSRM calls (public host courtesy) | `throttledGet` |
+| Start/end snap radius | **500 m** (courtyard/park → nearest road) | `SNAP_RADIUS_M` |
+| Soft max routes shown | **5** (via enrichment + UI; not a product “only 3”) | `MAX_ROUTE_OPTIONS` |
+| Native OSRM alternatives | Request at most **3** — FOSSGIS returns `TooBig` (zero routes) if higher | `OSRM_MAX_ALTERNATIVES` |
+
+### 5.2 Bike road-network fallback
+
+OSM cycle graphs in Indian cities are often sparse/disconnected. Bike may use **car road geometry** with a bike-speed ETA.
+
+| Assumption | Value | Source |
+|------------|-------|--------|
+| Prefer bike graph when | Not much longer than car **and** snaps are reasonable | `pickFeasibleBikeRoute` |
+| Fall back to roads when | Bike distance > car × **1.35** and > car + **600 m**, **or** start/end snap ≥ **90 m** and worse than car by **> 40 m** | `BIKE_DETOUR_*`, `BIKE_BAD_SNAP_M` |
+| Bike ETA on road geometry | ~**16 km/h** (`distance / 4.5` m/s), min **60 s** | `asBikeEta` |
+| Alternate routes when fallback is on | **All** diversions stay on **driving** network + bike ETA — no fragile cycle-only scraps next to a road primary | `useRoadNetwork` / `fetchDivertedRoute` |
+
+### 5.3 Discovering alternate corridors
+
+When OSRM returns one path (common), the app probes left/right **via** points along the primary.
+
+| Assumption | Value | Source |
+|------------|-------|--------|
+| Short trips (< ~2 km) | Via offsets ~**55–220 m** (parallel streets) | `diversionViaPoints` |
+| Mid trips | Offsets ~**150–700 m** | `diversionViaPoints` |
+| Long trips (≥ ~5 km) | Corridor offsets ~**400–2200 m** (e.g. Mahadevapura vs ORR-style) | `diversionViaPoints` |
+| Via snap (middle waypoint) | **55 m** short / **120 m** long trips — must stay tight so via does not snap back onto the primary road | `fetchViaRoute` |
+| Diversity | Prefer routes with larger mid-path geographic gap; drop near-duplicates | `pickDiverseRoutes`, `routesAreVisiblyDistinct` |
+
+### 5.4 Hard quality gates (reject before draw)
+
+**Do not** reject merely for being a few minutes slower. Reject if:
+
+| Gate | Rule (summary) | Why |
+|------|----------------|-----|
+| Start/end join | Candidate start/end must be within ~**primary join + 100 m** (floor ~**140 m**) of the requested points | Connectivity (no “floating” spur at origin) |
+| Snap quality | Start/end snap not much worse than primary (+**120 m** and absolute > **140 m**) | Same |
+| Extreme length | Distance > primary × **1.55** + **1200 m** | Pointless mega-detour |
+| Extreme time | Duration > primary × **1.50** + **10 min** | e.g. 49 min vs 24 min waste |
+| Geometry (via-probed only) | True out-and-back (path/chord ≥ ~5) or gross corridor deviation (≥ ~2.5–3.5 km wider than primary) | Waste spurs / wrong-way loops |
+| Native OSRM alts | Light filter only (connectivity + time/distance band) | Engine-ranked; don’t over-filter |
+| Soft fallback | If strict via filter leaves &lt; 2 routes, keep light-filtered distinct corridors | Always try to show a real choice |
+| Excess U-turns (strict) | ≥ **4** sharp reversals and **> primary + 2** | Messy path |
+
+| Assumption | Value | Source |
+|------------|-------|--------|
+| Quality API | `passesRouteQuality`, `hasPointlessSpur`, `countSharpReversals` | `OsrmRouteClient.kt` |
+| User choice | Survivors are shown with time + distance bubbles; user taps to select before Navigate | `TripNavigationOverlay`, `HomeScreen` |
+
+### 5.5 Map preview UI
+
+| Assumption | Value | Source |
+|------------|-------|--------|
+| Selected route | Blue polyline | `TripNavigationOverlay` |
+| Alternate routes | Orange polylines | `setPreviewAlternates` |
+| ETA bubbles | Time + distance; tip anchored **on** the route; positions spaced on-screen (~**150 dp**) to avoid overlap | `pickSpacedLabelPoints` |
+| Trip vs Heat | **Mutually exclusive** — Heat off while Trip is on | `HomeScreen.kt` |
+| Report from trip map | Report control available in trip mode (overlay; do not tear down MapView on open) | Field-fix / UI fix |
+
+### 5.6 Along-route pothole matching
+
+| Assumption | Value | Source |
+|------------|-------|--------|
+| Ahead cone (no route) | Half-angle **35°**, max **2500 m**, min **5 m** | `TripNavigationMatcher` |
+| Route corridor | Perpendicular ≤ **28 m** from polyline | `ROUTE_CORRIDOR_M` |
+| Max alert distance | **2500 m** ahead (overview); street-follow map shows closer subset | `MAX_AHEAD_M`, street-follow caps |
+| Off-route reroute | Deviates **> 60 m** from route | `OFF_ROUTE_REROUTE_M` |
+| Start correction | If start was off by ≥ **15 m** (or accuracy-scaled), correct from live GPS | `START_CORRECTION_M` |
+| Pothole notify distance | Voice/notify within **150 m** | `TRIP_POTHOLE_NOTIFY_WITHIN_M` |
+| Follow zoom | Street follow ~**18.8–19** (near max); nav overview ~**15.5**; trip map max zoom **19** | `TRIP_FOLLOW_ZOOM`, `TripStreetCamera`, `TRIP_MAP_MAX_ZOOM` |
+
+### 5.7 Place search / labels
+
+| Assumption | Value | Source |
+|------------|-------|--------|
+| Search bias | City-biased India geocoder queries | `HomeScreen` / trip search |
+| Labels | Prefer place/institution name over house number / “Building 41”; may fall back to query text | `TripPlaceLabels` |
+| Recents | Cap destinations / starts / favorites | `TripRecentPlacesRepository` |
+
+---
+
+## 6. Recent reports & local storage
 
 | Assumption | Value | Source |
 |------------|-------|--------|
@@ -105,52 +188,46 @@ Related docs:
 
 ---
 
-## 6. Identity, auth & privacy
+## 7. Identity, auth & privacy
 
 | Assumption | Value | Source |
 |------------|-------|--------|
 | Reporter public id format | **`PW-` + 8** chars (A–Z, 2–9, no ambiguous I/O/0/1) | `UserProfileRepository.generateAnonymousUserId` |
-| One email = one account | No account linking; duplicate signup blocked via `email_exists` RPC | Backlog §1, `SupabaseAuthRepository` |
-| Signup password (full screen) | Min **6** characters | `SignupScreen.kt` |
-| Signup password (report modal) | Min **6** + upper + lower + digit + symbol | `ReportSignInModal.isStrongCitizenPassword` |
-| Login password | Min **6** characters | `LoginScreen.kt` |
-| Signup verification | Email OTP via Supabase; **4+** digit code field on verify | `SignupScreen.kt` |
-| Report flow without sign-in | Home **Report a pothole** opens **sign-in modal** for guests | `HomeScreen.kt` |
-| Anonymous on public map | Reporter id / email not shown on shared map views | Product design; `AccountabilitySection` copy |
-| Device id (unsigned) | `DeviceReporterId` for local reporter id when opening report screen without session | `AuthNavHost.kt` |
+| One email = one account | No account linking; duplicate signup blocked via `email_exists` RPC | `SupabaseAuthRepository` |
+| Signup / login password | Min **6** characters (report modal may require stronger) | Auth screens |
+| Report flow without sign-in | Guests prompted to sign in before report | `HomeScreen.kt` |
+| Anonymous on public map | Reporter id / email not shown on shared map views | Product design |
+| Device id (unsigned) | `DeviceReporterId` for local reporter id when no session | `AuthNavHost.kt` |
 
 ---
 
-## 7. Municipal accountability routing
+## 8. Municipal accountability routing
 
 | Assumption | Value | Source |
 |------------|-------|--------|
-| Assignee selection | **GBA ward polygon** → corporation assignee (Bengaluru); legacy BBMP zone lookup for old reports | `BengaluruMunicipalRouting`, `BengaluruGbaWards` |
-| Bengaluru zones modeled | **5 GBA corporations** + **369 wards** at submit; legacy 8 BBMP zones lookup-only | `MunicipalContactsRegistry`, `bengaluru_gba_wards.json` |
-| GBA 5 corporations / 369 wards | **Citizen submit + details** (not on home map); gov app parked | `future_govt_bbmp_gba_zones.md`, `government_app_handover.md` |
+| Assignee selection | **GBA ward polygon** → corporation assignee (Bengaluru); legacy BBMP zone lookup for old reports | `BengaluruMunicipalRouting` |
+| Bengaluru zones modeled | **5 GBA corporations** + **369 wards** at submit | `MunicipalContactsRegistry`, `bengaluru_gba_wards.json` |
 | Fallback | City HQ assignee if GPS invalid or no zone match | `fallbackForCity` |
-| Officer data | Public directory snapshots in code + `supabase/seed/officers.json` — **re-verify before production** | Comments in registry |
+| Officer data | Public directory snapshots — **re-verify before production** | Registry comments |
 
 ---
 
-## 8. Sync, notifications & app lifecycle
+## 9. Sync, notifications & app lifecycle
 
 | Assumption | Value | Source |
 |------------|-------|--------|
 | Evidence storage bucket | **`evidence`** (Supabase Storage) | `ReportSyncRepository` |
-| Push survives screen close | Upload on app-level `CoroutineScope`, not composition scope | `enqueuePush` |
 | Splash minimum time | **1.5 s** on cold start | `AppAutoRefresh.SPLASH_MIN_MS` |
 | Background refresh trigger | **10 minutes** idle | `AppAutoRefresh.RESUME_IDLE_MS` |
 | In-app notifications cap | **50** items | `CitizenNotificationsRepository.MAX_PILE` |
-| App update notice | Local compare of `versionName` vs last seen | `CitizenNotificationsRepository.checkAppVersion` |
 | Confirmation email ticket id | **`CG-` + last 8** hex chars of `reports.id` | `report_confirmation_email.md` |
 | Confirmation email time | **IST** | `report_confirmation_email.md` |
 
 ---
 
-## 9. ML & photo validation (summary)
+## 10. ML & photo validation (summary)
 
-Detailed numbers live in **`tools/train_pothole_model/CALIBRATION_NOTES.md`**. High-level assumptions:
+Detailed numbers live in **`tools/train_pothole_model/CALIBRATION_NOTES.md`**. High-level:
 
 | Assumption | Value | Source |
 |------------|-------|--------|
@@ -158,11 +235,10 @@ Detailed numbers live in **`tools/train_pothole_model/CALIBRATION_NOTES.md`**. H
 | Wide shot min road ratio | **0.24** | `PotholePhotoValidator` |
 | Duplicate photo hash distance | Reject if perceptual hash distance **< 8** | `MIN_HASH_DISTANCE` |
 | YOLO detection min score | **0.18** | `PotholeDetector` |
-| Risk / blob thresholds | Calibration-derived; lane-aware path stricter than pre-submit validator | `CALIBRATION_NOTES.md` |
 
 ---
 
-## 10. Platform & release identifiers
+## 11. Platform & release identifiers
 
 | Assumption | Value | Source |
 |------------|-------|--------|
@@ -174,26 +250,24 @@ Detailed numbers live in **`tools/train_pothole_model/CALIBRATION_NOTES.md`**. H
 
 ---
 
-## 11. Assumptions *not* enforced yet (backlog / planned)
+## 12. Assumptions *not* enforced yet (backlog / planned)
 
-These are **documented intentions**, not current behaviour:
-
-| Topic | Planned assumption | Backlog |
-|-------|-------------------|---------|
-| City/metro boundary on submit | Reject or warn if GPS outside selected city metro | §5 |
-| GPS accuracy gate | Warn or block submit above ~**50 m** accuracy | §12 |
-| Signup OTP interrupt | Resume / resend for unconfirmed email | §11 |
-| GBA heat map | Red gradient by report count per division **inside city only** | §17 |
-| Map cluster tap | Open report list / detail from cluster number | §19 |
+| Topic | Planned assumption |
+|-------|-------------------|
+| Live traffic in routing | Rank / label routes by congestion |
+| City/metro boundary on submit | Reject or warn if GPS outside selected city metro |
+| Server-side duplicate guard | Enforce 30 m rule in Supabase/RPC |
+| Map cluster tap | Open report list / detail from cluster |
 
 ---
 
-## 12. How to update this file
+## 13. How to update this file
 
 When you change a constant or product rule in code:
 
-1. Update the table row here in the same PR/commit.
+1. Update the matching row here in the same PR/commit.
 2. If the change is user-visible, note it in release notes / `versionName` bump.
 3. For ML threshold changes, update **`CALIBRATION_NOTES.md`** and **[`ml_models_and_evaluation.md`](ml_models_and_evaluation.md)** first, then summarize here.
+4. For trip-routing quality gates or OSRM hosts, update **§5** and the unit tests in `OsrmRouteAlternatesTest.kt` / `OsrmBikeFallbackTest.kt`.
 
-When an assumption is debated (e.g. duplicate radius 40 m → 30 m), record **why** in a one-line rationale column or a short note under the section.
+When an assumption is debated (e.g. duplicate radius, route soft max), record **why** in a one-line rationale or a short note under the section.

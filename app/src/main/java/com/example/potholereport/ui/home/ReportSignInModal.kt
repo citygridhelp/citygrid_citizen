@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -53,7 +55,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.zIndex
 import com.example.potholereport.data.LoginResult
 import com.example.potholereport.data.SignupStartResult
 import com.example.potholereport.data.SignupVerifyResult
@@ -162,9 +164,32 @@ fun ReportSignInModal(
         )
     }
 
-    Dialog(onDismissRequest = { requestDismiss() }) {
+    // In-composition overlay — never a window Dialog. Dialog over MapView was
+    // backgrounding the Activity on some devices when opened from trip nav.
+    BackHandler(enabled = !signupOtpPending) {
+        requestDismiss()
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(40f)
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = { requestDismiss() },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = { /* consume — do not dismiss */ },
+                ),
             shape = RoundedCornerShape(0.dp),
             color = Color.White,
             border = BorderStroke(1.dp, ModalDark),
