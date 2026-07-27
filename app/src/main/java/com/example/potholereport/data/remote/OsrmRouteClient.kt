@@ -77,11 +77,8 @@ object OsrmRouteClient {
     /** Generous snap so GPS in a courtyard/park still finds a nearby road. */
     private const val SNAP_RADIUS_M = 500
 
-    /**
-     * Soft upper bound for planner UI / via probes.
-     * FOSSGIS OSRM itself caps native `alternatives` at 3 — do not request more.
-     */
-    private const val MAX_ROUTE_OPTIONS = 5
+    /** Soft upper bound: 1 primary + up to 2 useful alternates (trust over quantity). */
+    private const val MAX_ROUTE_OPTIONS = 3
 
     /** Max alternatives parameter accepted by FOSSGIS OSRM (higher → TooBig, zero routes). */
     private const val OSRM_MAX_ALTERNATIVES = 3

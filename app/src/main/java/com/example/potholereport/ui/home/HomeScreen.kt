@@ -212,6 +212,7 @@ import com.example.potholereport.data.TripPotholeAlert
 import com.example.potholereport.data.fuseNavHeadingDeg
 import com.example.potholereport.data.withFusedNavHeading
 import com.example.potholereport.data.TripRouteProgress
+import com.example.potholereport.data.TripDeviationAction
 import com.example.potholereport.data.TripTurnGuidance
 import com.example.potholereport.data.TripRecentPlace
 import com.example.potholereport.data.TripRecentPlacesRepository
@@ -1642,6 +1643,8 @@ private fun ReportAndTrackSection(
     var tripRoutePoints by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
     var tripRouteSteps by remember { mutableStateOf<List<OsrmRouteStep>>(emptyList()) }
     var tripRouteOptions by remember { mutableStateOf<List<OsrmRouteResult>>(emptyList()) }
+    /** Preview corridors retained after Navigate for deviation “tap to use”. */
+    var tripKnownAlternates by remember { mutableStateOf<List<OsrmRouteResult>>(emptyList()) }
     var tripSelectedRouteIndex by remember { mutableIntStateOf(0) }
     var tripRouteUserPicked by remember { mutableStateOf(false) }
     var tripNextTurn by remember { mutableStateOf<TripTurnGuidance?>(null) }
@@ -1656,6 +1659,10 @@ private fun ReportAndTrackSection(
     var rerouteOriginLon by remember { mutableStateOf<Double?>(null) }
     var lastRerouteAtMs by remember { mutableStateOf(0L) }
     var tripStartCorrectionDone by remember { mutableStateOf(false) }
+    /** Dashed return-to-route polyline while hybrid prefers rejoin. */
+    var tripRejoinPoints by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
+    /** Index into [tripKnownAlternates] offered for tap-to-confirm, or null. */
+    var tripOfferedAlternateIndex by remember { mutableStateOf<Int?>(null) }
     val announcedPotholeIds = remember { mutableSetOf<Long>() }
     val bbox = remember(selectedCity) { metroBboxForCity(selectedCity) }
 
@@ -1701,6 +1708,26 @@ private fun ReportAndTrackSection(
         tripRouteDurationSec = option.durationSeconds
         tripRouteStatus = TripRouteStatus.ACTIVE
         tripRouteUserPicked = true
+    }
+
+    fun confirmOfferedKnownAlternate() {
+        val idx = tripOfferedAlternateIndex ?: return
+        val option = tripKnownAlternates.getOrNull(idx) ?: return
+        tripRoutePoints = option.points
+        tripRouteSteps = option.steps
+        tripRouteDurationSec = option.durationSeconds
+        tripRouteStatus = TripRouteStatus.ACTIVE
+        tripOfferedAlternateIndex = null
+        tripRejoinPoints = emptyList()
+        tripRerouting = false
+        rerouteOriginLat = null
+        rerouteOriginLon = null
+        lastRerouteAtMs = SystemClock.elapsedRealtime()
+    }
+
+    fun clearTripDeviationUi() {
+        tripRejoinPoints = emptyList()
+        tripOfferedAlternateIndex = null
     }
 
     // Restore trip after leaving Home mid-navigation (report / tab / process recreate).
@@ -1799,6 +1826,7 @@ private fun ReportAndTrackSection(
             tripRoutePoints = emptyList()
             tripRouteSteps = emptyList()
             tripRouteOptions = emptyList()
+            tripKnownAlternates = emptyList()
             tripSelectedRouteIndex = 0
             tripRouteUserPicked = false
             tripNextTurn = null
@@ -1812,6 +1840,7 @@ private fun ReportAndTrackSection(
             rerouteOriginLon = null
             lastRerouteAtMs = 0L
             tripStartCorrectionDone = false
+            clearTripDeviationUi()
             announcedPotholeIds.clear()
             return@LaunchedEffect
         }
@@ -1821,6 +1850,7 @@ private fun ReportAndTrackSection(
             tripRoutePoints = emptyList()
             tripRouteSteps = emptyList()
             tripRouteOptions = emptyList()
+            tripKnownAlternates = emptyList()
             tripSelectedRouteIndex = 0
             tripNextTurn = null
             tripRouteProgress = null
@@ -1828,6 +1858,7 @@ private fun ReportAndTrackSection(
             tripRouteStatus = TripRouteStatus.IDLE
             tripAlerts = emptyList()
             tripRerouting = false
+            clearTripDeviationUi()
             return@LaunchedEffect
         }
         val gps = gpsPinLocation
@@ -1873,11 +1904,17 @@ private fun ReportAndTrackSection(
                         tripRouteSteps.isNotEmpty()
                 if (keepChosenPreview) {
                     // Navigate with the route the user already selected (incl. alternate).
+                    // Keep preview corridors for mid-trip deviation “tap to use”.
+                    if (tripRouteOptions.isNotEmpty()) {
+                        tripKnownAlternates = tripRouteOptions
+                    }
                     tripRouteOptions = emptyList()
                     tripRouteStatus = TripRouteStatus.ACTIVE
                     tripRerouting = false
+                    clearTripDeviationUi()
                 } else {
                     // Mid-trip refetch: prefer a route that matches the corridor in use.
+                    clearTripDeviationUi()
                     val preferredPoints = tripRoutePoints
                     val routes = runCatching {
                         OsrmRouteClient.fetchRoutes(
@@ -1887,6 +1924,10 @@ private fun ReportAndTrackSection(
                     val route = pickOsrmRouteMatchingPoints(routes, preferredPoints)
                     if (route != null && route.points.size >= 2) {
                         tripRouteOptions = emptyList()
+                        // Refresh known alts from the new fetch so future detours can offer them.
+                        if (routes.size > 1) {
+                            tripKnownAlternates = routes
+                        }
                         tripSelectedRouteIndex = 0
                         tripRoutePoints = route.points
                         tripRouteSteps = route.steps
@@ -1977,6 +2018,7 @@ private fun ReportAndTrackSection(
             tripRouteProgress = null
             tripNextTurn = null
             tripAlerts = emptyList()
+            clearTripDeviationUi()
             return@LaunchedEffect
         }
         val gps = gpsPinLocation
@@ -2072,20 +2114,120 @@ private fun ReportAndTrackSection(
             gps.accuracy.takeIf { gps.hasAccuracy() }?.times(2.0f)?.toDouble() ?: 0.0,
         )
         val now = SystemClock.elapsedRealtime()
-        if (
-            progress.offRouteMeters > accuracyAwareThreshold &&
-            now - lastRerouteAtMs >= 12_000L
-        ) {
-            // No internet → skip OSRM; GPS follow continues on the existing route.
-            if (!NetworkReachability.hasInternet(context)) {
+        if (progress.offRouteMeters <= accuracyAwareThreshold) {
+            // Back on the active corridor — drop rejoin / offer chrome.
+            if (tripRejoinPoints.isNotEmpty() || tripOfferedAlternateIndex != null) {
+                clearTripDeviationUi()
+            }
+            return@LaunchedEffect
+        }
+        if (now - lastRerouteAtMs < 12_000L) {
+            return@LaunchedEffect
+        }
+        // No internet → skip OSRM; still show a local dashed rejoin when cheap.
+        val speed = gps.speed.takeIf { gps.hasSpeed() }
+        val knownAltPoints = tripKnownAlternates.map { it.points }
+        if (!NetworkReachability.hasInternet(context)) {
+            val offlinePlan = TripNavigationMatcher.planDeviation(
+                routePoints = tripRoutePoints,
+                knownAlternates = knownAltPoints,
+                driverLat = gps.latitude,
+                driverLon = gps.longitude,
+                progress = progress,
+                speedMps = speed,
+                fullRerouteDurationSec = null,
+            )
+            when (offlinePlan.action) {
+                TripDeviationAction.OFFER_KNOWN_ALTERNATE -> {
+                    tripOfferedAlternateIndex = offlinePlan.knownAlternateIndex
+                    tripRejoinPoints = emptyList()
+                    lastRerouteAtMs = now
+                }
+                TripDeviationAction.SHOW_REJOIN -> {
+                    tripRejoinPoints = offlinePlan.rejoinPoints
+                    tripOfferedAlternateIndex = null
+                    lastRerouteAtMs = now
+                }
+                else -> Unit
+            }
+            return@LaunchedEffect
+        }
+
+        // Probe full-reroute ETA only when return looks borderline / costly.
+        val prelim = TripNavigationMatcher.planDeviation(
+            routePoints = tripRoutePoints,
+            knownAlternates = knownAltPoints,
+            driverLat = gps.latitude,
+            driverLon = gps.longitude,
+            progress = progress,
+            speedMps = speed,
+            fullRerouteDurationSec = null,
+        )
+        when (prelim.action) {
+            TripDeviationAction.OFFER_KNOWN_ALTERNATE -> {
+                tripOfferedAlternateIndex = prelim.knownAlternateIndex
+                tripRejoinPoints = emptyList()
+                lastRerouteAtMs = now
                 return@LaunchedEffect
             }
-            lastRerouteAtMs = now
-            rerouteOriginLat = gps.latitude
-            rerouteOriginLon = gps.longitude
-            tripRerouting = true
-            tripRouteRequestEpoch++
+            TripDeviationAction.SHOW_REJOIN -> {
+                // Confirm hybrid with a live OSRM duration when return is near the edge.
+                val returnM = prelim.rejoinReturnMeters
+                val needEtaProbe =
+                    returnM > TripNavigationMatcher.REJOIN_PREF_MAX_RETURN_M * 0.7
+                val fullRerouteSec = if (needEtaProbe) {
+                    val dLat = tripDestLat
+                    val dLon = tripDestLon
+                    if (dLat != null && dLon != null) {
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                OsrmRouteClient.fetchRoute(
+                                    gps.latitude,
+                                    gps.longitude,
+                                    dLat,
+                                    dLon,
+                                    tripVehicle,
+                                )?.durationSeconds
+                            }.getOrNull()
+                        }
+                    } else {
+                        null
+                    }
+                } else {
+                    null
+                }
+                val confirmed = if (fullRerouteSec != null) {
+                    TripNavigationMatcher.planDeviation(
+                        routePoints = tripRoutePoints,
+                        knownAlternates = knownAltPoints,
+                        driverLat = gps.latitude,
+                        driverLon = gps.longitude,
+                        progress = progress,
+                        speedMps = speed,
+                        fullRerouteDurationSec = fullRerouteSec,
+                    )
+                } else {
+                    prelim
+                }
+                if (confirmed.action == TripDeviationAction.SHOW_REJOIN) {
+                    tripRejoinPoints = confirmed.rejoinPoints
+                    tripOfferedAlternateIndex = null
+                    lastRerouteAtMs = now
+                    return@LaunchedEffect
+                }
+                // Fall through to full reroute.
+            }
+            TripDeviationAction.FULL_REROUTE,
+            TripDeviationAction.NONE,
+            -> Unit
         }
+
+        lastRerouteAtMs = now
+        clearTripDeviationUi()
+        rerouteOriginLat = gps.latitude
+        rerouteOriginLon = gps.longitude
+        tripRerouting = true
+        tripRouteRequestEpoch++
     }
     val nextTripAlert = tripAlerts.firstOrNull()
 
@@ -2189,6 +2331,11 @@ private fun ReportAndTrackSection(
                 },
                 tripSelectedRouteIndex = tripSelectedRouteIndex,
                 onSelectTripRouteIndex = { selectTripRouteOption(it) },
+                tripRejoinPoints = tripRejoinPoints,
+                tripOfferedAlternatePoints = tripOfferedAlternateIndex
+                    ?.let { tripKnownAlternates.getOrNull(it)?.points }
+                    .orEmpty(),
+                onConfirmOfferedAlternate = { confirmOfferedKnownAlternate() },
                 tripAlerts = tripAlerts,
                 // Start/end dots follow the road-snapped route when available (not off-road GPS).
                 tripStartLat = tripRoutePoints.firstOrNull()?.first
@@ -4118,6 +4265,9 @@ private fun refreshTripNavigationOverlay(
     selectedRouteIndex: Int = 0,
     previewSelecting: Boolean = false,
     onSelectRouteIndex: ((Int) -> Unit)? = null,
+    rejoinPoints: List<Pair<Double, Double>> = emptyList(),
+    offeredAlternatePoints: List<Pair<Double, Double>> = emptyList(),
+    onConfirmOfferedAlternate: (() -> Unit)? = null,
 ) {
     if (!tripModeEnabled) {
         decor.tripNav?.let { overlay ->
@@ -4130,6 +4280,7 @@ private fun refreshTripNavigationOverlay(
     val overlay = decor.tripNav ?: TripNavigationOverlay().also { decor.tripNav = it }
     overlay.attachTo(map)
     overlay.onAlternateRouteClick = onSelectRouteIndex
+    overlay.onOfferedAlternateClick = onConfirmOfferedAlternate
     overlay.showSidePlacement = streetFollow
     if (previewSelecting && alternateRouteOptions.isNotEmpty()) {
         overlay.completedRoutePoints = emptyList()
@@ -4148,6 +4299,8 @@ private fun refreshTripNavigationOverlay(
             selectedRouteIndex,
             etas = alternateRouteEtas,
         )
+        overlay.clearRejoinPath(map)
+        overlay.clearOfferedAlternate(map)
     } else {
         overlay.setPreviewAlternates(map, emptyList(), 0)
         val (completed, remaining) = TripNavigationMatcher.splitRouteByTraveled(
@@ -4165,6 +4318,22 @@ private fun refreshTripNavigationOverlay(
             navigationActive = navigationActive,
             mapZoom = map.zoomLevelDouble,
         )
+        if (rejoinPoints.size >= 2) {
+            overlay.setRejoinPath(
+                map,
+                rejoinPoints.map { (lat, lon) -> GeoPoint(lat, lon) },
+            )
+        } else {
+            overlay.clearRejoinPath(map)
+        }
+        if (offeredAlternatePoints.size >= 2) {
+            overlay.setOfferedAlternate(
+                map,
+                offeredAlternatePoints.map { (lat, lon) -> GeoPoint(lat, lon) },
+            )
+        } else {
+            overlay.clearOfferedAlternate(map)
+        }
     }
     overlay.syncMarkers(map)
     decor.clusters?.let { clusters ->
@@ -5305,6 +5474,9 @@ private fun OsmDensityMap(
     tripRouteEtas: List<String> = emptyList(),
     tripSelectedRouteIndex: Int = 0,
     onSelectTripRouteIndex: (Int) -> Unit = {},
+    tripRejoinPoints: List<Pair<Double, Double>> = emptyList(),
+    tripOfferedAlternatePoints: List<Pair<Double, Double>> = emptyList(),
+    onConfirmOfferedAlternate: () -> Unit = {},
     tripAlerts: List<TripPotholeAlert>,
     tripStartLat: Double?,
     tripStartLon: Double?,
@@ -5352,6 +5524,8 @@ private fun OsmDensityMap(
     val lastTripOptionsSize = remember { mutableIntStateOf(-1) }
     val lastTripAlertsSize = remember { mutableIntStateOf(-1) }
     val lastTripTraveledMeters = remember { mutableFloatStateOf(-1f) }
+    val lastTripRejoinSize = remember { mutableIntStateOf(-1) }
+    val lastTripOfferedAltSize = remember { mutableIntStateOf(-1) }
     val areaHeatEnabledHolder = remember { object { var enabled: Boolean = false } }
     areaHeatEnabledHolder.enabled = areaHeatEnabled
     val tripDestMarkerRef = remember { arrayOfNulls<Marker>(1) }
@@ -5480,6 +5654,8 @@ private fun OsmDensityMap(
         tripRouteEtas,
         tripSelectedRouteIndex,
         tripAlerts,
+        tripRejoinPoints,
+        tripOfferedAlternatePoints,
         tripStartLat,
         tripStartLon,
         tripDestinationLat,
@@ -5518,6 +5694,9 @@ private fun OsmDensityMap(
             selectedRouteIndex = tripSelectedRouteIndex,
             previewSelecting = tripModeEnabled && !tripNavActive,
             onSelectRouteIndex = onSelectTripRouteIndex,
+            rejoinPoints = tripRejoinPoints,
+            offeredAlternatePoints = tripOfferedAlternatePoints,
+            onConfirmOfferedAlternate = onConfirmOfferedAlternate,
         )
         syncTripEndpointDots(
             map = map,
@@ -5539,6 +5718,8 @@ private fun OsmDensityMap(
         lastTripOptionsSize.intValue = tripRouteOptions.size
         lastTripAlertsSize.intValue = tripAlerts.size
         lastTripTraveledMeters.floatValue = tripRouteTraveledMeters.toFloat()
+        lastTripRejoinSize.intValue = tripRejoinPoints.size
+        lastTripOfferedAltSize.intValue = tripOfferedAlternatePoints.size
         map.invalidate()
         map.postInvalidate()
     }
@@ -6304,6 +6485,8 @@ private fun OsmDensityMap(
                     tripSelectedRouteIndex != lastTripSelectedRouteIndex.intValue ||
                     tripRouteOptions.size != lastTripOptionsSize.intValue ||
                     tripAlerts.size != lastTripAlertsSize.intValue ||
+                    tripRejoinPoints.size != lastTripRejoinSize.intValue ||
+                    tripOfferedAlternatePoints.size != lastTripOfferedAltSize.intValue ||
                     kotlin.math.abs(tripRouteTraveledMeters.toFloat() - lastTripTraveledMeters.floatValue) > 2f
                 ) {
                     refreshTripNavigationOverlay(
@@ -6327,6 +6510,9 @@ private fun OsmDensityMap(
                         selectedRouteIndex = tripSelectedRouteIndex,
                         previewSelecting = tripModeEnabled && !tripNavActive,
                         onSelectRouteIndex = onSelectTripRouteIndex,
+                        rejoinPoints = tripRejoinPoints,
+                        offeredAlternatePoints = tripOfferedAlternatePoints,
+                        onConfirmOfferedAlternate = onConfirmOfferedAlternate,
                     )
                     syncTripEndpointDots(
                         map = view,
@@ -6348,6 +6534,8 @@ private fun OsmDensityMap(
                     lastTripOptionsSize.intValue = tripRouteOptions.size
                     lastTripAlertsSize.intValue = tripAlerts.size
                     lastTripTraveledMeters.floatValue = tripRouteTraveledMeters.toFloat()
+                    lastTripRejoinSize.intValue = tripRejoinPoints.size
+                    lastTripOfferedAltSize.intValue = tripOfferedAlternatePoints.size
                     view.invalidate()
                 } else if (tripModeEnabled) {
                     syncTripEndpointDots(

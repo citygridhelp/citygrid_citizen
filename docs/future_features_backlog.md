@@ -29,15 +29,76 @@ Do **not** rely on chat or memory alone — **this backlog is the source of trut
 
 ## ★ Highest priority (do next — user reminder 27 Jul 2026)
 
-### 23. Trip alternate-route quality (MOST IMPORTANT — revisit)
+### 23. Trip alternate-route quality + deviation handling (MOST IMPORTANT — revisit)
 
-**Status:** **Deferred — #1 next trip task.** User reconfirmed (27 Jul 2026) as an active enhancement — keep working on alternate routes.
+**Status:** **In progress (27 Jul 2026)** — **23.1** + **23.3** implemented in app; **23.2** pothole ranking still later.
 
-**Problem:** Alternates sometimes missing, or include waste / meaningless diversions; quality filters and via-probes need a better Google-like balance.
+**Shipped in code (device-verify):**
 
-**When resuming:** Re-read `docs/product_assumptions.md` §5 and `OsrmRouteClient.kt`; treat this as the **most important** open trip item.
+| Piece | Detail |
+|-------|--------|
+| **23.1** | Soft max routes **3** (1 primary + ≤2 alts) |
+| **23.3 offer** | Preview corridors kept after Navigate; if off-route near a known alt → orange **Tap to use** (no auto-switch) |
+| **23.3 rejoin** | Hybrid: dashed **teal** return line when return ≤ ~400 m (and ETA within ~90 s when probed); else full OSRM reroute |
+| **23.3 clear** | Rejoin / offer chrome clears when back on corridor |
 
-**Key files:** `OsrmRouteClient.kt`, `OsrmRouteAlternatesTest.kt`, `TripNavigationOverlay.kt`, `docs/product_assumptions.md` §5.
+**Still later:** **23.2** pothole-aware ranking when ETAs are close.
+
+**Problem today (pre-change):** Alternates sometimes **missing**, or include **waste / meaningless diversions**. Quality filters and via-probes need a better Google-like balance. Reroute on deviation existed (~60 m off-route) but did not distinguish “user chose a better corridor” vs “user should rejoin.”
+
+**Product goal:** Show **fewer, better** routes — not more routes for the sake of it.
+
+| Phase | Scope |
+|-------|--------|
+| **23.1 — Alternate quality (ship first)** | **1 primary + up to 2 genuinely useful alternates.** Reject near-duplicates, spurs, messy U-turn loops, and fake detours. Prefer real corridor differences (parallel road, ORR vs inner, etc.). |
+| **23.2 — Pothole-aware ranking (later)** | When ETAs are close, rank routes by **road condition / pothole risk** (fewer severe/critical ahead, not just fastest). Makes City Grid more useful than plain navigation. |
+| **23.3 — Deviation / detour UX** | If the user leaves the active route: **(A)** if they are on or near a **known good alternate** (or a clearly better next path), switch guidance to that route; **(B)** otherwise show how to **rejoin the original route** (rejoin segment / “return to route” cue) rather than always blind full reroute. |
+
+**23.1 — Quality rules (draft):**
+
+- Do **not** optimize for route count — optimize for **trust**.
+- Native OSRM alternatives first; via-probes only when needed (see `product_assumptions.md` §5.3).
+- Reject: too similar to primary, out-and-back spurs, excess U-turns, gross corridor waste, bike-only scraps beside a road primary.
+- Soft fallback: if strict filter leaves &lt; 2 options, keep **light-filtered distinct** corridors rather than showing nothing.
+
+**23.2 — Ranking (later, after 23.1 stable):**
+
+- Default sort: **ETA** (static OSRM — no live traffic yet).
+- When time delta is small (threshold TBD), prefer route with **lower pothole risk** (severity-weighted count ahead on corridor).
+- Surface in UI: e.g. “Similar time · fewer severe potholes” on alternate chip.
+- Optional: let user pick “Fastest” vs “Safer road” before Navigate.
+
+**23.3 — When user deviates (draft):**
+
+| Situation | Behaviour |
+|-----------|-----------|
+| Slight drift / GPS jitter | No drama — existing snap + tolerance |
+| Off original route, **on a known alternate** from preview | Offer that alternate with **tap to confirm** (do not auto-switch) |
+| Off route, **not** on a known alternate | Prefer **rejoin** (dashed return line) unless rejoin is clearly worse than a full **reroute** — see threshold below |
+| User clearly chose a long intentional detour | Full reroute to destination from current position |
+
+**Decided (27 Jul 2026):**
+
+| Question | Decision |
+|----------|----------|
+| Auto-switch to alternate vs tap | **Tap to confirm** |
+| Rejoin line on map | **Yes** — dashed, **different color grading** from active route / alternates |
+| Pothole ranking weights (#23.2) | **Later — not now** |
+| Rejoin vs reroute | **Hybrid** — prefer rejoin while return is short **and** not clearly slower; otherwise full reroute |
+
+**Hybrid threshold (draft — tune on device):**
+
+| Rule | Draft value |
+|------|-------------|
+| Prefer **rejoin** when | Return-to-route distance ≤ **~400 m** **and** rejoin ETA is not much worse than full reroute (draft: within **~90 s**) |
+| Prefer **full reroute** when | Return &gt; **~400–500 m**, or rejoin ETA clearly worse, or user is heading away / past the corridor |
+| Still show dashed rejoin line | While hybrid says “rejoin is viable”; hide / replace with new route once full reroute is chosen |
+
+Numbers above are starting points — adjust after road tests in Bengaluru traffic.
+
+**When resuming:** Re-read `docs/product_assumptions.md` §5 and `OsrmRouteClient.kt`; implement **23.1** before **23.2** or **23.3** polish.
+
+**Key files:** `OsrmRouteClient.kt`, `OsrmRouteAlternatesTest.kt`, `TripNavigationMatcher.kt` (off-route), `TripNavigationOverlay.kt`, `HomeScreen.kt` (reroute / preview), `docs/product_assumptions.md` §5.
 
 ---
 

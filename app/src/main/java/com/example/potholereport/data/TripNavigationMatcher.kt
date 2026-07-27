@@ -24,6 +24,25 @@ data class TripRouteProgress(
     val offRouteMeters: Double,
 )
 
+/** How to recover after the driver leaves the active route. */
+enum class TripDeviationAction {
+    NONE,
+    /** User is near a preview alternate — wait for tap to confirm. */
+    OFFER_KNOWN_ALTERNATE,
+    /** Short return to original route is viable (dashed rejoin line). */
+    SHOW_REJOIN,
+    /** Rejoin is too costly — full OSRM refetch to destination. */
+    FULL_REROUTE,
+}
+
+/** Planned recovery for an off-route GPS fix. */
+data class TripDeviationPlan(
+    val action: TripDeviationAction,
+    val knownAlternateIndex: Int? = null,
+    val rejoinPoints: List<Pair<Double, Double>> = emptyList(),
+    val rejoinReturnMeters: Double = 0.0,
+)
+
 /** Upcoming turn guidance for the trip banner. */
 data class TripTurnGuidance(
     val instruction: String,
@@ -66,6 +85,21 @@ object TripNavigationMatcher {
 
     /** Smaller one-time tolerance used to correct an inaccurate initial route origin. */
     const val START_CORRECTION_M = 15.0
+
+    /** Prefer rejoin when return-to-route distance is at or below this (hybrid #23.3). */
+    const val REJOIN_PREF_MAX_RETURN_M = 400.0
+
+    /** Beyond this return distance, always full-reroute. */
+    const val REJOIN_HARD_MAX_RETURN_M = 500.0
+
+    /** Rejoin may be up to this many seconds slower than a full reroute and still win. */
+    const val REJOIN_ETA_SLACK_SEC = 90.0
+
+    /** Corridor to treat GPS as “on” a known preview alternate. */
+    const val KNOWN_ALTERNATE_CORRIDOR_M = 45.0
+
+    /** Fallback speed (~30 km/h) when GPS speed is missing / too low for ETA estimates. */
+    const val DEVIATION_FALLBACK_SPEED_MPS = 8.33
 
     fun routeStartNeedsCorrection(
         routePoints: List<Pair<Double, Double>>,
@@ -463,6 +497,153 @@ object TripNavigationMatcher {
         val projLat = a.first + t * (b.first - a.first)
         val projLon = a.second + t * (b.second - a.second)
         return haversineM(pLat, pLon, projLat, projLon)
+    }
+
+    /**
+     * Builds a short dashed rejoin path from the driver to the nearest point on
+     * [routePoints], then continues along the remaining original route.
+     * @return polyline + pure return distance (driver → snap), or null if impossible.
+     */
+    fun buildRejoinPolyline(
+        routePoints: List<Pair<Double, Double>>,
+        driverLat: Double,
+        driverLon: Double,
+    ): Pair<List<Pair<Double, Double>>, Double>? {
+        if (routePoints.size < 2 || !driverLat.isFinite() || !driverLon.isFinite()) return null
+        val seg = nearestSegmentIndex(routePoints, driverLat, driverLon) ?: return null
+        val (aLat, aLon) = routePoints[seg]
+        val (bLat, bLon) = routePoints[seg + 1]
+        val t = projectT(aLat, aLon, bLat, bLon, driverLat, driverLon).coerceIn(0.0, 1.0)
+        val snapLat = aLat + t * (bLat - aLat)
+        val snapLon = aLon + t * (bLon - aLon)
+        val returnM = haversineM(driverLat, driverLon, snapLat, snapLon)
+        if (!returnM.isFinite()) return null
+        val alongAtSnap = alongDistanceAt(routePoints, seg, snapLat, snapLon)
+        val (_, remaining) = splitRouteByTraveled(routePoints, alongAtSnap)
+        val points = buildList {
+            add(driverLat to driverLon)
+            if (returnM > 2.0) add(snapLat to snapLon)
+            // Skip duplicate first remaining vertex if it matches snap.
+            remaining.forEachIndexed { i, p ->
+                if (i == 0 && haversineM(p.first, p.second, snapLat, snapLon) < 1.5) return@forEachIndexed
+                add(p)
+            }
+        }
+        if (points.size < 2) return null
+        return points to returnM
+    }
+
+    /** Index of a known alternate corridor the driver is currently near, or null. */
+    fun findNearbyKnownAlternateIndex(
+        knownAlternates: List<List<Pair<Double, Double>>>,
+        activeRoute: List<Pair<Double, Double>>,
+        driverLat: Double,
+        driverLon: Double,
+        corridorM: Double = KNOWN_ALTERNATE_CORRIDOR_M,
+    ): Int? {
+        if (!driverLat.isFinite() || !driverLon.isFinite() || corridorM <= 0.0) return null
+        var bestIdx: Int? = null
+        var bestDist = Double.MAX_VALUE
+        knownAlternates.forEachIndexed { index, alt ->
+            if (alt.size < 2) return@forEachIndexed
+            if (routesLookAlike(alt, activeRoute)) return@forEachIndexed
+            val progress = routeProgress(alt, driverLat, driverLon) ?: return@forEachIndexed
+            if (progress.offRouteMeters <= corridorM && progress.offRouteMeters < bestDist) {
+                bestDist = progress.offRouteMeters
+                bestIdx = index
+            }
+        }
+        return bestIdx
+    }
+
+    fun routesLookAlike(
+        a: List<Pair<Double, Double>>,
+        b: List<Pair<Double, Double>>,
+        sampleGapMaxM: Double = 80.0,
+    ): Boolean {
+        if (a.size < 2 || b.size < 2) return false
+        val stations = listOf(0.25, 0.5, 0.75)
+        var maxGap = 0.0
+        for (frac in stations) {
+            val ai = (a.size * frac).toInt().coerceIn(0, a.lastIndex)
+            val bi = (b.size * frac).toInt().coerceIn(0, b.lastIndex)
+            maxGap = maxOf(
+                maxGap,
+                haversineM(a[ai].first, a[ai].second, b[bi].first, b[bi].second),
+            )
+        }
+        return maxGap <= sampleGapMaxM
+    }
+
+    fun estimateTravelSeconds(distanceM: Double, speedMps: Float?): Double {
+        if (!distanceM.isFinite() || distanceM <= 0.0) return 0.0
+        val speed = speedMps?.takeIf { it.isFinite() && it >= 1.5f }?.toDouble()
+            ?: DEVIATION_FALLBACK_SPEED_MPS
+        return distanceM / speed
+    }
+
+    /**
+     * Hybrid #23.3 decision once the driver is clearly off the active route.
+     * [fullRerouteDurationSec] may be null before an OSRM probe completes —
+     * then distance alone decides (≤ [REJOIN_PREF_MAX_RETURN_M] → rejoin).
+     */
+    fun planDeviation(
+        routePoints: List<Pair<Double, Double>>,
+        knownAlternates: List<List<Pair<Double, Double>>>,
+        driverLat: Double,
+        driverLon: Double,
+        progress: TripRouteProgress,
+        speedMps: Float?,
+        fullRerouteDurationSec: Double?,
+    ): TripDeviationPlan {
+        val nearbyAlt = findNearbyKnownAlternateIndex(
+            knownAlternates, routePoints, driverLat, driverLon,
+        )
+        if (nearbyAlt != null) {
+            return TripDeviationPlan(
+                action = TripDeviationAction.OFFER_KNOWN_ALTERNATE,
+                knownAlternateIndex = nearbyAlt,
+            )
+        }
+
+        val rejoin = buildRejoinPolyline(routePoints, driverLat, driverLon)
+            ?: return TripDeviationPlan(TripDeviationAction.FULL_REROUTE)
+        val (rejoinPoints, returnM) = rejoin
+
+        // Snap behind the driver by a lot while drifting → treat as intentional detour.
+        val snapAlong = progress.traveledMeters
+        val headingAway =
+            returnM > 120.0 &&
+                progress.offRouteMeters > OFF_ROUTE_REROUTE_M * 1.5 &&
+                snapAlong < progress.totalMeters * 0.15 &&
+                progress.completionFraction < 0.12
+
+        if (headingAway || returnM > REJOIN_HARD_MAX_RETURN_M) {
+            return TripDeviationPlan(TripDeviationAction.FULL_REROUTE)
+        }
+
+        val remainingAfterSnap = (progress.remainingMeters).coerceAtLeast(0.0)
+        // Rough remaining after rejoining ≈ remaining on original − nothing for return on-route.
+        // Return leg is off-route; remaining is still roughly progress.remainingMeters from snap.
+        val rejoinEtaSec =
+            estimateTravelSeconds(returnM, speedMps) +
+                estimateTravelSeconds(remainingAfterSnap, speedMps)
+
+        val preferRejoin = when {
+            returnM > REJOIN_PREF_MAX_RETURN_M -> false
+            fullRerouteDurationSec == null -> true
+            else -> rejoinEtaSec <= fullRerouteDurationSec + REJOIN_ETA_SLACK_SEC
+        }
+
+        return if (preferRejoin) {
+            TripDeviationPlan(
+                action = TripDeviationAction.SHOW_REJOIN,
+                rejoinPoints = rejoinPoints,
+                rejoinReturnMeters = returnM,
+            )
+        } else {
+            TripDeviationPlan(TripDeviationAction.FULL_REROUTE)
+        }
     }
 
     fun haversineM(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {

@@ -3,6 +3,7 @@ package com.example.potholereport.ui.home
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Point
 import android.graphics.Typeface
@@ -69,6 +70,36 @@ class TripNavigationOverlay : Overlay() {
         outlinePaint.strokeJoin = Paint.Join.ROUND
     }
 
+    /**
+     * Dashed return-to-route cue (#23.3) — teal grading, distinct from blue active
+     * and orange preview alternates.
+     */
+    private val rejoinLine = Polyline().apply {
+        outlinePaint.color = AndroidColor.parseColor("#0F766E")
+        outlinePaint.strokeWidth = 10f
+        outlinePaint.style = Paint.Style.STROKE
+        outlinePaint.isAntiAlias = true
+        outlinePaint.isDither = true
+        outlinePaint.strokeCap = Paint.Cap.ROUND
+        outlinePaint.strokeJoin = Paint.Join.ROUND
+        outlinePaint.pathEffect = DashPathEffect(floatArrayOf(22f, 14f), 0f)
+        outlinePaint.alpha = 230
+        isEnabled = false
+    }
+
+    /** Soft under-glow for the dashed rejoin so it reads at street zoom. */
+    private val rejoinGlow = Polyline().apply {
+        outlinePaint.color = AndroidColor.parseColor("#5EEAD4")
+        outlinePaint.strokeWidth = 16f
+        outlinePaint.style = Paint.Style.STROKE
+        outlinePaint.isAntiAlias = true
+        outlinePaint.strokeCap = Paint.Cap.ROUND
+        outlinePaint.strokeJoin = Paint.Join.ROUND
+        outlinePaint.pathEffect = DashPathEffect(floatArrayOf(22f, 14f), 0f)
+        outlinePaint.alpha = 90
+        isEnabled = false
+    }
+
     var remainingRoutePoints: List<GeoPoint> = emptyList()
         set(value) {
             field = value
@@ -106,6 +137,9 @@ class TripNavigationOverlay : Overlay() {
     /** Invoked when the user taps an alternate preview polyline (index in [setPreviewAlternates]). */
     var onAlternateRouteClick: ((Int) -> Unit)? = null
 
+    /** Mid-nav: tap the offered known-alternate corridor to confirm switch. */
+    var onOfferedAlternateClick: (() -> Unit)? = null
+
     /**
      * Street follow: show L/M/R/F placement on pins.
      * Map overview: number pins by distance ahead (1, 2, …) — no side letters.
@@ -115,6 +149,8 @@ class TripNavigationOverlay : Overlay() {
     private val alternateLines = mutableListOf<Polyline>()
     private val etaMarkers = mutableListOf<Marker>()
     private val markers = mutableListOf<Marker>()
+    private var offeredAlternateLine: Polyline? = null
+    private var offeredAlternateEta: Marker? = null
 
     /**
      * Route stroke widths + crisp under-outline in street follow.
@@ -174,16 +210,97 @@ class TripNavigationOverlay : Overlay() {
             val insertAt = if (ribbonIdx >= 0) ribbonIdx + 1 else map.overlays.size
             map.overlays.add(insertAt, remainingLine)
         }
+        if (!map.overlays.contains(rejoinGlow)) {
+            map.overlays.add(rejoinGlow)
+        }
+        if (!map.overlays.contains(rejoinLine)) {
+            map.overlays.add(rejoinLine)
+        }
     }
 
     fun detachFrom(map: MapView) {
         clearAlternateLines(map)
         clearEtaMarkers(map)
+        clearOfferedAlternate(map)
+        clearRejoinPath(map)
         map.overlays.remove(completedLine)
         map.overlays.remove(remainingRibbon)
         map.overlays.remove(remainingLine)
+        map.overlays.remove(rejoinGlow)
+        map.overlays.remove(rejoinLine)
         markers.forEach { map.overlays.remove(it) }
         markers.clear()
+    }
+
+    /** Dashed teal return-to-route path while hybrid prefers rejoin. */
+    fun setRejoinPath(map: MapView, points: List<GeoPoint>) {
+        if (points.size < 2) {
+            clearRejoinPath(map)
+            return
+        }
+        val display = densifyForDisplay(points)
+        if (!map.overlays.contains(rejoinGlow)) map.overlays.add(rejoinGlow)
+        if (!map.overlays.contains(rejoinLine)) map.overlays.add(rejoinLine)
+        rejoinGlow.isEnabled = true
+        rejoinLine.isEnabled = true
+        rejoinGlow.setPoints(display)
+        rejoinLine.setPoints(display)
+    }
+
+    fun clearRejoinPath(map: MapView) {
+        rejoinGlow.isEnabled = false
+        rejoinLine.isEnabled = false
+        rejoinGlow.setPoints(emptyList())
+        rejoinLine.setPoints(emptyList())
+        map.overlays.remove(rejoinGlow)
+        map.overlays.remove(rejoinLine)
+    }
+
+    /**
+     * Mid-navigation: highlight a known alternate corridor; tap confirms switch
+     * (does not auto-switch — #23.3).
+     */
+    fun setOfferedAlternate(map: MapView, points: List<GeoPoint>) {
+        clearOfferedAlternate(map)
+        if (points.size < 2) return
+        val remainingIdx = map.overlays.indexOf(remainingLine)
+        val insertAt = if (remainingIdx >= 0) remainingIdx else map.overlays.size
+        val line = Polyline().apply {
+            outlinePaint.color = AndroidColor.parseColor("#EA580C")
+            outlinePaint.strokeWidth = 14f
+            outlinePaint.style = Paint.Style.STROKE
+            outlinePaint.isAntiAlias = true
+            outlinePaint.strokeCap = Paint.Cap.ROUND
+            outlinePaint.strokeJoin = Paint.Join.ROUND
+            setPoints(densifyForDisplay(points))
+            setOnClickListener { _, _, _ ->
+                onOfferedAlternateClick?.invoke()
+                true
+            }
+        }
+        offeredAlternateLine = line
+        map.overlays.add(insertAt, line)
+        val tip = pointAlongRoute(points, 0.45)
+        val eta = Marker(map).apply {
+            position = tip
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            setInfoWindow(null)
+            title = "Tap to use"
+            setIcon(buildRouteEtaBadgeDrawable(map.context, "Tap to use", selected = false))
+            setOnMarkerClickListener { _, _ ->
+                onOfferedAlternateClick?.invoke()
+                true
+            }
+        }
+        offeredAlternateEta = eta
+        map.overlays.add(eta)
+    }
+
+    fun clearOfferedAlternate(map: MapView) {
+        offeredAlternateLine?.let { map.overlays.remove(it) }
+        offeredAlternateLine = null
+        offeredAlternateEta?.let { map.overlays.remove(it) }
+        offeredAlternateEta = null
     }
 
     /**
@@ -408,6 +525,8 @@ class TripNavigationOverlay : Overlay() {
         remainingLine.setPoints(emptyList())
         clearAlternateLines(map)
         clearEtaMarkers(map)
+        clearOfferedAlternate(map)
+        clearRejoinPath(map)
         markers.forEach { map.overlays.remove(it) }
         markers.clear()
     }

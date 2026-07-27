@@ -104,6 +104,75 @@ class TripNavigationMatcherTest {
     fun offRouteReroute_baseThresholdIsSixtyMeters() {
         assertEquals(60.0, TripNavigationMatcher.OFF_ROUTE_REROUTE_M, 0.0)
         assertEquals(15.0, TripNavigationMatcher.START_CORRECTION_M, 0.0)
+        assertEquals(400.0, TripNavigationMatcher.REJOIN_PREF_MAX_RETURN_M, 0.0)
+        assertEquals(500.0, TripNavigationMatcher.REJOIN_HARD_MAX_RETURN_M, 0.0)
+        assertEquals(90.0, TripNavigationMatcher.REJOIN_ETA_SLACK_SEC, 0.0)
+    }
+
+    @Test
+    fun buildRejoinPolyline_returnsDriverToSnapThenRemaining() {
+        val rejoin = TripNavigationMatcher.buildRejoinPolyline(
+            straightRoute,
+            driverLat = 0.001,
+            driverLon = 0.005,
+        )
+        assertNotNull(rejoin)
+        val (points, returnM) = rejoin!!
+        assertTrue(points.size >= 2)
+        assertEquals(0.001, points.first().first, 1e-6)
+        assertEquals(0.005, points.first().second, 1e-6)
+        assertTrue(returnM in 105.0..117.0)
+    }
+
+    @Test
+    fun planDeviation_offersKnownAlternateWhenNearIt() {
+        val active = listOf(0.0 to 0.0, 0.0 to 0.01)
+        val alt = listOf(0.002 to 0.0, 0.002 to 0.01) // ~222 m north parallel
+        val progress = TripNavigationMatcher.routeProgress(active, 0.002, 0.005)!!
+        assertTrue(progress.offRouteMeters > 60.0)
+        val plan = TripNavigationMatcher.planDeviation(
+            routePoints = active,
+            knownAlternates = listOf(active, alt),
+            driverLat = 0.002,
+            driverLon = 0.005,
+            progress = progress,
+            speedMps = 8f,
+            fullRerouteDurationSec = null,
+        )
+        assertEquals(TripDeviationAction.OFFER_KNOWN_ALTERNATE, plan.action)
+        assertEquals(1, plan.knownAlternateIndex)
+    }
+
+    @Test
+    fun planDeviation_prefersRejoinWhenReturnIsShort() {
+        val progress = TripNavigationMatcher.routeProgress(straightRoute, 0.001, 0.005)!!
+        val plan = TripNavigationMatcher.planDeviation(
+            routePoints = straightRoute,
+            knownAlternates = emptyList(),
+            driverLat = 0.001,
+            driverLon = 0.005,
+            progress = progress,
+            speedMps = 8f,
+            fullRerouteDurationSec = null,
+        )
+        assertEquals(TripDeviationAction.SHOW_REJOIN, plan.action)
+        assertTrue(plan.rejoinPoints.size >= 2)
+        assertTrue(plan.rejoinReturnMeters < 400.0)
+    }
+
+    @Test
+    fun planDeviation_fullReroutesWhenReturnExceedsHardMax() {
+        val progress = TripNavigationMatcher.routeProgress(straightRoute, 0.006, 0.005)!!
+        val plan = TripNavigationMatcher.planDeviation(
+            routePoints = straightRoute,
+            knownAlternates = emptyList(),
+            driverLat = 0.006,
+            driverLon = 0.005,
+            progress = progress,
+            speedMps = 8f,
+            fullRerouteDurationSec = 60.0,
+        )
+        assertEquals(TripDeviationAction.FULL_REROUTE, plan.action)
     }
 
     @Test

@@ -98,7 +98,7 @@ Related docs:
 | Live traffic | **Not used** — ETAs are static network times (OSRM). Do not claim “less traffic” in UI until a traffic source exists | Product decision Jul 2026 |
 | Request throttle | ≥ **~400 ms** between OSRM calls (public host courtesy) | `throttledGet` |
 | Start/end snap radius | **500 m** (courtyard/park → nearest road) | `SNAP_RADIUS_M` |
-| Soft max routes shown | **5** (via enrichment + UI; not a product “only 3”) | `MAX_ROUTE_OPTIONS` |
+| Soft max routes shown | **3** (1 primary + up to 2 useful alts — #23.1 trust over quantity) | `MAX_ROUTE_OPTIONS` |
 | Native OSRM alternatives | Request at most **3** — FOSSGIS returns `TooBig` (zero routes) if higher | `OSRM_MAX_ALTERNATIVES` |
 
 ### 5.2 Bike road-network fallback
@@ -161,7 +161,8 @@ When OSRM returns one path (common), the app probes left/right **via** points al
 | Ahead cone (no route) | Half-angle **35°**, max **2500 m**, min **5 m** | `TripNavigationMatcher` |
 | Route corridor | Perpendicular ≤ **28 m** from polyline | `ROUTE_CORRIDOR_M` |
 | Max alert distance | **2500 m** ahead (overview); street-follow map shows closer subset | `MAX_AHEAD_M`, street-follow caps |
-| Off-route reroute | Deviates **> 60 m** from route | `OFF_ROUTE_REROUTE_M` |
+| Off-route trigger | Deviates **> 60 m** from route (accuracy-aware) | `OFF_ROUTE_REROUTE_M` |
+| Deviation recovery (#23.3) | Near known alt → **tap to confirm**; else hybrid **rejoin** (return ≤ **~400 m**, ETA within **~90 s** of full reroute) with dashed teal line; else **full reroute** (return &gt; **~500 m** or worse ETA) | `TripNavigationMatcher.planDeviation` |
 | Start correction | If start was off by ≥ **15 m** (or accuracy-scaled), correct from live GPS | `START_CORRECTION_M` |
 | Pothole notify distance | Voice/notify within **150 m** | `TRIP_POTHOLE_NOTIFY_WITHIN_M` |
 | Follow zoom | Street follow ~**18.8–19** (near max); nav overview ~**15.5**; trip map max zoom **19** | `TRIP_FOLLOW_ZOOM`, `TripStreetCamera`, `TRIP_MAP_MAX_ZOOM` |
