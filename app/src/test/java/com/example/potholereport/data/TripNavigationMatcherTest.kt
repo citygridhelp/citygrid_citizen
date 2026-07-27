@@ -1,0 +1,288 @@
+package com.example.potholereport.data
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class TripNavigationMatcherTest {
+
+    private val straightRoute = listOf(
+        0.0 to 0.0,
+        0.0 to 0.01,
+    )
+
+    @Test
+    fun routeProgress_projectsDriverOntoRoute() {
+        val progress = TripNavigationMatcher.routeProgress(
+            straightRoute,
+            driverLat = 0.0,
+            driverLon = 0.005,
+        )
+
+        assertNotNull(progress)
+        progress!!
+        assertEquals(0.5, progress.completionFraction, 0.02)
+        assertEquals(progress.traveledMeters, progress.remainingMeters, 5.0)
+        assertTrue(progress.offRouteMeters < 1.0)
+    }
+
+    @Test
+    fun routeProgress_reportsPerpendicularDeviation() {
+        val progress = TripNavigationMatcher.routeProgress(
+            straightRoute,
+            driverLat = 0.001,
+            driverLon = 0.005,
+        )
+
+        assertNotNull(progress)
+        assertTrue(progress!!.offRouteMeters in 105.0..117.0)
+    }
+
+    @Test
+    fun routeStartCorrection_usesReliableMovingFix() {
+        assertTrue(
+            TripNavigationMatcher.routeStartNeedsCorrection(
+                straightRoute,
+                driverLat = 0.0,
+                driverLon = 0.0003,
+                gpsAccuracyM = 5f,
+            ),
+        )
+        assertFalse(
+            TripNavigationMatcher.routeStartNeedsCorrection(
+                straightRoute,
+                driverLat = 0.0,
+                driverLon = 0.0001,
+                gpsAccuracyM = 5f,
+            ),
+        )
+    }
+
+    @Test
+    fun routeStartCorrection_ignoresNormalGpsJitterUnder25m() {
+        // ~11 m east of route start (0.0001 lon ≈ 11 m near equator).
+        assertFalse(
+            TripNavigationMatcher.routeStartNeedsCorrection(
+                straightRoute,
+                driverLat = 0.0,
+                driverLon = 0.0001,
+                gpsAccuracyM = 8f,
+            ),
+        )
+    }
+
+    @Test
+    fun routeStartCorrection_triggersWhenSettledFixIsClearlyWrong() {
+        // ~33 m east of route start with good accuracy — intentional path rebuild.
+        assertTrue(
+            TripNavigationMatcher.routeStartNeedsCorrection(
+                straightRoute,
+                driverLat = 0.0,
+                driverLon = 0.0003,
+                gpsAccuracyM = 8f,
+            ),
+        )
+    }
+
+    @Test
+    fun routeStartCorrection_raisesThresholdWhenAccuracyIsPoor() {
+        // Same ~33 m offset, but poor accuracy (30 m) raises threshold to 45 m.
+        assertFalse(
+            TripNavigationMatcher.routeStartNeedsCorrection(
+                straightRoute,
+                driverLat = 0.0,
+                driverLon = 0.0003,
+                gpsAccuracyM = 30f,
+            ),
+        )
+    }
+
+    @Test
+    fun offRouteReroute_baseThresholdIsSixtyMeters() {
+        assertEquals(60.0, TripNavigationMatcher.OFF_ROUTE_REROUTE_M, 0.0)
+        assertEquals(15.0, TripNavigationMatcher.START_CORRECTION_M, 0.0)
+    }
+
+    @Test
+    fun pinRouteOriginToGps_prependsOnlyWithinBridgeLimit() {
+        val route = listOf(
+            12.97 to 77.59,
+            12.971 to 77.591,
+        )
+        // ~55 m north of snapped start — must NOT cut across open land.
+        val gpsLat = 12.97 + (55.0 / 111_320.0)
+        val pinned = TripNavigationMatcher.pinRouteOriginToGps(
+            route,
+            gpsLat,
+            77.59,
+            maxBridgeMeters = 10.0,
+        )
+        assertEquals(route, pinned)
+    }
+
+    @Test
+    fun pinRouteOriginToGps_prependsWhenOsrmSnappedSlightlyAway() {
+        val route = listOf(
+            12.97 to 77.59,
+            12.971 to 77.591,
+        )
+        // ~8 m north — short bridge is OK for walk pin match.
+        val gpsLat = 12.97 + (8.0 / 111_320.0)
+        val pinned = TripNavigationMatcher.pinRouteOriginToGps(
+            route,
+            gpsLat,
+            77.59,
+            maxBridgeMeters = 12.0,
+        )
+        assertEquals(3, pinned.size)
+        assertEquals(gpsLat, pinned.first().first, 1e-9)
+        assertEquals(77.59, pinned.first().second, 1e-9)
+        assertEquals(route.first(), pinned[1])
+    }
+
+    @Test
+    fun pinRouteOriginToGps_keepsRouteWhenAlreadyAtPin() {
+        val route = listOf(12.97 to 77.59, 12.971 to 77.591)
+        val pinned = TripNavigationMatcher.pinRouteOriginToGps(route, 12.97, 77.59)
+        assertEquals(route, pinned)
+    }
+
+    @Test
+    fun nextTurnGuidance_advancesPastCompletedSteps() {
+        val steps = listOf(
+            com.example.potholereport.data.remote.OsrmRouteStep(
+                instruction = "Start",
+                alongRouteMeters = 0.0,
+                stepDistanceMeters = 40.0,
+                maneuverType = "depart",
+                modifier = "",
+                roadName = "",
+            ),
+            com.example.potholereport.data.remote.OsrmRouteStep(
+                instruction = "Turn left onto MG Road",
+                alongRouteMeters = 40.0,
+                stepDistanceMeters = 120.0,
+                maneuverType = "turn",
+                modifier = "left",
+                roadName = "MG Road",
+            ),
+            com.example.potholereport.data.remote.OsrmRouteStep(
+                instruction = "Arrive at destination",
+                alongRouteMeters = 160.0,
+                stepDistanceMeters = 0.0,
+                maneuverType = "arrive",
+                modifier = "",
+                roadName = "",
+            ),
+        )
+        val first = TripNavigationMatcher.nextTurnGuidance(steps, traveledMeters = 10.0)
+        assertNotNull(first)
+        assertEquals("Turn left onto MG Road", first!!.instruction)
+        assertEquals(30.0, first.distanceMeters, 0.5)
+
+        val afterTurn = TripNavigationMatcher.nextTurnGuidance(steps, traveledMeters = 55.0)
+        assertNotNull(afterTurn)
+        assertEquals("Arrive at destination", afterTurn!!.instruction)
+    }
+
+    @Test
+    fun splitRouteByTraveled_greysCompletedSegment() {
+        val (completed, remaining) = TripNavigationMatcher.splitRouteByTraveled(
+            straightRoute,
+            traveledMeters = TripNavigationMatcher.routeProgress(
+                straightRoute,
+                driverLat = 0.0,
+                driverLon = 0.005,
+            )!!.traveledMeters,
+        )
+        assertTrue(completed.size >= 2)
+        assertTrue(remaining.size >= 2)
+        assertEquals(completed.last().first, remaining.first().first, 1e-9)
+        assertEquals(completed.last().second, remaining.first().second, 1e-9)
+    }
+
+    @Test
+    fun alertsForMapDisplay_streetFollowKeepsOnlyNearestFew() {
+        val alerts = listOf(
+            fakeAlert(distanceM = 50.0),
+            fakeAlert(distanceM = 200.0),
+            fakeAlert(distanceM = 350.0),
+            fakeAlert(distanceM = 800.0),
+        )
+        val shown = TripNavigationMatcher.alertsForMapDisplay(alerts, streetFollow = true)
+        assertEquals(2, shown.size)
+        assertEquals(50.0, shown[0].distanceMeters, 0.1)
+        assertEquals(200.0, shown[1].distanceMeters, 0.1)
+    }
+
+    @Test
+    fun alertsForMapDisplay_overviewShowsFartherAhead() {
+        val alerts = (1..12).map { i -> fakeAlert(distanceM = i * 100.0) }
+        val shown = TripNavigationMatcher.alertsForMapDisplay(alerts, streetFollow = false)
+        assertEquals(10, shown.size)
+        assertEquals(100.0, shown.first().distanceMeters, 0.1)
+        assertEquals(1_000.0, shown.last().distanceMeters, 0.1)
+    }
+
+    @Test
+    fun snapDriverToRoute_pullsNearbyGpsOntoPolyline() {
+        // Eastbound segment near equator for simple lat/lon math.
+        val route = listOf(0.0 to 0.0, 0.0 to 0.01)
+        // ~20 m north of mid-route — should snap back onto the segment.
+        val driftedLat = 20.0 / 111_320.0
+        val driftedLon = 0.005
+        val snapped = TripNavigationMatcher.snapDriverToRoute(route, driftedLat, driftedLon)
+        assertNotNull(snapped)
+        assertEquals(0.0, snapped!!.first, 1e-5)
+        assertEquals(0.005, snapped.second, 1e-5)
+    }
+
+    @Test
+    fun snapDriverToRoute_returnsNullWhenFarOffRoute() {
+        val route = listOf(0.0 to 0.0, 0.0 to 0.01)
+        // ~120 m north — beyond DRIVER_MAP_SNAP_MAX_M.
+        val farLat = 120.0 / 111_320.0
+        assertNull(TripNavigationMatcher.snapDriverToRoute(route, farLat, 0.005))
+    }
+
+    @Test
+    fun displayPositionForAlert_offsetsLeftOfEastboundRoute() {
+        val route = listOf(0.0 to 0.0, 0.0 to 0.01) // eastbound
+        val alert = fakeAlert(distanceM = 100.0, lat = 0.0, lon = 0.005, side = "Left")
+        val (lat, lon) = TripNavigationMatcher.displayPositionForAlert(route, alert, offsetMeters = 7.0)
+        // Left of eastbound travel is north → latitude increases.
+        assertTrue(lat > 0.0)
+        assertEquals(0.005, lon, 1e-5)
+    }
+
+    @Test
+    fun normalizeSideKey_mapsCommonLabels() {
+        assertEquals("left", TripNavigationMatcher.normalizeSideKey("on your left"))
+        assertEquals("right", TripNavigationMatcher.normalizeSideKey("R"))
+        assertEquals("full", TripNavigationMatcher.normalizeSideKey("Full width"))
+        assertEquals("middle", TripNavigationMatcher.normalizeSideKey("Middle"))
+    }
+
+    private fun fakeAlert(
+        distanceM: Double,
+        lat: Double = 0.0,
+        lon: Double = 0.0,
+        side: String? = null,
+    ) = TripPotholeAlert(
+        report = PersistedPotholeReport(
+            id = distanceM.toLong(),
+            cityKey = "bengaluru",
+            createdAtMs = 0L,
+            photoPath = "",
+            latitude = lat,
+            longitude = lon,
+            severity = PotholeSeverity.MODERATE,
+        ),
+        distanceMeters = distanceM,
+        sideLabel = side,
+        alongRouteMeters = distanceM,
+    )
+}

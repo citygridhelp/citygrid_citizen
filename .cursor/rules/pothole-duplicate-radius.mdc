@@ -1,0 +1,13 @@
+---
+description: Field-tunable min distance between pothole reports (Phase F major fix)
+globs: "**/PotholeDuplicateGuard.kt"
+alwaysApply: false
+---
+
+# Pothole duplicate radius — field calibration
+
+`SAME_POTHOLE_RADIUS_METERS` (currently **9.144 m = 30 ft**, was 12.192 m / 40 ft / 15.24 m / 30 m / 25 m) is a **major Phase F product fix**, not a one-off constant.
+
+- Expect to **retune after more outdoor field tests** (too tight = blocking nearby distinct holes; too loose = duplicate spam).
+- Also consider `effectiveRadiusMeters()` (GPS accuracy expansion, ~18.3 m / 60 ft cap) when adjusting.
+- When changing the radius, update user-facing copy via `userFacingRadiusMeters()` in `NewReportScreen` and unit tests in `PhaseFReportRulesTest`.
