@@ -1,5 +1,6 @@
 package com.example.potholereport.data
 
+import com.example.potholereport.data.remote.TripVehicle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -125,9 +126,11 @@ class TripNavigationMatcherTest {
     }
 
     @Test
-    fun planDeviation_offersKnownAlternateWhenNearIt() {
-        val active = listOf(0.0 to 0.0, 0.0 to 0.01)
-        val alt = listOf(0.002 to 0.0, 0.002 to 0.01) // ~222 m north parallel
+    fun planDeviation_adoptsKnownAlternateWhenNearIt() {
+        val dest = 0.0 to 0.01
+        val active = listOf(0.0 to 0.0, dest)
+        // Parallel mid-corridor that still finishes at the same destination.
+        val alt = listOf(0.002 to 0.0, 0.002 to 0.008, dest)
         val progress = TripNavigationMatcher.routeProgress(active, 0.002, 0.005)!!
         assertTrue(progress.offRouteMeters > 60.0)
         val plan = TripNavigationMatcher.planDeviation(
@@ -138,13 +141,113 @@ class TripNavigationMatcherTest {
             progress = progress,
             speedMps = 8f,
             fullRerouteDurationSec = null,
+            destLat = dest.first,
+            destLon = dest.second,
         )
-        assertEquals(TripDeviationAction.OFFER_KNOWN_ALTERNATE, plan.action)
+        assertEquals(TripDeviationAction.ADOPT_KNOWN_ALTERNATE, plan.action)
         assertEquals(1, plan.knownAlternateIndex)
     }
 
     @Test
+    fun planDeviation_prefersAlternateOverRejoinWhenSoftOnAlt() {
+        val dest = 0.0 to 0.01
+        val active = listOf(0.0 to 0.0, dest)
+        // Alternate only modestly closer than active — still must not show rejoin-to-old.
+        val alt = listOf(0.0004 to 0.0, 0.0004 to 0.008, dest)
+        val progress = TripNavigationMatcher.routeProgress(active, 0.0004, 0.005)!!
+        assertTrue(progress.offRouteMeters > 20.0)
+        val plan = TripNavigationMatcher.planDeviation(
+            routePoints = active,
+            knownAlternates = listOf(active, alt),
+            driverLat = 0.0004,
+            driverLon = 0.005,
+            progress = progress,
+            speedMps = 8f,
+            fullRerouteDurationSec = null,
+            destLat = dest.first,
+            destLon = dest.second,
+        )
+        assertEquals(TripDeviationAction.ADOPT_KNOWN_ALTERNATE, plan.action)
+        assertEquals(1, plan.knownAlternateIndex)
+        assertTrue(plan.rejoinPoints.isEmpty())
+    }
+
+    @Test
+    fun findPreferredKnownAlternate_rejectsCorridorThatMissesDestination() {
+        val active = listOf(0.0 to 0.0, 0.0 to 0.01)
+        val altElsewhere = listOf(0.002 to 0.0, 0.002 to 0.01) // ends ~222 m north of dest
+        val idx = TripNavigationMatcher.findPreferredKnownAlternateIndex(
+            knownAlternates = listOf(altElsewhere),
+            activeRoute = active,
+            driverLat = 0.002,
+            driverLon = 0.005,
+            activeOffRouteMeters = 220.0,
+            destLat = 0.0,
+            destLon = 0.01,
+        )
+        assertNull(idx)
+    }
+
+    @Test
     fun planDeviation_prefersRejoinWhenReturnIsShort() {
+        // ~28 m north — GPS spur that does not qualify as a dest-reaching alternate.
+        val nearLat = 28.0 / 111_320.0
+        val progress = TripNavigationMatcher.routeProgress(straightRoute, nearLat, 0.005)!!
+        val plan = TripNavigationMatcher.planDeviation(
+            routePoints = straightRoute,
+            knownAlternates = emptyList(),
+            driverLat = nearLat,
+            driverLon = 0.005,
+            progress = progress,
+            speedMps = 8f,
+            fullRerouteDurationSec = null,
+        )
+        assertEquals(TripDeviationAction.SHOW_REJOIN, plan.action)
+        assertTrue(plan.rejoinPoints.size >= 2)
+        assertTrue(plan.rejoinReturnMeters < 70.0)
+    }
+
+    @Test
+    fun planDeviation_fullReroutesWhenOnParallelCorridor() {
+        // ~55 m north — typical parallel street; rematch best vehicle route (no rejoin dash).
+        val parallelLat = 55.0 / 111_320.0
+        val progress = TripNavigationMatcher.routeProgress(straightRoute, parallelLat, 0.005)!!
+        val plan = TripNavigationMatcher.planDeviation(
+            routePoints = straightRoute,
+            knownAlternates = emptyList(),
+            driverLat = parallelLat,
+            driverLon = 0.005,
+            progress = progress,
+            speedMps = 8f,
+            fullRerouteDurationSec = null,
+        )
+        assertEquals(TripDeviationAction.FULL_REROUTE, plan.action)
+    }
+
+    @Test
+    fun planDeviation_rejoinsWhenOnAlternateThatMissesDestination() {
+        val dest = 0.0 to 0.01
+        val active = listOf(0.0 to 0.0, dest)
+        // Parallel spur that does not finish at dest.
+        val deadEnd = listOf(0.002 to 0.0, 0.002 to 0.006)
+        val progress = TripNavigationMatcher.routeProgress(active, 0.002, 0.003)!!
+        val plan = TripNavigationMatcher.planDeviation(
+            routePoints = active,
+            knownAlternates = listOf(active, deadEnd),
+            driverLat = 0.002,
+            driverLon = 0.003,
+            progress = progress,
+            speedMps = 8f,
+            fullRerouteDurationSec = null,
+            destLat = dest.first,
+            destLon = dest.second,
+        )
+        assertEquals(TripDeviationAction.SHOW_REJOIN, plan.action)
+        assertTrue(plan.rejoinPoints.isNotEmpty())
+    }
+
+    @Test
+    fun planDeviation_suggestsUturnOnWrongNetworkForCar() {
         val progress = TripNavigationMatcher.routeProgress(straightRoute, 0.001, 0.005)!!
         val plan = TripNavigationMatcher.planDeviation(
             routePoints = straightRoute,
@@ -154,10 +257,12 @@ class TripNavigationMatcherTest {
             progress = progress,
             speedMps = 8f,
             fullRerouteDurationSec = null,
+            destLat = 0.0,
+            destLon = 0.01,
+            vehicle = TripVehicle.CAR,
+            vehicleNetworkSnapM = 120.0,
         )
-        assertEquals(TripDeviationAction.SHOW_REJOIN, plan.action)
-        assertTrue(plan.rejoinPoints.size >= 2)
-        assertTrue(plan.rejoinReturnMeters < 400.0)
+        assertEquals(TripDeviationAction.SUGGEST_UTURN, plan.action)
     }
 
     @Test
@@ -312,19 +417,125 @@ class TripNavigationMatcherTest {
     @Test
     fun snapDriverToRoute_returnsNullWhenFarOffRoute() {
         val route = listOf(0.0 to 0.0, 0.0 to 0.01)
-        // ~120 m north — beyond DRIVER_MAP_SNAP_MAX_M.
+        // ~120 m north — beyond DRIVER_MAP_SNAP_HARD_MAX_M.
         val farLat = 120.0 / 111_320.0
         assertNull(TripNavigationMatcher.snapDriverToRoute(route, farLat, 0.005))
+    }
+
+    @Test
+    fun mapSnapLimit_scalesWithPoorAccuracy() {
+        assertEquals(
+            TripNavigationMatcher.DRIVER_MAP_SNAP_MAX_M,
+            TripNavigationMatcher.mapSnapLimitM(null),
+            0.01,
+        )
+        assertTrue(TripNavigationMatcher.mapSnapLimitM(50f) >= 90.0)
+        assertEquals(
+            TripNavigationMatcher.DRIVER_MAP_SNAP_HARD_MAX_M,
+            TripNavigationMatcher.mapSnapLimitM(80f),
+            0.01,
+        )
+    }
+
+    @Test
+    fun snapDriverToRoute_prefersSegmentNearProgress() {
+        // Two parallel eastbound segments ~55 m apart; GPS near the northern one,
+        // but progress says we are on the southern corridor.
+        val south = listOf(0.0 to 0.0, 0.0 to 0.01)
+        val northLat = 55.0 / 111_320.0
+        val north = listOf(northLat to 0.0, northLat to 0.01)
+        val route = south + north
+        val gpsLat = northLat
+        val gpsLon = 0.005
+        val alongSouthMid = TripNavigationMatcher.routeProgress(south, 0.0, 0.005)!!.traveledMeters
+        val snapped = TripNavigationMatcher.snapDriverToRoute(
+            routePoints = route,
+            driverLat = gpsLat,
+            driverLon = gpsLon,
+            maxSnapMeters = 80.0,
+            preferredAlongMeters = alongSouthMid,
+        )
+        assertNotNull(snapped)
+        // Should pull down onto the southern (progress) corridor, not stay on north.
+        assertEquals(0.0, snapped!!.first, 1e-4)
     }
 
     @Test
     fun displayPositionForAlert_offsetsLeftOfEastboundRoute() {
         val route = listOf(0.0 to 0.0, 0.0 to 0.01) // eastbound
         val alert = fakeAlert(distanceM = 100.0, lat = 0.0, lon = 0.005, side = "Left")
-        val (lat, lon) = TripNavigationMatcher.displayPositionForAlert(route, alert, offsetMeters = 7.0)
+        val (lat, lon) = TripNavigationMatcher.displayPositionForAlert(route, alert, offsetMeters = 3.2)
         // Left of eastbound travel is north → latitude increases.
         assertTrue(lat > 0.0)
         assertEquals(0.005, lon, 1e-5)
+    }
+
+    @Test
+    fun displayPositionForAlert_snapsOffRoadGpsOntoRouteBeforeLaneOffset() {
+        val route = listOf(0.0 to 0.0, 0.0 to 0.01) // eastbound along lat=0
+        // Report GPS drifted ~22 m north of the road, but labeled Left.
+        val alert = fakeAlert(distanceM = 100.0, lat = 0.0002, lon = 0.005, side = "Left")
+        val (lat, lon) = TripNavigationMatcher.displayPositionForAlert(
+            route,
+            alert,
+            offsetMeters = 3.2,
+            applyLaneOffset = true,
+        )
+        // Must stay near the road (centerline + ~3.2 m), not at the 22 m GPS drift.
+        val driftFromRoad = TripNavigationMatcher.haversineM(0.0, 0.005, lat, lon)
+        assertTrue("pin still ~${driftFromRoad}m from road", driftFromRoad < 6.0)
+        assertTrue(lat > 0.0) // still left/north of centerline
+        assertEquals(0.005, lon, 1e-5)
+    }
+
+    @Test
+    fun displayPositionForAlert_middleStaysOnCenterlineEvenIfGpsDrifted() {
+        val route = listOf(0.0 to 0.0, 0.0 to 0.01)
+        val alert = fakeAlert(distanceM = 50.0, lat = 0.0002, lon = 0.004, side = "Middle")
+        val (lat, lon) = TripNavigationMatcher.displayPositionForAlert(route, alert)
+        assertEquals(0.0, lat, 1e-6)
+        assertEquals(0.004, lon, 1e-5)
+    }
+
+    @Test
+    fun displayPositionForAlert_overviewStillAppliesLaneNudgeOnRoad() {
+        val route = listOf(0.0 to 0.0, 0.0 to 0.01)
+        val alert = fakeAlert(distanceM = 50.0, lat = 0.0002, lon = 0.004, side = "Right")
+        val (lat, lon) = TripNavigationMatcher.displayPositionForAlert(
+            route,
+            alert,
+            applyLaneOffset = true,
+        )
+        // Snapped to centerline then nudged right (south of eastbound) — stays on-road.
+        assertTrue(lat < 0.0)
+        assertEquals(0.004, lon, 1e-5)
+        val driftFromRoad = TripNavigationMatcher.haversineM(0.0, 0.004, lat, lon)
+        assertTrue(driftFromRoad <= TripNavigationMatcher.MAP_SIDE_MAX_OFFSET_M + 0.5)
+    }
+
+    @Test
+    fun laneLateralOffset_clampedInsideRoadCorridor() {
+        val left = TripNavigationMatcher.laneLateralOffsetM("left", 99.0)!!
+        assertEquals(-TripNavigationMatcher.MAP_SIDE_MAX_OFFSET_M, left, 1e-9)
+        val right = TripNavigationMatcher.laneLateralOffsetM("right", 99.0)!!
+        assertEquals(TripNavigationMatcher.MAP_SIDE_MAX_OFFSET_M, right, 1e-9)
+        assertTrue(TripNavigationMatcher.MAP_SIDE_MAX_OFFSET_M <= 2.5)
+    }
+
+    @Test
+    fun detailedPlacement_zoomThresholds() {
+        assertTrue(
+            !TripNavigationMatcher.useDetailedLanePlacement(14.0, mapLibre = true),
+        )
+        assertTrue(
+            TripNavigationMatcher.useDetailedLanePlacement(16.0, mapLibre = true),
+        )
+        assertTrue(
+            !TripNavigationMatcher.useDetailedLanePlacement(16.0, mapLibre = false),
+        )
+        assertTrue(
+            TripNavigationMatcher.useDetailedLanePlacement(18.0, mapLibre = false),
+        )
     }
 
     @Test

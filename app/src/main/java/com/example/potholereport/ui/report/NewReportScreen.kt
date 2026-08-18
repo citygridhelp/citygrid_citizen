@@ -2,6 +2,17 @@
 
 package com.example.potholereport.ui.report
 
+import com.example.potholereport.ui.theme.CitizenBorder
+import com.example.potholereport.ui.theme.CitizenInk
+import com.example.potholereport.ui.theme.CitizenPrivacyCopy
+import com.example.potholereport.ui.theme.CitizenSpace
+import com.example.potholereport.ui.theme.CitizenType
+import com.example.potholereport.ui.theme.CitizenHeader
+import com.example.potholereport.ui.theme.CitizenRadius
+import com.example.potholereport.ui.theme.CitizenSelection
+import com.example.potholereport.ui.theme.CitizenIcon
+import com.example.potholereport.ui.neighbourhood.NeighbourhoodPalette
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
@@ -18,6 +29,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,18 +45,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -77,14 +89,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import androidx.core.location.LocationManagerCompat
-import androidx.core.os.CancellationSignal
 import com.example.potholereport.data.AddReportResult
+import com.example.potholereport.data.CitizenGps
+import com.example.potholereport.data.CitizenRuntimePermissions
 import com.example.potholereport.data.BengaluruMunicipalRouting
 import com.example.potholereport.data.CityMetroLocation
 import com.example.potholereport.data.PersistedPotholeReport
 import com.example.potholereport.data.PotholeDuplicateGuard
 import com.example.potholereport.data.PotholePosition
+import com.example.potholereport.data.CivicIssueType
+import com.example.potholereport.data.IncidentTimeOfDay
+import com.example.potholereport.data.ManholeCondition
 import com.example.potholereport.data.PotholeSeverity
 import com.example.potholereport.data.RecentReportsRepository
 import com.example.potholereport.data.TrafficFacingMode
@@ -100,22 +115,26 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.resume
 
 private val AccentRed = Color(0xFFB74233)
 private val DarkBlue = Color(0xFF1A1A2E)
-private val ReportActionPillShape = RoundedCornerShape(50)
-private val OffWhite = Color(0xFFF5F2E8)
 private val OrangeSelect = Color(0xFFF58220)
-private val GrayDisabled = Color(0xFF9E9E9E)
-private val GrayButton = Color(0xFF757575)
+private val GrayDisabled = CitizenInk.Disabled
 
 private const val GPS_SUBMIT_WARN_ACCURACY_METERS = 50f
 private const val GPS_SUBMIT_BLOCK_ACCURACY_METERS = 100f
+
+@Composable
+private fun SectionHelper(text: String) {
+    Text(
+        text,
+        style = CitizenType.Helper,
+        color = CitizenInk.Helper,
+    )
+}
 
 @Composable
 fun NewReportScreen(
@@ -125,6 +144,9 @@ fun NewReportScreen(
     onReportPersisted: () -> Unit = {},
     onSyncMessage: (String) -> Unit = {},
     submittedWhileSignedIn: Boolean = false,
+    issueType: CivicIssueType = CivicIssueType.POTHOLE,
+    /** Prefill close-up from trip road still (#32 Phase 6); validated on open. */
+    initialCloseUpUri: Uri? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -134,6 +156,8 @@ fun NewReportScreen(
     var wideUri by remember { mutableStateOf<Uri?>(null) }
     var closeUpVerified by remember { mutableStateOf(false) }
     var wideVerified by remember { mutableStateOf(false) }
+    var pendingWideUri by remember { mutableStateOf<Uri?>(null) }
+    var showWideLaneConfirm by remember { mutableStateOf(false) }
     var photoValidating by remember { mutableStateOf(false) }
     var submitting by remember { mutableStateOf(false) }
     var photoValidationTitle by remember { mutableStateOf<String?>(null) }
@@ -142,6 +166,8 @@ fun NewReportScreen(
     var showDuplicateDialog by remember { mutableStateOf(false) }
 
     var selectedSeverity by remember { mutableStateOf(PotholeSeverity.MODERATE) }
+    var selectedManholeCondition by remember { mutableStateOf(ManholeCondition.OPEN) }
+    var selectedIncidentTime by remember { mutableStateOf(IncidentTimeOfDay.now()) }
     var selectedPosition by remember { mutableStateOf(PotholePosition.MIDDLE) }
     var aiRiskInsight by remember { mutableStateOf<PotholeRiskInsight?>(null) }
 
@@ -198,7 +224,7 @@ fun NewReportScreen(
             locationLoading = true
             if (!useManualLocation) locationBlockedReason = null
             val loc = withContext(Dispatchers.Default) {
-                fetchBestCalibratedLocation(context)
+                CitizenGps.fetchForReport(context)
             }
             locationLoading = false
             if (loc != null) {
@@ -239,12 +265,65 @@ fun NewReportScreen(
         }
     }
 
+    val gatePhotos = issueType.needsPotholePhotoGate
+    val usesLaneCapture = issueType.usesLaneCapture
+    val requiresWideShot = issueType.requiresWideShot
+    val strayForm = issueType.usesIncidentTimeForm
+
+    // Trip road still → close-up (#32 Phase 6).
+    LaunchedEffect(initialCloseUpUri, issueType) {
+        val prefill = initialCloseUpUri ?: return@LaunchedEffect
+        if (!gatePhotos) {
+            closeUpUri = prefill
+            closeUpVerified = true
+            wideUri = null
+            wideVerified = false
+            aiRiskInsight = null
+            return@LaunchedEffect
+        }
+        photoValidating = true
+        val result = withContext(Dispatchers.Default) {
+            PotholePhotoValidator.validate(
+                context = context,
+                uri = prefill,
+                kind = PhotoCaptureKind.CLOSE_UP,
+                closeUpUri = null,
+            )
+        }
+        photoValidating = false
+        when (result) {
+            is PhotoValidationResult.Accepted -> {
+                val insight = withContext(Dispatchers.Default) {
+                    PotholeRiskAnalyzer.analyze(
+                        context = context,
+                        closeUpUri = prefill,
+                        position = selectedPosition,
+                        userSeverity = selectedSeverity,
+                    )
+                }
+                closeUpUri = prefill
+                closeUpVerified = true
+                wideUri = null
+                wideVerified = false
+                aiRiskInsight = insight
+                insight?.let { selectedSeverity = it.suggestedSeverity }
+            }
+            is PhotoValidationResult.Rejected -> {
+                photoValidationTitle = result.title
+                photoValidationMessage = result.message
+                closeUpUri = null
+                closeUpVerified = false
+                aiRiskInsight = null
+            }
+        }
+    }
+
     // Re-run the risk analyzer whenever the user changes the lane (left /
     // middle / right). The analyzer constrains its dark-blob search to that
     // lane, so the suggested width / depth / severity numbers update.
-    LaunchedEffect(selectedPosition, closeUpVerified) {
+    LaunchedEffect(selectedPosition, closeUpVerified, issueType) {
         val captured = closeUpUri ?: return@LaunchedEffect
-        if (!closeUpVerified) return@LaunchedEffect
+        if (!closeUpVerified || !gatePhotos) return@LaunchedEffect
         val insight = withContext(Dispatchers.Default) {
             PotholeRiskAnalyzer.analyze(
                 context = context,
@@ -265,6 +344,25 @@ fun NewReportScreen(
         val kind = if (photoChoiceTarget == 1) PhotoCaptureKind.CLOSE_UP else PhotoCaptureKind.WIDE_ROAD
         photoValidating = true
         scope.launch {
+            if (!gatePhotos) {
+                photoValidating = false
+                if (kind == PhotoCaptureKind.CLOSE_UP) {
+                    closeUpUri = capturedUri
+                    closeUpVerified = true
+                    wideUri = null
+                    wideVerified = false
+                    aiRiskInsight = null
+                } else if (usesLaneCapture) {
+                    pendingWideUri = capturedUri
+                    showWideLaneConfirm = true
+                } else {
+                    wideUri = capturedUri
+                    wideVerified = true
+                    pendingWideUri = null
+                    showWideLaneConfirm = false
+                }
+                return@launch
+            }
             val result = withContext(Dispatchers.Default) {
                 PotholePhotoValidator.validate(
                     context = context,
@@ -292,9 +390,8 @@ fun NewReportScreen(
                         aiRiskInsight = insight
                         insight?.let { selectedSeverity = it.suggestedSeverity }
                     } else {
-                        wideUri = capturedUri
-                        wideVerified = true
-                        trafficFacing = TrafficFacingMode.UNKNOWN
+                        pendingWideUri = capturedUri
+                        showWideLaneConfirm = true
                     }
                 }
                 is PhotoValidationResult.Rejected -> {
@@ -343,7 +440,7 @@ fun NewReportScreen(
         AlertDialog(
             onDismissRequest = { showEnableGpsDialog = false },
             title = { Text("Turn on location") },
-            text = { Text("Enable device location (GPS) so we can tag the pothole. You can also use manual entry below.") },
+            text = { Text("Location is off. Open Location settings, or enter coordinates manually below.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -408,6 +505,25 @@ fun NewReportScreen(
         )
     }
 
+    val pendingWide = pendingWideUri
+    if (showWideLaneConfirm && pendingWide != null) {
+        WideShotLaneConfirmDialog(
+            photoUri = pendingWide,
+            onDismiss = {
+                showWideLaneConfirm = false
+                pendingWideUri = null
+            },
+            onConfirm = { position, facing ->
+                wideUri = pendingWide
+                wideVerified = true
+                selectedPosition = position
+                trafficFacing = facing
+                showWideLaneConfirm = false
+                pendingWideUri = null
+            },
+        )
+    }
+
     val latEffective = if (useManualLocation) manualCoordLat else deviceLat
     val lngEffective = if (useManualLocation) manualCoordLng else deviceLng
     val gpsOk = latEffective != null && lngEffective != null
@@ -430,7 +546,7 @@ fun NewReportScreen(
     }
     val metroBlock = metroSubmitBlock != null
 
-    LaunchedEffect(reportCityKey, reporterUserId, latEffective, lngEffective, gpsAccuracyM) {
+    LaunchedEffect(reportCityKey, reporterUserId, latEffective, lngEffective, gpsAccuracyM, issueType) {
         val lat = latEffective
         val lng = lngEffective
         duplicateBlockingReport = if (lat != null && lng != null && reporterUserId.isNotBlank()) {
@@ -441,6 +557,7 @@ fun NewReportScreen(
                     latitude = lat,
                     longitude = lng,
                     gpsAccuracyM = if (useManualLocation) null else gpsAccuracyM,
+                    issueType = issueType,
                 )
             }
         } else {
@@ -452,7 +569,7 @@ fun NewReportScreen(
     val formBusy = photoValidating || submitting
 
     val missingClose = closeUpUri == null || !closeUpVerified
-    val missingWide = wideUri == null || !wideVerified
+    val missingWide = requiresWideShot && (wideUri == null || !wideVerified)
     val missingLoc = !gpsOk
 
     val footerLabel = when {
@@ -464,7 +581,7 @@ fun NewReportScreen(
         }
         metroBlock -> "LOCATION OUTSIDE CITY"
         lowGpsAccuracyBlock -> "GPS TOO INACCURATE — RETRY OR MANUAL"
-        missingClose -> "ADD VALID CLOSE-UP PHOTO TO CONTINUE"
+        missingClose -> if (strayForm) "ADD PHOTO TO CONTINUE" else "ADD VALID CLOSE-UP PHOTO TO CONTINUE"
         missingWide -> "ADD VALID WIDE SHOT TO CONTINUE"
         missingLoc -> "ATTACH LOCATION TO CONTINUE"
         else -> "SUBMIT REPORT"
@@ -501,20 +618,20 @@ fun NewReportScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(DarkBlue)
+            .background(NeighbourhoodPalette.Page)
     ) {
         Row(Modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(OffWhite)
+                    .background(NeighbourhoodPalette.Page)
             ) {
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .verticalScroll(rememberScrollState())
-                        .padding(start = 6.dp, end = 4.dp, top = 6.dp)
+                        .padding(start = CitizenHeader.Horizontal, end = CitizenHeader.Horizontal, top = CitizenHeader.Vertical)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -522,38 +639,50 @@ fun NewReportScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            "NEW REPORT",
-                            color = AccentRed,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 16.sp,
-                            fontFamily = FontFamily.Monospace
+                            issueType.reportTitle,
+                            color = NeighbourhoodPalette.Ink,
+                            style = CitizenType.ScreenTitle,
                         )
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(AccentRed)
-                                .clickable(enabled = !submitting) { onClose() },
-                            contentAlignment = Alignment.Center
+                        IconButton(
+                            onClick = onClose,
+                            enabled = !submitting,
+                            modifier = Modifier.size(CitizenIcon.Tap),
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = DarkBlue)
+                            Icon(
+                                Icons.Outlined.Close,
+                                contentDescription = "Close",
+                                tint = NeighbourhoodPalette.Navy,
+                                modifier = Modifier.size(CitizenIcon.Header),
+                            )
                         }
                     }
 
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(CitizenSpace.Sm))
 
-                    SectionTitle("01 CLOSE-UP OF POTHOLE")
-                    Text(
-                        "FRAME THE HOLE CLEARLY - USED FOR DEPTH AND AREA ESTIMATION",
-                        color = Color.Gray,
-                        fontSize = 8.sp,
-                        lineHeight = 10.sp,
-                        maxLines = 2
+                    SectionTitle(
+                        when {
+                            gatePhotos -> "01 CLOSE-UP OF POTHOLE"
+                            issueType == CivicIssueType.MANHOLE -> "01 CLOSE-UP OF MANHOLE"
+                            strayForm -> "01 PHOTO OF PLACE / DOGS"
+                            else -> "01 CLOSE-UP PHOTO"
+                        },
                     )
-                    Spacer(Modifier.height(4.dp))
+                    SectionHelper(
+                        when {
+                            gatePhotos -> "Frame the pothole clearly. Used for depth and area estimate."
+                            issueType == CivicIssueType.MANHOLE ->
+                                "Frame the manhole clearly so cover state is visible."
+                            strayForm ->
+                                "Photo of the dogs, or the place where the incident happened."
+                            else -> "Frame the issue clearly so others can recognise it."
+                        },
+                    )
+                    Spacer(modifier = Modifier.height(CitizenSpace.Xs))
                     PhotoDropZone(
                         enabled = !formBusy,
                         label = when {
                             photoValidating && photoChoiceTarget == 1 -> "ANALYZING PHOTO..."
+                            closeUpVerified && strayForm -> "PHOTO ADDED · TAP TO RETAKE"
                             closeUpVerified -> "CLOSE-UP VERIFIED · TAP TO RETAKE"
                             else -> "TAP TO OPEN CAMERA"
                         },
@@ -561,49 +690,62 @@ fun NewReportScreen(
                         onClick = { launchCamera(1) },
                     )
 
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(CitizenSpace.Sm))
 
-                    SectionTitle("02 WIDE SHOT OF ROAD")
-                    Text(
-                        "STEP BACK - SHOW THE FULL ROAD AND THE POTHOLE - USED TO CONFIRM TRAFFIC DIRECTION",
-                        color = Color.Gray,
-                        fontSize = 8.sp,
-                        lineHeight = 10.sp,
-                        maxLines = 2
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    PhotoDropZone(
-                        enabled = closeUpVerified && !formBusy,
-                        label = when {
-                            !closeUpVerified -> "COMPLETE STEP 01 FIRST"
-                            photoValidating && photoChoiceTarget == 2 -> "ANALYZING PHOTO..."
-                            wideVerified -> "WIDE SHOT VERIFIED · TAP TO RETAKE"
-                            else -> "TAP TO OPEN CAMERA"
-                        },
-                        filled = wideVerified,
-                        onClick = { if (closeUpVerified) launchCamera(2) },
-                    )
-
-                    if (wideVerified) {
-                        Spacer(Modifier.height(6.dp))
-                        TrafficDirectionConfirmRow(
-                            facing = trafficFacing,
-                            enabled = !formBusy,
-                            onSelect = { trafficFacing = it },
+                    if (requiresWideShot) {
+                        SectionTitle("02 WIDE SHOT OF ROAD")
+                        SectionHelper(
+                            if (usesLaneCapture) {
+                                "Step back and show the full road. After capture, tap L/M/R on the photo."
+                            } else {
+                                "Step back and show the street or area around the issue."
+                            },
                         )
+                        Spacer(modifier = Modifier.height(CitizenSpace.Xs))
+                        PhotoDropZone(
+                            enabled = closeUpVerified && !formBusy,
+                            label = when {
+                                !closeUpVerified -> "COMPLETE STEP 01 FIRST"
+                                photoValidating && photoChoiceTarget == 2 -> "ANALYZING PHOTO..."
+                                showWideLaneConfirm -> "CONFIRM LANES ON PHOTO…"
+                                wideVerified -> "WIDE SHOT VERIFIED · TAP TO RETAKE"
+                                else -> "TAP TO OPEN CAMERA"
+                            },
+                            filled = wideVerified,
+                            onClick = { if (closeUpVerified) launchCamera(2) },
+                        )
+
+                        if (wideVerified && usesLaneCapture) {
+                            Spacer(modifier = Modifier.height(CitizenSpace.Sm))
+                            WideShotSummaryRow(
+                                position = selectedPosition,
+                                facing = trafficFacing,
+                                enabled = !formBusy,
+                                onAdjust = {
+                                    val uri = wideUri ?: return@WideShotSummaryRow
+                                    pendingWideUri = uri
+                                    showWideLaneConfirm = true
+                                },
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(CitizenSpace.Sm))
                     }
 
-                    Spacer(Modifier.height(8.dp))
-
-                    SectionTitle("03 ATTACH LOCATION")
-                    Text(
-                        "AUTO-DETECTED FROM GPS - USED ONLY TO TAG THE POTHOLE - NOT LINKED TO YOU",
-                        color = Color.Gray,
-                        fontSize = 8.sp,
-                        lineHeight = 10.sp,
-                        maxLines = 2
+                    SectionTitle(if (strayForm) "02 LOCATION" else "03 ATTACH LOCATION")
+                    SectionHelper(
+                        when {
+                            gatePhotos ->
+                                "Auto-detected from GPS. Used only to tag the pothole, not linked to you."
+                            issueType == CivicIssueType.MANHOLE ->
+                                "Auto-detected from GPS. Used only to tag the manhole, not linked to you."
+                            strayForm ->
+                                "Auto-detected from GPS. Used only to tag this sighting, not linked to you."
+                            else ->
+                                "Auto-detected from GPS. Used only to tag this report, not linked to you."
+                        },
                     )
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(CitizenSpace.Xs))
                     LocationBlock(
                         loading = locationLoading,
                         blockedReason = locationBlockedReason,
@@ -614,12 +756,12 @@ fun NewReportScreen(
                         lngDisplay = lngEffective,
                         onRetryGps = {
                             if (!locationPermitted()) {
-                                locationPermissionLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.ACCESS_FINE_LOCATION,
-                                        Manifest.permission.ACCESS_COARSE_LOCATION
-                                    )
-                                )
+                                val extra = CitizenRuntimePermissions.forLocationAndTrip(context)
+                                if (extra.isNotEmpty()) {
+                                    locationPermissionLauncher.launch(extra)
+                                } else {
+                                    refreshGpsLocation()
+                                }
                             } else {
                                 val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
                                 val on = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
@@ -632,57 +774,47 @@ fun NewReportScreen(
                     )
 
                     if (lowGpsAccuracyWarn) {
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Xs))
                         Text(
-                            "GPS accuracy is +/-${gpsAccuracyM!!.toInt()}m - move outdoors for a better fix, " +
-                                "or use manual entry below.",
-                            color = Color(0xFFB45309),
-                            fontSize = 8.sp,
-                            lineHeight = 10.sp,
+                            "GPS is imprecise (±${gpsAccuracyM!!.toInt()}m). Move outdoors for a better fix, or use manual entry below.",
+                            style = CitizenType.Helper,
+                            color = CitizenInk.Warning,
                         )
                     }
 
                     if (lowGpsAccuracyBlock) {
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Xs))
                         Text(
-                            "GPS accuracy is +/-${gpsAccuracyM!!.toInt()}m - too low to auto-tag. " +
-                                "Retry GPS, enable location, or paste coordinates manually.",
-                            color = Color(0xFFB71C1C),
-                            fontSize = 8.sp,
-                            lineHeight = 10.sp,
+                            "GPS too weak (±${gpsAccuracyM!!.toInt()}m) to tag. Retry GPS, enable location, or paste coordinates below.",
+                            style = CitizenType.Helper,
+                            color = CitizenInk.Error,
                         )
                     }
 
                     if (duplicateBlock) {
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Xs))
                         Text(
-                            "Open report within ~${PotholeDuplicateGuard.userFacingRadiusMeters()} m (${duplicateBlockingReport?.status?.displayLabel}). " +
-                                "Submit again only after it is resolved (Completed).",
-                            color = Color(0xFFB45309),
-                            fontSize = 8.sp,
-                            lineHeight = 10.sp,
+                            "Open report within ~${PotholeDuplicateGuard.userFacingRadiusMeters()} m " +
+                                "(${duplicateBlockingReport?.status?.displayLabel}). Submit again only after it is resolved.",
+                            style = CitizenType.Helper,
+                            color = CitizenInk.Warning,
                         )
                     }
 
                     if (metroBlock && metroSubmitBlock != null) {
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Xs))
                         Text(
                             metroSubmitBlock,
-                            color = Color(0xFFB45309),
-                            fontSize = 8.sp,
-                            lineHeight = 10.sp,
+                            style = CitizenType.Helper,
+                            color = CitizenInk.Warning,
                         )
                     }
 
                     if (!gpsOk && !locationLoading) {
-                        Spacer(Modifier.height(4.dp))
-                        Text("MANUAL ENTRY", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 10.sp, color = DarkBlue)
-                        Text(
-                            "Paste a Google Maps URL or coordinates.",
-                            color = Color.Gray,
-                            fontSize = 8.sp
-                        )
-                        Spacer(Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Xs))
+                        Text("MANUAL ENTRY", style = CitizenType.Label, fontFamily = FontFamily.Monospace, color = DarkBlue)
+                        SectionHelper("Paste a Google Maps URL or coordinates.")
+                        Spacer(modifier = Modifier.height(CitizenSpace.Xs))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             OutlinedTextField(
                                 value = mapsUrlInput,
@@ -702,7 +834,7 @@ fun NewReportScreen(
                                     unfocusedBorderColor = DarkBlue,
                                 )
                             )
-                            Spacer(Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(CitizenSpace.Xs))
                             OutlinedTextField(
                                 value = lngFieldInput,
                                 onValueChange = {
@@ -723,7 +855,7 @@ fun NewReportScreen(
                                 )
                             )
                         }
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Xs))
                         Button(
                             onClick = {
                                 val parsed = parseMapsInput(mapsUrlInput, lngFieldInput)
@@ -736,98 +868,178 @@ fun NewReportScreen(
                             },
                             enabled = !submitting,
                             colors = ButtonDefaults.buttonColors(containerColor = DarkBlue, contentColor = Color.White),
-                            shape = RoundedCornerShape(0.dp),
+                            shape = CitizenRadius.Card,
                             modifier = Modifier.align(Alignment.End)
                         ) {
                             Text("USE THIS LOCATION", fontWeight = FontWeight.Bold, fontSize = 10.sp)
                         }
                     }
 
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(CitizenSpace.Sm))
 
-                    SectionTitle("04 POTHOLE POSITION IN PHOTO")
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "As per the photo, tap the side where the pothole lies (Left, Middle, or Right). " +
-                            "Use Full road pothole when the whole road width is damaged.",
-                        fontSize = 10.sp,
-                        color = Color.DarkGray,
-                        lineHeight = 13.sp,
+                    when {
+                        strayForm -> {
+                            SectionTitle("03 TIME OF DAY")
+                            SectionHelper("When did you see the dogs or when did the incident happen? Change if it was earlier.")
+                            Spacer(modifier = Modifier.height(CitizenSpace.Xs))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Xs)) {
+                                IncidentTimeTile(
+                                    Modifier.weight(1f),
+                                    IncidentTimeOfDay.MORNING,
+                                    selectedIncidentTime,
+                                    enabled = !submitting,
+                                ) { selectedIncidentTime = it }
+                                IncidentTimeTile(
+                                    Modifier.weight(1f),
+                                    IncidentTimeOfDay.AFTERNOON,
+                                    selectedIncidentTime,
+                                    enabled = !submitting,
+                                ) { selectedIncidentTime = it }
+                            }
+                            Spacer(modifier = Modifier.height(CitizenSpace.Xs))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Xs)) {
+                                IncidentTimeTile(
+                                    Modifier.weight(1f),
+                                    IncidentTimeOfDay.EVENING,
+                                    selectedIncidentTime,
+                                    enabled = !submitting,
+                                ) { selectedIncidentTime = it }
+                                IncidentTimeTile(
+                                    Modifier.weight(1f),
+                                    IncidentTimeOfDay.NIGHT,
+                                    selectedIncidentTime,
+                                    enabled = !submitting,
+                                ) { selectedIncidentTime = it }
+                            }
+                        }
+                        issueType == CivicIssueType.MANHOLE -> {
+                            SectionTitle("04 MANHOLE STATE")
+                            SectionHelper("Is the manhole open, closed, broken, or overflowing?")
+                            Spacer(modifier = Modifier.height(CitizenSpace.Xs))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Xs)) {
+                                ManholeConditionTile(
+                                    Modifier.weight(1f),
+                                    ManholeCondition.OPEN,
+                                    selectedManholeCondition,
+                                    enabled = !submitting,
+                                ) { selectedManholeCondition = it }
+                                ManholeConditionTile(
+                                    Modifier.weight(1f),
+                                    ManholeCondition.CLOSED,
+                                    selectedManholeCondition,
+                                    enabled = !submitting,
+                                ) { selectedManholeCondition = it }
+                            }
+                            Spacer(modifier = Modifier.height(CitizenSpace.Xs))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Xs)) {
+                                ManholeConditionTile(
+                                    Modifier.weight(1f),
+                                    ManholeCondition.BROKEN,
+                                    selectedManholeCondition,
+                                    enabled = !submitting,
+                                ) { selectedManholeCondition = it }
+                                ManholeConditionTile(
+                                    Modifier.weight(1f),
+                                    ManholeCondition.OVERFLOWING,
+                                    selectedManholeCondition,
+                                    enabled = !submitting,
+                                ) { selectedManholeCondition = it }
+                            }
+                        }
+                        else -> {
+                            SectionTitle("04 HOW BAD IS IT?")
+                            SectionHelper(
+                                if (gatePhotos) {
+                                    "Pick the closest match. AI may suggest a severity after photos."
+                                } else {
+                                    "Same severity scale for every issue."
+                                },
+                            )
+                            Spacer(modifier = Modifier.height(CitizenSpace.Xs))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Xs)) {
+                                SeverityTile(
+                                    Modifier.weight(1f),
+                                    PotholeSeverity.MINOR,
+                                    selectedSeverity,
+                                    enabled = !submitting,
+                                    blurb = issueType.severityBlurb(PotholeSeverity.MINOR),
+                                ) { selectedSeverity = it }
+                                SeverityTile(
+                                    Modifier.weight(1f),
+                                    PotholeSeverity.MODERATE,
+                                    selectedSeverity,
+                                    enabled = !submitting,
+                                    blurb = issueType.severityBlurb(PotholeSeverity.MODERATE),
+                                ) { selectedSeverity = it }
+                            }
+                            Spacer(modifier = Modifier.height(CitizenSpace.Xs))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Xs)) {
+                                SeverityTile(
+                                    Modifier.weight(1f),
+                                    PotholeSeverity.SEVERE,
+                                    selectedSeverity,
+                                    enabled = !submitting,
+                                    blurb = issueType.severityBlurb(PotholeSeverity.SEVERE),
+                                ) { selectedSeverity = it }
+                                SeverityTile(
+                                    Modifier.weight(1f),
+                                    PotholeSeverity.CRITICAL,
+                                    selectedSeverity,
+                                    enabled = !submitting,
+                                    blurb = issueType.severityBlurb(PotholeSeverity.CRITICAL),
+                                ) { selectedSeverity = it }
+                            }
+
+                            if (gatePhotos) aiRiskInsight?.let { insight ->
+                                Spacer(modifier = Modifier.height(CitizenSpace.Sm))
+                                AiRiskSuggestionCard(
+                                    insight = insight,
+                                    enabled = !submitting,
+                                    onUseSuggested = { selectedSeverity = insight.suggestedSeverity },
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(CitizenSpace.Sm))
+
+                    SectionTitle(if (strayForm) "04 LANDMARK" else "05 NOTE (OPTIONAL)")
+                    SectionHelper(
+                        if (strayForm) {
+                            "Park gate, shop, school, junction — anything a catcher can find."
+                        } else {
+                            "Add a location clue if you can: landmark, road name, street number, junction, or nearby shop."
+                        },
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        PositionTile(modifier.weight(1f), PotholePosition.LEFT, selectedPosition, enabled = !submitting) { selectedPosition = it }
-                        PositionTile(modifier.weight(1f), PotholePosition.MIDDLE, selectedPosition, enabled = !submitting) { selectedPosition = it }
-                        PositionTile(modifier.weight(1f), PotholePosition.RIGHT, selectedPosition, enabled = !submitting) { selectedPosition = it }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    PositionTile(
-                        Modifier.fillMaxWidth(),
-                        PotholePosition.FULL_WIDTH,
-                        selectedPosition,
-                        enabled = !submitting,
-                    ) { selectedPosition = it }
-
-                    Spacer(Modifier.height(6.dp))
-
-                    SectionTitle("05 HOW BAD IS IT?")
-                    Spacer(Modifier.height(4.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        SeverityTile(Modifier.weight(1f), PotholeSeverity.MINOR, selectedSeverity, enabled = !submitting) { selectedSeverity = it }
-                        SeverityTile(Modifier.weight(1f), PotholeSeverity.MODERATE, selectedSeverity, enabled = !submitting) { selectedSeverity = it }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        SeverityTile(Modifier.weight(1f), PotholeSeverity.SEVERE, selectedSeverity, enabled = !submitting) { selectedSeverity = it }
-                        SeverityTile(Modifier.weight(1f), PotholeSeverity.CRITICAL, selectedSeverity, enabled = !submitting) { selectedSeverity = it }
-                    }
-
-                    aiRiskInsight?.let { insight ->
-                        Spacer(Modifier.height(6.dp))
-                        AiRiskSuggestionCard(
-                            insight = insight,
-                            enabled = !submitting,
-                            onUseSuggested = { selectedSeverity = insight.suggestedSeverity },
-                        )
-                    }
-
-                    Spacer(Modifier.height(6.dp))
-
-                    SectionTitle("06 NOTE (OPTIONAL)")
-                    Text(
-                        "Add a location clue if you can — landmark, road name, street number, junction, or nearby shop.",
-                        fontSize = 9.sp,
-                        lineHeight = 11.sp,
-                        color = Color.DarkGray,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        listOf(
-                            "Near …" to "Near ",
-                            "Road …" to "On … Road, ",
-                            "Street no. …" to "Street no. ",
-                            "Landmark …" to "Landmark: ",
-                        ).forEach { (label, insert) ->
-                            val chipEnabled = !submitting && note.length + insert.length <= noteMax
-                            Text(
-                                text = label,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (chipEnabled) DarkBlue else GrayDisabled,
-                                modifier = Modifier
-                                    .border(BorderStroke(1.dp, if (chipEnabled) DarkBlue else GrayDisabled))
-                                    .background(Color.White.copy(alpha = 0.9f))
-                                    .clickable(enabled = chipEnabled) {
-                                        note = (note + insert).take(noteMax)
-                                    }
-                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                    Spacer(modifier = Modifier.height(CitizenSpace.Xs))
+                    val noteSuggestions = remember(strayForm) {
+                        if (strayForm) {
+                            listOf(
+                                "Near park gate...",
+                                "Opposite the bakery...",
+                                "Next to school wall...",
+                                "Behind the bus stop...",
+                                "Junction of ... and ...",
+                            )
+                        } else {
+                            listOf(
+                                "Near ...",
+                                "On ... Road...",
+                                "Street no. ...",
+                                "Landmark: ...",
+                                "Near MG Road metro, opp. Cafe Coffee Day...",
                             )
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
+                    var noteSuggestionIndex by remember { mutableIntStateOf(0) }
+                    LaunchedEffect(note.isEmpty(), submitting) {
+                        if (note.isNotEmpty() || submitting) return@LaunchedEffect
+                        while (true) {
+                            delay(2_500)
+                            noteSuggestionIndex =
+                                (noteSuggestionIndex + 1) % noteSuggestions.size
+                        }
+                    }
                     OutlinedTextField(
                         value = note,
                         onValueChange = { if (it.length <= noteMax) note = it },
@@ -835,7 +1047,7 @@ fun NewReportScreen(
                         enabled = !submitting,
                         placeholder = {
                             Text(
-                                "e.g. Near MG Road metro, opp. Café Coffee Day, Street no. 12…",
+                                noteSuggestions[noteSuggestionIndex],
                                 fontSize = 10.sp,
                             )
                         },
@@ -843,7 +1055,7 @@ fun NewReportScreen(
                         textStyle = TextStyle(fontSize = 11.sp),
                         supportingText = {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                Text("${note.length}/$noteMax", fontSize = 9.sp, color = Color.Gray)
+                                Text("${note.length}/$noteMax", style = CitizenType.Caption, color = CitizenInk.Muted)
                             }
                         },
                         colors = OutlinedTextFieldDefaults.colors(
@@ -852,20 +1064,28 @@ fun NewReportScreen(
                             focusedTextColor = DarkBlue,
                             unfocusedTextColor = DarkBlue,
                             cursorColor = DarkBlue,
-                            focusedPlaceholderColor = Color(0xFF757575),
-                            unfocusedPlaceholderColor = Color(0xFF757575),
+                            focusedPlaceholderColor = CitizenInk.Helper,
+                            unfocusedPlaceholderColor = CitizenInk.Helper,
                         )
                     )
                 }
 
                 Column(
-                    modifier = Modifier.padding(start = 6.dp, end = 4.dp, bottom = 6.dp)
+                    modifier = Modifier.padding(
+                        start = CitizenSpace.Lg,
+                        end = CitizenSpace.Lg,
+                        bottom = CitizenSpace.Sm,
+                    )
                 ) {
                     Button(
                         onClick = {
                             if (!readyToSubmit || submitting) return@Button
                             val closeUri = closeUpUri ?: return@Button
-                            val wideShotUri = wideUri ?: return@Button
+                            val wideShotUri = if (requiresWideShot) {
+                                wideUri ?: return@Button
+                            } else {
+                                null
+                            }
                             val lat = latEffective ?: return@Button
                             val lng = lngEffective ?: return@Button
                             val metroError = CityMetroLocation.validateSubmitLocation(reportCityKey, lat, lng)
@@ -880,13 +1100,22 @@ fun NewReportScreen(
                                             wideUri = wideShotUri,
                                             latitude = lat,
                                             longitude = lng,
-                                            severity = selectedSeverity,
+                                            severity = when {
+                                                issueType == CivicIssueType.MANHOLE ->
+                                                    selectedManholeCondition.toSeverity()
+                                                else -> selectedSeverity
+                                            },
+                                            issueType = issueType,
                                             note = note,
                                             reporterUserId = reporterUserId,
                                             submittedSignedIn = submittedWhileSignedIn,
                                             potholePosition = selectedPosition,
                                             reportBearingDeg = deviceBearingDeg ?: Float.NaN,
                                             trafficFacing = trafficFacing,
+                                            manholeCondition = selectedManholeCondition.takeIf {
+                                                issueType == CivicIssueType.MANHOLE
+                                            },
+                                            incidentTimeOfDay = selectedIncidentTime.takeIf { strayForm },
                                         )
                                     }
                                     when (result) {
@@ -918,7 +1147,7 @@ fun NewReportScreen(
                                             showDuplicateDialog = true
                                         }
                                         AddReportResult.Failed -> {
-                                            onSyncMessage("Could not save report. Try again.")
+                                            onSyncMessage("Couldn't save the report. Check storage or network, then tap Submit again.")
                                         }
                                     }
                                 } finally {
@@ -928,19 +1157,22 @@ fun NewReportScreen(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 56.dp),
+                            .heightIn(min = CitizenIcon.Tap + CitizenSpace.Md),
                         enabled = readyToSubmit && !submitting,
-                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (submitButtonActive) DarkBlue else GrayButton,
-                            contentColor = if (submitButtonActive) Color.White else Color.White.copy(alpha = 0.85f),
-                            disabledContainerColor = if (submitting) DarkBlue else GrayButton,
-                            disabledContentColor = Color.White.copy(alpha = 0.85f)
+                        contentPadding = PaddingValues(
+                            horizontal = CitizenSpace.Xl,
+                            vertical = CitizenSpace.Md,
                         ),
-                        shape = ReportActionPillShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (submitButtonActive) DarkBlue else CitizenInk.Disabled,
+                            contentColor = Color.White,
+                            disabledContainerColor = if (submitting) DarkBlue else CitizenInk.Disabled,
+                            disabledContentColor = Color.White.copy(alpha = 0.85f),
+                        ),
+                        shape = CitizenRadius.Capsule,
                         border = BorderStroke(
-                            1.dp,
-                            if (submitButtonActive || submitting) Color(0xFF0F0F1A) else Color(0xFF616161),
+                            CitizenBorder.Thin,
+                            if (submitButtonActive || submitting) Color(0xFF0F0F1A) else CitizenInk.Disabled,
                         ),
                     ) {
                         Row(
@@ -950,30 +1182,33 @@ fun NewReportScreen(
                         ) {
                             if (submitting) {
                                 CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
+                                    modifier = Modifier.size(CitizenIcon.Chip),
                                     color = Color.White,
                                     strokeWidth = 2.dp,
                                 )
                             } else {
-                                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Default.CameraAlt,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(CitizenIcon.Chip),
+                                )
                             }
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(CitizenSpace.Sm))
                             Text(
                                 footerLabel,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
+                                style = CitizenType.Cta,
                                 maxLines = 2,
                                 textAlign = TextAlign.Center,
                             )
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(CitizenSpace.Xs))
                     Text(
-                        "REPORT ANONYMOUSLY · NO IP STORED",
-                        color = Color.Gray,
-                        fontSize = 8.sp,
+                        CitizenPrivacyCopy.FOOTER_CAPS,
+                        style = CitizenType.CtaSub,
+                        color = CitizenInk.Muted,
                         modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
                     )
                 }
             }
@@ -1003,7 +1238,7 @@ private fun AiRiskSuggestionCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(BorderStroke(1.dp, severityColor))
+            .border(BorderStroke(CitizenBorder.Thin, severityColor))
             .background(Color.White)
             .padding(6.dp),
     ) {
@@ -1014,7 +1249,7 @@ private fun AiRiskSuggestionCard(
             color = severityColor,
             fontFamily = FontFamily.Monospace,
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(modifier = Modifier.height(CitizenSpace.Xs))
         Text(
             insight.advisoryLine,
             fontSize = 9.sp,
@@ -1034,7 +1269,7 @@ private fun AiRiskSuggestionCard(
             fontWeight = FontWeight.Bold,
             lineHeight = 11.sp,
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(CitizenSpace.Xs))
         TextButton(
             onClick = onUseSuggested,
             enabled = enabled,
@@ -1049,12 +1284,11 @@ private fun AiRiskSuggestionCard(
 private fun SectionTitle(text: String) {
     Text(
         text,
+        style = CitizenType.Label,
         fontFamily = FontFamily.Monospace,
-        fontWeight = FontWeight.Black,
-        fontSize = 11.sp,
         color = DarkBlue,
         maxLines = 1,
-        overflow = TextOverflow.Ellipsis
+        overflow = TextOverflow.Ellipsis,
     )
 }
 
@@ -1068,33 +1302,42 @@ private fun PhotoDropZone(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(72.dp)
+            .heightIn(min = 72.dp)
+            .clip(CitizenRadius.Card)
             .border(
-                BorderStroke(2.dp, if (enabled) DarkBlue else GrayDisabled),
-                RoundedCornerShape(0.dp)
+                BorderStroke(CitizenBorder.Thin, if (enabled) DarkBlue else GrayDisabled),
+                CitizenRadius.Card,
             )
-            .background(if (enabled) Color.White.copy(alpha = 0.5f) else Color(0xFFE0E0E0))
+            .background(
+                if (enabled) Color.White.copy(alpha = 0.5f) else Color(0xFFE0E0E0),
+                CitizenRadius.Card,
+            )
             .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
                 Icons.Filled.CameraAlt,
                 contentDescription = null,
                 tint = if (enabled) DarkBlue else GrayDisabled,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(CitizenIcon.Header)
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(CitizenSpace.Xs))
             Text(
                 label,
-                fontSize = 9.sp,
+                style = CitizenType.ChipCompact,
                 fontWeight = FontWeight.Bold,
-                color = if (enabled) DarkBlue else GrayDisabled,
+                color = if (enabled) DarkBlue else CitizenInk.Disabled,
                 textAlign = TextAlign.Center,
-                maxLines = 2
+                maxLines = 2,
             )
             if (filled) {
-                Text("✓ Added", fontSize = 8.sp, color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
+                Text(
+                    "✓ Added",
+                    style = CitizenType.Caption,
+                    color = CitizenInk.Success,
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
     }
@@ -1112,65 +1355,86 @@ private fun LocationBlock(
     onRetryGps: () -> Unit,
     onOpenGpsSettings: () -> Unit,
 ) {
+    val pinColor = when {
+        loading -> CitizenInk.Helper
+        gpsOk -> CitizenInk.Success
+        blockedReason == "NO_FIX" -> CitizenInk.Warning
+        else -> CitizenInk.Error
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .border(BorderStroke(1.dp, DarkBlue))
-            .background(Color.White)
-            .padding(6.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .border(BorderStroke(CitizenBorder.Thin, CitizenSelection.InactiveBorder), CitizenRadius.Card)
+            .background(Color.White, CitizenRadius.Card)
+            .padding(CitizenSpace.Sm),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(32.dp)
-                .background(Color(0xFFB71C1C)),
-            contentAlignment = Alignment.Center
+                .size(CitizenIcon.Fab)
+                .background(pinColor, CitizenRadius.Capsule),
+            contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Default.LocationOn, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+            Icon(
+                Icons.Default.LocationOn,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(CitizenIcon.Chip),
+            )
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(CitizenSpace.Sm))
         Column(modifier = Modifier.weight(1f)) {
             when {
-                loading -> Text("LOCATING…", color = DarkBlue, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                loading -> Text(
+                    "LOCATING…",
+                    style = CitizenType.Label,
+                    color = DarkBlue,
+                )
                 gpsOk -> {
-                    val title = if (usingManualLocation) {
-                        "MANUAL LOCATION"
-                    } else {
-                        "LOCATION ATTACHED"
-                    }
-                    Text(title, color = Color(0xFF2E7D32), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    val title = if (usingManualLocation) "MANUAL LOCATION" else "LOCATION ATTACHED"
+                    Text(title, style = CitizenType.Label, color = CitizenInk.Success)
                     Text(
                         "${"%.5f".format(latDisplay!!)}, ${"%.5f".format(lngDisplay!!)}",
-                        fontSize = 9.sp,
-                        color = Color.Gray
+                        style = CitizenType.Caption,
+                        color = CitizenInk.Helper,
                     )
                     if (!usingManualLocation && gpsAccuracyM != null) {
                         Text(
                             "GPS +/-${gpsAccuracyM.toInt()}m",
-                            fontSize = 8.sp,
+                            style = CitizenType.Caption,
                             color = when {
-                                gpsAccuracyM > GPS_SUBMIT_BLOCK_ACCURACY_METERS -> Color(0xFFB71C1C)
-                                gpsAccuracyM > GPS_SUBMIT_WARN_ACCURACY_METERS -> Color(0xFFB45309)
-                                else -> Color(0xFF2E7D32)
+                                gpsAccuracyM > GPS_SUBMIT_BLOCK_ACCURACY_METERS -> CitizenInk.Error
+                                gpsAccuracyM > GPS_SUBMIT_WARN_ACCURACY_METERS -> CitizenInk.Warning
+                                else -> CitizenInk.Success
                             },
                         )
                     }
                 }
                 blockedReason == "GPS_OFF" -> {
-                    Text("GPS DISABLED", color = Color(0xFFB71C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text("Turn on location services.", fontSize = 8.sp, color = Color.Gray, maxLines = 2)
+                    Text("GPS is off", style = CitizenType.Label, color = CitizenInk.Error)
+                    Text(
+                        "Turn on location, then tap RETRY GPS.",
+                        style = CitizenType.Helper,
+                        color = CitizenInk.Muted,
+                        maxLines = 2,
+                    )
                 }
                 blockedReason == "NO_FIX" -> {
-                    Text("LOCATION PENDING", color = Color(0xFFE65100), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text("Move outdoors and retry.", fontSize = 8.sp, color = Color.Gray, maxLines = 2)
+                    Text("No GPS fix yet", style = CitizenType.Label, color = CitizenInk.Warning)
+                    Text(
+                        "Move outdoors, then tap RETRY GPS.",
+                        style = CitizenType.Helper,
+                        color = CitizenInk.Muted,
+                        maxLines = 2,
+                    )
                 }
                 else -> {
-                    Text("LOCATION BLOCKED", color = Color(0xFFB71C1C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("Location permission needed", style = CitizenType.Label, color = CitizenInk.Error)
                     Text(
-                        "Allow location permission. On a deployed build you will be prompted to enable GPS.",
-                        fontSize = 8.sp,
-                        color = Color.Gray,
-                        maxLines = 3
+                        "Tap RETRY GPS to allow access.",
+                        style = CitizenType.Helper,
+                        color = CitizenInk.Muted,
+                        maxLines = 3,
                     )
                 }
             }
@@ -1179,16 +1443,168 @@ private fun LocationBlock(
             Column {
                 Button(
                     onClick = onRetryGps,
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentRed, contentColor = DarkBlue),
-                    shape = RoundedCornerShape(0.dp),
-                    contentPadding = ButtonDefaults.TextButtonContentPadding
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentRed,
+                        contentColor = DarkBlue,
+                    ),
+                    shape = CitizenRadius.Capsule,
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
                 ) {
-                    Text("RETRY GPS", fontWeight = FontWeight.Black, fontSize = 9.sp)
+                    Text("RETRY GPS", style = CitizenType.ChipCompact, fontWeight = FontWeight.Bold)
                 }
-                TextButton(onClick = onOpenGpsSettings, contentPadding = ButtonDefaults.TextButtonContentPadding) {
-                    Text("ENABLE GPS", fontSize = 8.sp, color = DarkBlue, fontWeight = FontWeight.Bold)
+                TextButton(
+                    onClick = onOpenGpsSettings,
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                ) {
+                    Text("ENABLE GPS", style = CitizenType.Caption, color = DarkBlue)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun WideShotSummaryRow(
+    position: PotholePosition,
+    facing: TrafficFacingMode,
+    enabled: Boolean,
+    onAdjust: () -> Unit,
+) {
+    val facingLabel = when (facing) {
+        TrafficFacingMode.FACING_CAMERA -> "Toward camera"
+        TrafficFacingMode.AWAY_FROM_CAMERA -> "Against traffic (Flip)"
+        TrafficFacingMode.UNKNOWN -> "Traffic unset"
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(CitizenRadius.Card)
+            .border(BorderStroke(CitizenBorder.Thin, DarkBlue), CitizenRadius.Card)
+            .background(Color.White.copy(alpha = 0.92f), CitizenRadius.Card)
+            .clickable(enabled = enabled, onClick = onAdjust)
+            .padding(CitizenSpace.Sm),
+    ) {
+        Text(
+            "POSITION ${position.code} · ${position.displayLabel.uppercase()}",
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 10.sp,
+            color = DarkBlue,
+        )
+        Text(
+            "$facingLabel · tap to adjust lanes / Flip",
+            fontSize = 8.sp,
+            color = CitizenInk.Muted,
+        )
+    }
+}
+
+@Composable
+private fun IncidentTimeTile(
+    modifier: Modifier,
+    period: IncidentTimeOfDay,
+    selected: IncidentTimeOfDay,
+    enabled: Boolean = true,
+    onSelect: (IncidentTimeOfDay) -> Unit,
+) {
+    val sel = period == selected
+    Box(
+        modifier = modifier
+            .heightIn(min = CitizenIcon.Tap + CitizenSpace.Sm)
+            .clip(CitizenRadius.Card)
+            .border(
+                BorderStroke(
+                    CitizenBorder.Thin,
+                    if (sel) CitizenSelection.Active else CitizenSelection.InactiveBorder,
+                ),
+                CitizenRadius.Card,
+            )
+            .background(
+                if (sel) CitizenSelection.Active else Color.White.copy(alpha = 0.85f),
+                CitizenRadius.Card,
+            )
+            .clickable(enabled = enabled) { onSelect(period) }
+            .padding(CitizenSpace.Xs),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                period.displayLabel.uppercase(),
+                style = CitizenType.ChipCompact,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = if (sel) CitizenSelection.ActiveContent else DarkBlue,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                period.blurb,
+                style = CitizenType.Caption,
+                color = if (sel) {
+                    CitizenSelection.ActiveContent.copy(alpha = 0.95f)
+                } else {
+                    CitizenInk.Helper
+                },
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ManholeConditionTile(
+    modifier: Modifier,
+    condition: ManholeCondition,
+    selected: ManholeCondition,
+    enabled: Boolean = true,
+    onSelect: (ManholeCondition) -> Unit,
+) {
+    val sel = condition == selected
+    Box(
+        modifier = modifier
+            .heightIn(min = CitizenIcon.Tap + CitizenSpace.Sm)
+            .clip(CitizenRadius.Card)
+            .border(
+                BorderStroke(
+                    CitizenBorder.Thin,
+                    if (sel) CitizenSelection.Active else CitizenSelection.InactiveBorder,
+                ),
+                CitizenRadius.Card,
+            )
+            .background(
+                if (sel) CitizenSelection.Active else Color.White.copy(alpha = 0.85f),
+                CitizenRadius.Card,
+            )
+            .clickable(enabled = enabled) { onSelect(condition) }
+            .padding(CitizenSpace.Xs),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                condition.displayLabel.uppercase(),
+                style = CitizenType.ChipCompact,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = if (sel) CitizenSelection.ActiveContent else DarkBlue,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                condition.blurb,
+                style = CitizenType.Caption,
+                color = if (sel) {
+                    CitizenSelection.ActiveContent.copy(alpha = 0.95f)
+                } else {
+                    CitizenInk.Helper
+                },
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+            )
         }
     }
 }
@@ -1199,31 +1615,51 @@ private fun SeverityTile(
     severity: PotholeSeverity,
     selected: PotholeSeverity,
     enabled: Boolean = true,
+    blurb: String = severity.blurb,
     onSelect: (PotholeSeverity) -> Unit,
 ) {
     val sel = severity == selected
     Box(
         modifier = modifier
-            .height(52.dp)
-            .border(BorderStroke(1.dp, DarkBlue))
-            .background(if (sel) OrangeSelect else Color.White.copy(alpha = 0.85f))
+            .heightIn(min = CitizenIcon.Tap + CitizenSpace.Sm)
+            .clip(CitizenRadius.Card)
+            .border(
+                BorderStroke(
+                    CitizenBorder.Thin,
+                    if (sel) CitizenSelection.Active else CitizenSelection.InactiveBorder,
+                ),
+                CitizenRadius.Card,
+            )
+            .background(
+                if (sel) CitizenSelection.Active else Color.White.copy(alpha = 0.85f),
+                CitizenRadius.Card,
+            )
             .clickable(enabled = enabled) { onSelect(severity) }
-            .padding(4.dp)
+            .padding(CitizenSpace.Xs),
+        contentAlignment = Alignment.Center,
     ) {
-        Column {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
             Text(
                 "${severity.code} ${severity.title}",
+                style = CitizenType.ChipCompact,
                 fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Black,
-                fontSize = 9.sp,
-                color = if (sel) Color.White else DarkBlue
+                fontWeight = FontWeight.Bold,
+                color = if (sel) CitizenSelection.ActiveContent else DarkBlue,
+                textAlign = TextAlign.Center,
             )
             Text(
-                severity.blurb,
-                fontSize = 7.sp,
-                lineHeight = 9.sp,
-                color = if (sel) Color.White.copy(alpha = 0.95f) else Color.DarkGray,
-                maxLines = 2
+                blurb,
+                style = CitizenType.Caption,
+                color = if (sel) {
+                    CitizenSelection.ActiveContent.copy(alpha = 0.95f)
+                } else {
+                    CitizenInk.Helper
+                },
+                textAlign = TextAlign.Center,
+                maxLines = 2,
             )
         }
     }
@@ -1241,11 +1677,21 @@ private fun PositionTile(
     val isFullRoad = position == PotholePosition.FULL_WIDTH
     Box(
         modifier = modifier
-            .height(if (isFullRoad) 52.dp else 40.dp)
-            .border(BorderStroke(1.dp, DarkBlue))
-            .background(if (sel) OrangeSelect else Color.White.copy(alpha = 0.85f))
+            .heightIn(min = if (isFullRoad) CitizenIcon.Tap + CitizenSpace.Sm else CitizenIcon.Tap)
+            .clip(CitizenRadius.Card)
+            .border(
+                BorderStroke(
+                    CitizenBorder.Thin,
+                    if (sel) CitizenSelection.Active else CitizenSelection.InactiveBorder,
+                ),
+                CitizenRadius.Card,
+            )
+            .background(
+                if (sel) CitizenSelection.Active else Color.White.copy(alpha = 0.85f),
+                CitizenRadius.Card,
+            )
             .clickable(enabled = enabled) { onSelect(position) }
-            .padding(4.dp)
+            .padding(CitizenSpace.Xs),
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -1253,20 +1699,23 @@ private fun PositionTile(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                if (isFullRoad) "FULL ROAD POTHOLE" else position.displayLabel.uppercase(),
+                if (isFullRoad) "LMR · FULL ROAD" else position.displayLabel.uppercase(),
+                style = CitizenType.ChipCompact,
                 fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Black,
-                fontSize = if (isFullRoad) 10.sp else 11.sp,
-                color = if (sel) Color.White else DarkBlue,
+                fontWeight = FontWeight.Bold,
+                color = if (sel) CitizenSelection.ActiveContent else DarkBlue,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
             )
             if (isFullRoad) {
                 Text(
                     "Entire road width damaged",
-                    fontSize = 8.sp,
-                    lineHeight = 9.sp,
-                    color = if (sel) Color.White.copy(alpha = 0.95f) else Color.DarkGray,
+                    style = CitizenType.Caption,
+                    color = if (sel) {
+                        CitizenSelection.ActiveContent.copy(alpha = 0.95f)
+                    } else {
+                        CitizenInk.Helper
+                    },
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                 )
@@ -1284,7 +1733,7 @@ private fun TrafficDirectionConfirmRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(BorderStroke(1.dp, DarkBlue))
+            .border(BorderStroke(CitizenBorder.Thin, DarkBlue))
             .background(Color.White.copy(alpha = 0.92f))
             .padding(8.dp),
     ) {
@@ -1295,17 +1744,17 @@ private fun TrafficDirectionConfirmRow(
             fontSize = 9.sp,
             color = DarkBlue,
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(CitizenSpace.Xs))
         Text(
             "Look at the wide shot. Match the picture to how cars move in your photo. Used for Left/Right trip alerts.",
             fontSize = 8.sp,
             lineHeight = 10.sp,
-            color = Color.Gray,
+            color = CitizenInk.Muted,
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(CitizenSpace.Sm))
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Xs),
         ) {
             TrafficFacingTile(
                 modifier = Modifier.weight(1f),
@@ -1352,8 +1801,8 @@ private fun TrafficFacingTile(
     val mute = if (selected) Color.White.copy(alpha = 0.95f) else Color.DarkGray
     Column(
         modifier = modifier
-            .height(118.dp)
-            .border(BorderStroke(1.dp, DarkBlue))
+            .heightIn(min = 118.dp)
+            .border(BorderStroke(CitizenBorder.Thin, DarkBlue))
             .background(if (selected) OrangeSelect else Color.White.copy(alpha = 0.85f))
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 6.dp),
@@ -1368,7 +1817,7 @@ private fun TrafficFacingTile(
                 .fillMaxWidth()
                 .height(56.dp),
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(CitizenSpace.Xs))
         Text(
             title,
             fontFamily = FontFamily.Monospace,
@@ -1563,86 +2012,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrafficArrow(
 private fun createImageFile(context: Context): File {
     val time = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
     return File.createTempFile("JPEG_${time}_", ".jpg", context.cacheDir)
-}
-
-private fun locationQualityScore(location: Location): Float {
-    val ageSec = ((System.currentTimeMillis() - location.time).coerceAtLeast(0L) / 1000f)
-        .coerceAtMost(180f)
-    // Lower is better: prioritize accuracy, then freshness.
-    return location.accuracy.coerceAtLeast(1f) + ageSec * 0.35f
-}
-
-private fun pickBetterLocation(current: Location?, candidate: Location?): Location? {
-    if (candidate == null) return current
-    if (current == null) return candidate
-    return if (locationQualityScore(candidate) < locationQualityScore(current)) candidate else current
-}
-
-@SuppressLint("MissingPermission")
-private suspend fun requestSingleUpdate(
-    context: Context,
-    locationManager: LocationManager,
-    provider: String,
-    timeoutMs: Long,
-): Location? {
-    return withTimeoutOrNull(timeoutMs) {
-        suspendCancellableCoroutine { cont ->
-            val cancellationSignal = CancellationSignal()
-            try {
-                LocationManagerCompat.getCurrentLocation(
-                    locationManager,
-                    provider,
-                    cancellationSignal,
-                    ContextCompat.getMainExecutor(context),
-                ) { location ->
-                    if (!cont.isCompleted) cont.resume(location)
-                }
-            } catch (_: Exception) {
-                if (!cont.isCompleted) cont.resume(null)
-            }
-            cont.invokeOnCancellation {
-                runCatching { cancellationSignal.cancel() }
-            }
-        }
-    }
-}
-
-@SuppressLint("MissingPermission")
-private suspend fun fetchBestCalibratedLocation(context: Context): Location? {
-    val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-    var best: Location? = null
-    val providers = listOf(
-        LocationManager.GPS_PROVIDER,
-        LocationManager.NETWORK_PROVIDER,
-        LocationManager.PASSIVE_PROVIDER,
-    )
-
-    for (provider in providers) {
-        val last = runCatching { lm.getLastKnownLocation(provider) }.getOrNull()
-        best = pickBetterLocation(best, last)
-    }
-
-    if (runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)) {
-        val gpsFresh = requestSingleUpdate(
-            context = context,
-            locationManager = lm,
-            provider = LocationManager.GPS_PROVIDER,
-            timeoutMs = 6500L,
-        )
-        best = pickBetterLocation(best, gpsFresh)
-    }
-
-    if (runCatching { lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)) {
-        val networkFresh = requestSingleUpdate(
-            context = context,
-            locationManager = lm,
-            provider = LocationManager.NETWORK_PROVIDER,
-            timeoutMs = 3500L,
-        )
-        best = pickBetterLocation(best, networkFresh)
-    }
-
-    return best
 }
 
 private fun parseMapsInput(url: String, lngExtra: String): Pair<Double, Double>? {

@@ -45,10 +45,51 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from ultralytics import YOLO
+
+
+def _export_tflite(best: YOLO, imgsz: int, int8: bool, output_dir: Path) -> Path:
+    """Export TFLite; fall back to ONNX→onnx2tf on Windows."""
+    try:
+        export_kwargs: dict = dict(format="tflite", imgsz=imgsz)
+        if int8:
+            export_kwargs["int8"] = True
+        exported = Path(best.export(**export_kwargs))
+        if exported.is_file() and exported.suffix == ".tflite":
+            return exported
+        # Ultralytics sometimes returns a directory of variants.
+        if exported.is_dir():
+            float32 = sorted(exported.glob("*float32*.tflite"))
+            any_tflite = sorted(exported.glob("*.tflite"))
+            pick = (float32 or any_tflite)
+            if pick:
+                return pick[0]
+        raise RuntimeError(f"Unexpected TFLite export path: {exported}")
+    except Exception as exc:
+        if platform.system() != "Windows":
+            raise
+        print(f"Direct TFLite export failed ({exc}); using ONNX → onnx2tf on Windows…")
+        onnx_path = Path(best.export(format="onnx", imgsz=imgsz, simplify=True))
+        tflite_dir = output_dir / "tflite_export"
+        if tflite_dir.exists():
+            shutil.rmtree(tflite_dir)
+        tflite_dir.mkdir(parents=True, exist_ok=True)
+        cmd = [sys.executable, "-m", "onnx2tf", "-i", str(onnx_path), "-o", str(tflite_dir), "-osd"]
+        subprocess.check_call(cmd)
+        float32 = sorted(tflite_dir.glob("*float32*.tflite"))
+        any_tflite = sorted(tflite_dir.glob("*.tflite"))
+        pick = float32 or any_tflite
+        if not pick:
+            raise RuntimeError(f"onnx2tf produced no .tflite under {tflite_dir}")
+        if int8:
+            print("NOTE: --int8 ignored on Windows onnx2tf path; using float32.")
+        return pick[0]
 
 
 def main() -> None:
@@ -124,12 +165,10 @@ def main() -> None:
     print(f"Best weights: {best_pt}")
 
     # ---------------- Export to TFLite ----------------
+    # Ultralytics 8.4+ maps format=tflite → LiteRT, which only runs on Linux/macOS.
+    # On Windows we export ONNX then convert with onnx2tf.
     best = YOLO(str(best_pt))
-    export_kwargs = dict(format="tflite", imgsz=args.imgsz)
-    if args.int8:
-        export_kwargs["int8"] = True
-    exported_path = best.export(**export_kwargs)
-    exported_path = Path(exported_path)
+    exported_path = _export_tflite(best, imgsz=args.imgsz, int8=args.int8, output_dir=args.output_dir)
     print(f"Exported TFLite: {exported_path}")
 
     # ---------------- Stage outputs for the Android project ----------------

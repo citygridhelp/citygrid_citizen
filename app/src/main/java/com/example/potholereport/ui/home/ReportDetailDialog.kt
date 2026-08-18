@@ -1,7 +1,7 @@
 package com.example.potholereport.ui.home
 
-import android.graphics.BitmapFactory
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -11,13 +11,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -45,24 +43,41 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import com.example.potholereport.data.PersistedPotholeReport
+import com.example.potholereport.data.CivicIssueType
+import com.example.potholereport.data.IncidentTimeOfDay
+import com.example.potholereport.data.ManholeCondition
+import com.example.potholereport.data.TrafficFacingMode
+import com.example.potholereport.data.formatRecentReportCaption
+import com.example.potholereport.data.isMeaningfulAreaName
+import com.example.potholereport.data.resolveAreaLabel
+import com.example.potholereport.ui.theme.CitizenBorder
+import com.example.potholereport.ui.theme.CitizenIcon
+import com.example.potholereport.ui.theme.CitizenInk
+import com.example.potholereport.ui.theme.CitizenRadius
+import com.example.potholereport.ui.theme.CitizenSpace
+import com.example.potholereport.ui.theme.CitizenType
+import com.example.potholereport.ui.theme.citizenReportStatusColor
+import java.io.File
+import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
-import com.example.potholereport.data.PersistedPotholeReport
-import com.example.potholereport.data.PotholeReportStatus
-import com.example.potholereport.data.formatRecentReportCaption
-import com.example.potholereport.data.isMeaningfulAreaName
-import com.example.potholereport.data.resolveAreaLabel
-import java.io.File
-import java.util.Locale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+
+/** Vertical gap that avoids Spacer(modifier=...) named-arg issues in this module. */
+@Composable
+private fun Gap(height: Dp) {
+    Box(modifier = Modifier.height(height))
+}
 
 @Composable
 fun ReportDetailDialog(
@@ -108,15 +123,15 @@ fun ReportDetailDialog(
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(0.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            shape = CitizenRadius.Card,
+            border = BorderStroke(CitizenBorder.Thin, CitizenBorder.Secondary),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(14.dp),
+                    .padding(CitizenSpace.Md),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -124,49 +139,57 @@ fun ReportDetailDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "REPORT DETAILS",
-                        fontWeight = FontWeight.Black,
-                        fontSize = 15.sp,
+                        text = "REPORT DETAILS",
+                        style = CitizenType.ScreenTitle,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(CitizenIcon.Tap)) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            modifier = Modifier.size(CitizenIcon.Header),
+                        )
                     }
                 }
                 Text(
-                    whenLabel,
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
-                    fontWeight = FontWeight.SemiBold,
+                    text = whenLabel,
+                    style = CitizenType.Chip,
+                    color = CitizenInk.Helper,
                 )
-                Spacer(Modifier.height(12.dp))
+                Gap(CitizenSpace.Md)
 
                 if (report.submittedSignedIn) {
                     DetailSectionTitle("STATUS")
                     Text(
-                        report.status.displayLabel.uppercase(Locale.US),
+                        text = report.status.displayLabelCaps,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = reportStatusColor(report.status),
+                        color = citizenReportStatusColor(report.status),
                     )
-                    Spacer(Modifier.height(4.dp))
+                    Gap(CitizenSpace.Xs)
                     Text(
-                        "Updated by the municipal response team.",
+                        text = "Updated by the municipal response team.",
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     )
-                    Spacer(Modifier.height(12.dp))
+                    Gap(CitizenSpace.Md)
                 }
 
                 if (report.hasAssignee()) {
                     DetailSectionTitle("ACCOUNTABILITY (REFERENCE ONLY)")
                     Text(
-                        ReportAssigneeDisplay.routingDisclaimer(report),
+                        text = ReportAssigneeDisplay.routingDisclaimer(report),
                         fontSize = 10.sp,
                         lineHeight = 13.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = com.example.potholereport.ui.theme.CitizenAccountabilityCopy.CARD_DISCLAIMER,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                    Gap(CitizenSpace.Sm)
                     DetailLine(ReportAssigneeDisplay.authorityLabel(), report.assigneeCorporation)
                     DetailLine(
                         ReportAssigneeDisplay.municipalUnitLabel(report),
@@ -178,26 +201,37 @@ fun ReportDetailDialog(
                     DetailLine("Officer", report.assigneeName)
                     DetailLine("Role", report.assigneePosition)
                     DetailLine("Office", report.assigneeOfficeAddress)
-                    Spacer(Modifier.height(12.dp))
+                    Gap(CitizenSpace.Md)
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
+                val strayPlaceOnly = report.issueType.usesIncidentTimeForm &&
+                    report.widePhotoPath.isBlank() &&
+                    report.storageWidePath.isBlank()
+                if (strayPlaceOnly) {
                     ReportPhotoPanel(
-                        label = "CLOSE-UP",
+                        label = "PLACE / DOGS",
                         bitmap = closeBitmap,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                    ReportPhotoPanel(
-                        label = "WIDE CONTEXT",
-                        bitmap = wideBitmap,
-                        modifier = Modifier.weight(1f),
-                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ReportPhotoPanel(
+                            label = "CLOSE-UP",
+                            bitmap = closeBitmap,
+                            modifier = Modifier.weight(1f),
+                        )
+                        ReportPhotoPanel(
+                            label = "WIDE CONTEXT",
+                            bitmap = wideBitmap,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
 
-                Spacer(Modifier.height(14.dp))
+                Gap(14.dp)
                 DetailSectionTitle("LOCATION")
                 DetailLine(
                     "Area",
@@ -216,7 +250,11 @@ fun ReportDetailDialog(
                 )
                 if (report.hasCoordinates()) {
                     Text(
-                        if (showLocationMap) "Tap coordinates to hide map" else "Tap coordinates to view on map",
+                        text = if (showLocationMap) {
+                            "Tap coordinates to hide map"
+                        } else {
+                            "Tap coordinates to view on map"
+                        },
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
                         modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
@@ -240,33 +278,110 @@ fun ReportDetailDialog(
                     )
                 }
 
-                Spacer(Modifier.height(10.dp))
+                Gap(10.dp)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Spacer(Modifier.height(10.dp))
+                Gap(10.dp)
 
-                DetailSectionTitle("SEVERITY")
-                Text(
-                    report.severity.displayLabel,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    report.severity.blurb,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
+                if (report.issueType == CivicIssueType.MANHOLE) {
+                    val condition = report.manholeConditionEnum()
+                    DetailSectionTitle("MANHOLE STATE")
+                    Text(
+                        text = condition?.displayLabel ?: "Not recorded",
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = condition?.blurb ?: "Open, closed, broken, or overflowing was not saved.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                } else if (report.issueType.usesIncidentTimeForm) {
+                    val period = report.incidentTimeOfDayEnum()
+                    DetailSectionTitle("TIME OF DAY")
+                    Text(
+                        text = period?.displayLabel ?: "Not recorded",
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    period?.let {
+                        Text(
+                            text = it.blurb,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        )
+                    }
+                } else {
+                    DetailSectionTitle("SEVERITY")
+                    Text(
+                        text = report.severity.displayLabel,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = report.severity.blurb,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                    Text(
+                        text = "For drivers: ${report.severity.driverPhrase}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                    )
+                }
 
-                Spacer(Modifier.height(10.dp))
+                if (report.issueType.usesLaneCapture) {
+                    Gap(10.dp)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Gap(10.dp)
+                    DetailSectionTitle("POSITION ON ROAD")
+                    val facingLabel = when (report.trafficFacingMode()) {
+                        TrafficFacingMode.FACING_CAMERA -> "Toward camera"
+                        TrafficFacingMode.AWAY_FROM_CAMERA -> "Against traffic"
+                        TrafficFacingMode.UNKNOWN -> null
+                    }
+                    Text(
+                        text = "${report.potholePositionEnum().code} · ${report.potholePositionEnum().displayLabel}",
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    facingLabel?.let { facing ->
+                        Text(
+                            text = "Traffic: $facing",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        )
+                    }
+                }
+
+                Gap(10.dp)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Spacer(Modifier.height(10.dp))
+                Gap(10.dp)
 
-                DetailSectionTitle("NOTE")
+                DetailSectionTitle(
+                    if (report.issueType.usesIncidentTimeForm) "LANDMARK" else "NOTE",
+                )
+                val noteBody = IncidentTimeOfDay.stripFromNote(
+                    ManholeCondition.stripFromNote(report.note),
+                ).trim()
                 Text(
-                    report.note.trim().ifBlank { "No note provided." },
+                    text = noteBody.ifBlank {
+                        if (report.issueType.usesIncidentTimeForm) {
+                            "No landmark provided."
+                        } else {
+                            "No note provided."
+                        }
+                    },
                     fontSize = 13.sp,
-                    color = if (report.note.isBlank()) {
+                    color = if (noteBody.isBlank()) {
                         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     } else {
                         MaterialTheme.colorScheme.onSurface
@@ -286,13 +401,13 @@ private fun ReportPhotoPanel(
 ) {
     Column(modifier = modifier) {
         Text(
-            label,
+            text = label,
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             letterSpacing = 0.5.sp,
         )
-        Spacer(Modifier.height(4.dp))
+        Gap(CitizenSpace.Xs)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -302,15 +417,17 @@ private fun ReportPhotoPanel(
         ) {
             when (val b = bitmap) {
                 null -> Icon(
-                    Icons.Outlined.Image,
+                    imageVector = Icons.Outlined.Image,
                     contentDescription = null,
-                    tint = Color(0xFF9CA3AF),
+                    tint = CitizenInk.Disabled,
                     modifier = Modifier.size(32.dp),
                 )
                 else -> Image(
                     bitmap = b.asImageBitmap(),
                     contentDescription = label,
-                    modifier = Modifier.fillMaxWidth().height(128.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(128.dp),
                     contentScale = ContentScale.Crop,
                 )
             }
@@ -318,22 +435,15 @@ private fun ReportPhotoPanel(
     }
 }
 
-private fun reportStatusColor(status: PotholeReportStatus): Color = when (status) {
-    PotholeReportStatus.OPEN -> Color(0xFFA12A2A)
-    PotholeReportStatus.IN_PROGRESS -> Color(0xFFBC7A1E)
-    PotholeReportStatus.COMPLETED -> Color(0xFF0B7A42)
-}
-
 @Composable
 private fun DetailSectionTitle(text: String) {
     Text(
-        text,
-        fontWeight = FontWeight.Black,
-        fontSize = 11.sp,
-        letterSpacing = 0.8.sp,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+        text = text,
+        style = CitizenType.Caption,
+        fontWeight = FontWeight.Bold,
+        color = CitizenInk.Muted,
     )
-    Spacer(Modifier.height(6.dp))
+    Gap(CitizenSpace.Xs)
 }
 
 @Composable
@@ -349,14 +459,14 @@ private fun DetailLine(
             .padding(vertical = 2.dp),
     ) {
         Text(
-            "$label: ",
-            fontSize = 12.sp,
+            text = "$label: ",
+            style = CitizenType.Chip,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            color = CitizenInk.Helper,
         )
         Text(
-            value,
-            fontSize = 12.sp,
+            text = value,
+            style = CitizenType.Chip,
             color = if (clickable) {
                 MaterialTheme.colorScheme.primary
             } else {
@@ -376,7 +486,7 @@ private fun DetailLine(
     }
 }
 
-private val ReportDetailMapTiles: XYTileSource = XYTileSource(
+internal val ReportDetailMapTiles: XYTileSource = XYTileSource(
     "CartoVoyagerLabeled20",
     0,
     CartoBasemapNativeMaxZoom.toInt(),
@@ -391,7 +501,7 @@ private val ReportDetailMapTiles: XYTileSource = XYTileSource(
 )
 
 @Composable
-private fun ReportLocationMapPreview(
+internal fun ReportLocationMapPreview(
     latitude: Double,
     longitude: Double,
     areaHint: String?,
@@ -426,6 +536,7 @@ private fun ReportLocationMapPreview(
                     isVerticalMapRepetitionEnabled = false
                     maxZoomLevel = CartoBasemapUsefulMaxZoom
                     minZoomLevel = 5.0
+                    installCartoLabelDarkeningTilesOverlay()
                     controller.setZoom(16.0)
                     controller.setCenter(point)
                     overlays.add(
@@ -445,7 +556,7 @@ private fun ReportLocationMapPreview(
             },
         )
         Text(
-            "Open in Maps app",
+            text = "Open in Maps app",
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary,

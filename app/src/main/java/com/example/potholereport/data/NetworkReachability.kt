@@ -25,8 +25,54 @@ object NetworkReachability {
     }
 
     /**
-     * Calls [onOnline] when a network with internet becomes available.
+     * Calls [onChanged] whenever reachability flips (online or offline).
+     * Also fires once with the current state shortly after register.
      * Returns an unregister function.
+     */
+    fun registerConnectivityListener(
+        context: Context,
+        onChanged: (online: Boolean) -> Unit,
+    ): () -> Unit {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return {}
+        val appContext = context.applicationContext
+        val lastOnline = AtomicBoolean(hasInternet(appContext))
+        onChanged(lastOnline.get())
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = publish()
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities,
+            ) = publish()
+
+            override fun onLost(network: Network) = publish()
+
+            private fun publish() {
+                val online = hasInternet(appContext)
+                if (lastOnline.getAndSet(online) != online) {
+                    onChanged(online)
+                }
+            }
+        }
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        try {
+            cm.registerNetworkCallback(request, callback)
+        } catch (_: Exception) {
+            return {}
+        }
+        return {
+            try {
+                cm.unregisterNetworkCallback(callback)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
+     * Calls [onOnline] when a network with internet becomes available after being offline.
+     * Does not fire on the initial online state. Returns an unregister function.
      */
     fun registerOnlineListener(
         context: Context,

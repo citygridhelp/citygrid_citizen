@@ -117,6 +117,33 @@ fun fuseNavHeadingDeg(
     gpsSpeedMps = gps?.takeIf { it.hasSpeed() }?.speed,
 )
 
+/**
+ * Smooth MapLibre camera bearing (degrees from north, travel direction up).
+ * Mirrors OSM [applyTripHeadingUp] step/deadband/flip rules without inverting sign.
+ */
+fun stepMapLibreBearingDeg(
+    currentBearingDeg: Double,
+    targetHeadingDeg: Float?,
+    speedMps: Float?,
+): Double {
+    val target = targetHeadingDeg?.takeIf { it.isFinite() } ?: return currentBearingDeg
+    val speed = speedMps?.takeIf { it.isFinite() } ?: 0f
+    if (speed < TripStreetCamera.HEADING_LOCK_MIN_SPEED_MPS) return currentBearingDeg
+
+    var current = ((currentBearingDeg % 360.0) + 360.0) % 360.0
+    val want = ((target.toDouble() % 360.0) + 360.0) % 360.0
+    var delta = want - current
+    if (delta > 180.0) delta -= 360.0
+    if (delta < -180.0) delta += 360.0
+    if (abs(delta) >= TripStreetCamera.HEADING_FLIP_REJECT_DEG) return currentBearingDeg
+    if (abs(delta) < TripStreetCamera.HEADING_UPDATE_MIN_DEG) return currentBearingDeg
+    val step = delta.coerceIn(
+        -TripStreetCamera.HEADING_MAX_STEP_DEG.toDouble(),
+        TripStreetCamera.HEADING_MAX_STEP_DEG.toDouble(),
+    )
+    return ((current + step) % 360.0 + 360.0) % 360.0
+}
+
 /** Copy [gps] with fused bearing for map follow / icon rotation. */
 fun Location.withFusedNavHeading(deviceHeadingDeg: Float?): Location {
     val heading = fuseNavHeadingDeg(deviceHeadingDeg, this) ?: return this

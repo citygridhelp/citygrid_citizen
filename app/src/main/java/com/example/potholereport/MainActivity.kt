@@ -1,5 +1,9 @@
 package com.example.potholereport
 
+import android.content.Intent
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -54,11 +58,14 @@ class MainActivity : ComponentActivity() {
         }
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        maybeRequestUsbCameraPermission(intent)
         RecentReportsRepository.init(applicationContext)
         UserProfileRepository.init(applicationContext)
         CitizenNotificationsRepository.init(applicationContext)
         BengaluruGbaBoundary.init(applicationContext)
         BengaluruGbaWards.init(applicationContext)
+        com.example.potholereport.ui.home.CitizenMapTiler.ensureInitialized(applicationContext)
+        com.example.potholereport.data.WeatherAlertWorker.schedule(applicationContext)
         setContent {
             var splashVisible by remember {
                 mutableStateOf(!AppAutoRefresh.initialSplashCompleted)
@@ -74,11 +81,13 @@ class MainActivity : ComponentActivity() {
                         SupabaseAuthRepository.restoreSignedInEmail()
                         AppAutoRefresh.refreshLocalData()
                         AppAutoRefresh.checkPlayStoreUpdate(this@MainActivity)
+                        AppAutoRefresh.refreshWeatherAlerts(this@MainActivity)
                     }
                 } else {
                     withContext(Dispatchers.IO) {
                         AppAutoRefresh.refreshLocalData()
                         AppAutoRefresh.checkPlayStoreUpdate(this@MainActivity)
+                        AppAutoRefresh.refreshWeatherAlerts(this@MainActivity)
                     }
                 }
                 val elapsed = System.currentTimeMillis() - startedAt
@@ -118,6 +127,27 @@ class MainActivity : ComponentActivity() {
                         onDrawn = { keepSystemSplash = false },
                     )
                 }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        maybeRequestUsbCameraPermission(intent)
+    }
+
+    private fun maybeRequestUsbCameraPermission(intent: Intent?) {
+        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return
+        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+        } ?: return
+        com.example.potholereport.data.TripUsbCameraInventory.let { inventory ->
+            if (inventory.shouldRequestWebcamPermission(device)) {
+                inventory.requestPermission(this, device)
             }
         }
     }

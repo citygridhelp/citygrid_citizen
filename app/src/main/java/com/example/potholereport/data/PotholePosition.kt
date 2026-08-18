@@ -1,20 +1,21 @@
 package com.example.potholereport.data
 
 /**
- * Where the user says the pothole sits in the close-up frame.
+ * Where the user says the pothole sits across the framed road (wide-shot L/M/R span).
  *
- * The risk analyzer constrains its dark-blob search to the corresponding
- * vertical band (with a small overlap) so it picks up the actual pothole
- * the user is reporting and not a wall shadow / drain edge that happens to
- * be in another lane. [FULL_WIDTH] searches the whole frame for damage that
- * spans most or all of the carriageway.
+ * Contiguous spans only: L, M, R, LM, MR, LMR ([FULL_WIDTH]). Legacy code `F` still maps to [FULL_WIDTH].
+ * The risk analyzer constrains its dark-blob search to [laneRange].
  */
 enum class PotholePosition(val displayLabel: String, val code: String) {
     LEFT("Left", "L"),
     MIDDLE("Middle", "M"),
     RIGHT("Right", "R"),
-    /** Damage covering the full road width (large crater or many potholes across). */
-    FULL_WIDTH("Full road pothole", "F"),
+    /** Spans left + middle of the framed road. */
+    LEFT_MIDDLE("Left+Middle", "LM"),
+    /** Spans middle + right of the framed road. */
+    MIDDLE_RIGHT("Middle+Right", "MR"),
+    /** LMR — full / near-full road width (replaces separate “Full road” control). */
+    FULL_WIDTH("Full road", "LMR"),
     ;
 
     companion object {
@@ -25,9 +26,11 @@ enum class PotholePosition(val displayLabel: String, val code: String) {
             entries.find { it.name.equals(raw, ignoreCase = true) }?.let { return it }
             entries.find { it.displayLabel.equals(raw, ignoreCase = true) }?.let { return it }
             return when (raw.lowercase()) {
-                "across", "across road", "whole", "whole road", "full", "w",
+                "f", "across", "across road", "whole", "whole road", "full", "w",
                 "full width", "fullwidth", "full road", "full road pothole", "crater",
                 -> FULL_WIDTH
+                "left+middle", "left-middle", "l+m", "ml" -> LEFT_MIDDLE
+                "middle+right", "middle-right", "m+r", "rm" -> MIDDLE_RIGHT
                 else -> MIDDLE
             }
         }
@@ -39,6 +42,18 @@ enum class PotholePosition(val displayLabel: String, val code: String) {
             LEFT -> 0f..0.42f
             MIDDLE -> 0.30f..0.70f
             RIGHT -> 0.58f..1f
+            LEFT_MIDDLE -> 0f..0.70f
+            MIDDLE_RIGHT -> 0.30f..1f
             FULL_WIDTH -> 0f..1f
         }
+
+    /** Mirror L↔R for against-traffic / opposite-driver cases. */
+    fun mirrored(): PotholePosition = when (this) {
+        LEFT -> RIGHT
+        RIGHT -> LEFT
+        MIDDLE -> MIDDLE
+        LEFT_MIDDLE -> MIDDLE_RIGHT
+        MIDDLE_RIGHT -> LEFT_MIDDLE
+        FULL_WIDTH -> FULL_WIDTH
+    }
 }

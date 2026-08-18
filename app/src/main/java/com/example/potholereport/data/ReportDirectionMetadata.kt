@@ -35,7 +35,7 @@ fun resolveTrafficBearingDeg(
 }
 
 /**
- * Maps reporter lane (L/M/R/F) to driver lane given bearings.
+ * Maps reporter lane (L/M/R/LM/MR/LMR) to driver lane given bearings.
  * Returns null when metadata is insufficient (except [PotholePosition.FULL_WIDTH],
  * which does not need left/right flipping).
  */
@@ -51,12 +51,7 @@ fun resolveDriverLaneLabel(
     val traffic = trafficBearingDeg?.takeIf { it.isFinite() } ?: return null
     val driver = driverBearingDeg?.takeIf { it.isFinite() } ?: return null
     val opposite = abs(normalizeBearingDelta(traffic - driver)) > 90f
-    val lane = when (potholePosition) {
-        PotholePosition.LEFT -> if (opposite) PotholePosition.RIGHT else PotholePosition.LEFT
-        PotholePosition.RIGHT -> if (opposite) PotholePosition.LEFT else PotholePosition.RIGHT
-        PotholePosition.MIDDLE -> PotholePosition.MIDDLE
-        PotholePosition.FULL_WIDTH -> PotholePosition.FULL_WIDTH
-    }
+    val lane = if (opposite) potholePosition.mirrored() else potholePosition
     return lane.displayLabel
 }
 

@@ -9,6 +9,27 @@ enum class PotholeSeverity(val code: String, val title: String, val blurb: Strin
 
     val displayLabel: String get() = "${code} ${title}"
 
+    /**
+     * Plain-language urgency for trip voice / alerts / detail.
+     * Filters and stats keep [title] codes (MINOR…CRITICAL).
+     */
+    val driverPhrase: String
+        get() = when (this) {
+            MINOR -> "small dip — caution"
+            MODERATE -> "noticeable hole — avoid if you can"
+            SEVERE -> "deep hole — slow down"
+            CRITICAL -> "dangerous crater — stop or divert"
+        }
+
+    /** Compact capsule label (still human-readable). */
+    val driverShort: String
+        get() = when (this) {
+            MINOR -> "Caution"
+            MODERATE -> "Avoid"
+            SEVERE -> "Slow down"
+            CRITICAL -> "Stop / divert"
+        }
+
     companion object {
         fun fromStored(value: String?): PotholeSeverity {
             if (value.isNullOrBlank()) return MODERATE

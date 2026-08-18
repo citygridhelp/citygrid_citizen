@@ -6,8 +6,10 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Point
 import com.example.potholereport.data.GbaWardPolygon
+import com.example.potholereport.data.CivicIssueType
 import com.example.potholereport.data.PersistedPotholeReport
 import com.example.potholereport.data.PotholeSeverity
+import com.example.potholereport.data.matchesCivicFilters
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.Projection
@@ -116,5 +118,6 @@ internal fun countReportsByWardKey(
 internal fun reportsForAreaHeat(
     reports: List<PersistedPotholeReport>,
     severityFilter: PotholeSeverity?,
+    issueTypeFilter: CivicIssueType? = null,
 ): List<PersistedPotholeReport> =
-    if (severityFilter == null) reports else reports.filter { it.severity == severityFilter }
+    reports.filter { it.matchesCivicFilters(severityFilter, issueTypeFilter) }

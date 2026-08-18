@@ -1,5 +1,6 @@
 package com.example.potholereport.data
 
+import android.content.Context
 import com.example.potholereport.BuildConfig
 import com.example.potholereport.data.remote.SupabaseClientProvider
 import kotlinx.coroutines.Dispatchers
@@ -68,4 +69,9 @@ object AppAutoRefresh {
      */
     suspend fun checkPlayStoreUpdate(context: android.content.Context): Boolean =
         AppUpdateChecker.checkAndNotifyIfNeeded(context)
+
+    /** Cadence-gated weather bulletin for the Alerts Weather tab. */
+    suspend fun refreshWeatherAlerts(context: Context): Boolean = withContext(Dispatchers.IO) {
+        WeatherAlertRefresher.refreshIfDue(context)
+    }
 }

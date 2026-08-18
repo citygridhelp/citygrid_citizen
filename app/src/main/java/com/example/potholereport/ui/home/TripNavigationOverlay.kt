@@ -8,11 +8,13 @@ import android.graphics.Paint
 import android.graphics.Point
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
+import com.example.potholereport.data.PotholePosition
 import com.example.potholereport.data.PotholeSeverity
 import com.example.potholereport.data.TripNavigationMatcher
 import com.example.potholereport.data.TripPotholeAlert
 import com.example.potholereport.data.TripStreetCamera
 import com.example.potholereport.data.formatTripPotholeAlertLine
+import com.example.potholereport.data.formatTripPotholeSideLetter
 import com.example.potholereport.data.tripPotholeAlertAccentArgb
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
@@ -23,9 +25,9 @@ import android.graphics.Color as AndroidColor
 import kotlin.math.hypot
 
 /**
- * Draws trip route polyline (completed grey + remaining blue), optional alternate
- * preview routes, and upcoming pothole markers (severity color + L/M/R/F in street
- * follow, or numbered pins in map overview).
+ * Draws trip route polyline (remaining blue only — covered distance is hidden),
+ * optional alternate preview routes, and upcoming pothole markers: small circles for
+ * L/M/R, elongated spans for LM/MR/LMR, placed on the reported side within the road.
  */
 class TripNavigationOverlay : Overlay() {
 
@@ -112,9 +114,11 @@ class TripNavigationOverlay : Overlay() {
         }
 
     var completedRoutePoints: List<GeoPoint> = emptyList()
-        set(value) {
-            field = value
-            completedLine.setPoints(densifyForDisplay(value))
+        set(@Suppress("UNUSED_PARAMETER") value) {
+            // Covered distance is not drawn — keep the grey trail disabled.
+            field = emptyList()
+            completedLine.setPoints(emptyList())
+            completedLine.isEnabled = false
         }
 
     /** Route used to nudge pins left/right of the road when side is known. */
@@ -480,27 +484,38 @@ class TripNavigationOverlay : Overlay() {
     fun syncMarkers(map: MapView) {
         markers.forEach { map.overlays.remove(it) }
         markers.clear()
-        alerts.forEachIndexed { index, alert ->
+        val detailed = TripNavigationMatcher.useDetailedLanePlacement(
+            map.zoomLevelDouble,
+            mapLibre = false,
+        )
+        alerts.forEach { alert ->
             val r = alert.report
-            if (!r.hasCoordinates()) return@forEachIndexed
-            val (lat, lon) = if (showSidePlacement) {
-                TripNavigationMatcher.displayPositionForAlert(routeLatLons, alert)
-            } else {
-                // Overview: pin at report coords — no L/M/R lane nudge.
-                r.latitude to r.longitude
-            }
-            if (!lat.isFinite() || !lon.isFinite()) return@forEachIndexed
+            if (!r.hasCoordinates()) return@forEach
+            // Snap onto the route; L/M/R only when zoomed in enough to see the road.
+            val place = TripNavigationMatcher.displayPlacementForAlert(
+                routePoints = routeLatLons,
+                alert = alert,
+                applyLaneOffset = detailed,
+            )
+            if (!place.latitude.isFinite() || !place.longitude.isFinite()) return@forEach
+            val kind = TripMapMarkerIcons.mapIconKindForZoom(
+                position = r.potholePositionEnum(),
+                detailedPlacement = detailed,
+            )
             val m = Marker(map).apply {
-                position = GeoPoint(lat, lon)
+                position = GeoPoint(place.latitude, place.longitude)
                 title = formatTripPotholeAlertLine(alert)
                 setInfoWindow(null)
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                // Span ovals are drawn horizontal; +90° puts the long axis across the road.
+                rotation = when (kind) {
+                    PotholeMapIconKind.DOT, PotholeMapIconKind.CIRCLE -> 0f
+                    else -> place.bearingDeg + 90f
+                }
                 setIcon(
-                    buildTripPotholeMarkerDrawable(
+                    TripMapMarkerIcons.potholeMapDrawable(
                         context = map.context,
-                        severity = r.severity,
-                        sideLabel = if (showSidePlacement) alert.sideLabel else null,
-                        numberLabel = if (showSidePlacement) null else (index + 1).toString(),
+                        kind = kind,
                     ),
                 )
             }
@@ -533,8 +548,8 @@ class TripNavigationOverlay : Overlay() {
 }
 
 /**
- * Teardrop-style pin: severity fill + either placement letter (L/M/R/F) or
- * a distance-order number for map overview.
+ * Teardrop-style pin: severity fill + placement letter (L/M/R/LM/MR/LMR)
+ * for street / play follow.
  */
 internal fun buildTripPotholeMarkerDrawable(
     context: Context,
@@ -573,7 +588,7 @@ internal fun buildTripPotholeMarkerDrawable(
     canvas.drawPath(tip, stroke)
 
     val label = numberLabel?.takeIf { it.isNotBlank() }
-        ?: sideBadgeLetter(sideLabel)
+        ?: formatTripPotholeSideLetter(sideLabel)
     if (label != null) {
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = AndroidColor.parseColor("#111827")
@@ -585,6 +600,22 @@ internal fun buildTripPotholeMarkerDrawable(
         canvas.drawText(label, cx, textY, textPaint)
     }
     return BitmapDrawable(context.resources, bmp).apply { setBounds(0, 0, w, h) }
+}
+
+/**
+ * Trip map pothole marker: small circle for L/M/R; elongated span for LM/MR/LMR.
+ */
+internal fun buildTripPotholeSpotDrawable(
+    context: Context,
+    severity: PotholeSeverity,
+    position: PotholePosition = PotholePosition.MIDDLE,
+): BitmapDrawable {
+    @Suppress("UNUSED_PARAMETER")
+    val unusedSeverity = severity
+    return TripMapMarkerIcons.potholeMapDrawable(
+        context,
+        TripMapMarkerIcons.mapIconKind(position),
+    )
 }
 
 /** Speech-cloud badge beside a route: time + distance (e.g. "3 min · 1.3 km"). */
@@ -666,12 +697,3 @@ internal fun buildRouteEtaBadgeDrawable(
     }
     return BitmapDrawable(context.resources, bmp).apply { setBounds(0, 0, w, h) }
 }
-
-private fun sideBadgeLetter(sideLabel: String?): String? =
-    when (TripNavigationMatcher.normalizeSideKey(sideLabel)) {
-        "left" -> "L"
-        "right" -> "R"
-        "middle" -> "M"
-        "full" -> "F"
-        else -> null
-    }

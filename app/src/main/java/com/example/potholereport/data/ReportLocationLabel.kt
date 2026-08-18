@@ -33,6 +33,7 @@ fun areaLabelFromAddress(address: Address): String {
     fun pick(candidate: String?): String? {
         val c = candidate?.trim().orEmpty()
         if (c.isEmpty() || !isMeaningfulAreaName(c)) return null
+        if (TripPlaceLabels.isAdministrativeUnitName(c)) return null
         if (c.lowercase(Locale.getDefault()) in skipNames) return null
         return c
     }
@@ -54,7 +55,10 @@ fun areaLabelFromAddress(address: Address): String {
     }
 
     pick(address.locality)?.let { return it }
-    pick(address.subAdminArea)?.let { return it }
+    // Never surface railway/revenue units like "Bangalore Division".
+    address.subAdminArea?.let { raw ->
+        TripPlaceLabels.cleanAreaPart(raw)?.let { return it }
+    }
     return ""
 }
 

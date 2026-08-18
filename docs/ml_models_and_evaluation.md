@@ -7,6 +7,7 @@ Related:
 - [`pothole_classification_model.md`](pothole_classification_model.md) — standalone doc: classification models, features, thresholds, metrics
 - [`tools/train_pothole_model/CALIBRATION_NOTES.md`](../tools/train_pothole_model/CALIBRATION_NOTES.md) — threshold change log + measured pass/reject rates
 - [`tools/train_pothole_model/README.md`](../tools/train_pothole_model/README.md) — YOLOv8 training & mAP targets
+- [`tools/train_pothole_model/MODEL_UPDATE_PROCESS.md`](../tools/train_pothole_model/MODEL_UPDATE_PROCESS.md) — **#33M** sample targets + Supabase retrain loop
 - [`product_assumptions.md`](product_assumptions.md) — duplicate radius, GPS, etc.
 - [`tools/calibrate/`](../tools/calibrate/) — Java calibration tools + CSV outputs
 
@@ -18,13 +19,13 @@ Related:
 
 | Layer | Technology in **current production build** | Neural model active? |
 |-------|------------------------------------------|----------------------|
-| Photo accept/reject (close-up + wide) | Pixel **heuristics** (`SceneHeuristics`, `ContentClassifier`, `PotholeBlobLocator`) | **No** — `PotholePhotoValidator` explicitly does not call `PotholeDetector` |
-| Risk insight (width / depth / suggested severity) | **Heuristic** blob + formulas (`PotholeRiskAnalyzer`) | **No** — unless `CloudPotholeAnalysisClient` is registered |
-| On-device detector (optional asset) | `PotholeDetector` → `assets/ml/pothole_detect.tflite` | **Not shipped** in repo (only `pothole_labels.txt` present); code ready for YOLOv8 / SSD |
+| Photo accept/reject (close-up + wide) | Pixel **heuristics** + optional **YOLO/SSD** when `pothole_detect.tflite` present | **Optional** — Phase A wires `PotholeDetector`; heuristics always run first |
+| Risk insight (width / depth / suggested severity) | Heuristic blob **or** YOLO bbox → `enrichWithMaskGeometry` | **Optional** neural bbox when detector score ≥ 0.18 |
+| On-device detector (optional asset) | `PotholeDetector` → `assets/ml/pothole_detect.tflite` | **Wired**; **`.tflite` not in repo** until trained — drop-in activates neural path |
 | Monocular depth (optional asset) | `MonocularDepthEstimator` → `assets/ml/depth.tflite` | **Not shipped**; optional future fusion |
 | Cloud analysis | `CloudPotholeAnalysisClient` interface | **Not implemented** — hook only |
 
-**UI note:** New report screen copy says photos are checked with “TensorFlow Lite”. The **validator path is heuristic-only** today; LiteRT/TFLite is on the classpath for optional/future `pothole_detect.tflite` inference.
+**UI note:** Photo check uses heuristics always; LiteRT runs when `pothole_detect.tflite` is bundled. Hard YOLO-only reject is **off** (`PotholeDetectorGate.YOLO_HARD_REJECT_ENABLED = false`) until the model is calibrated.
 
 ---
 
@@ -36,33 +37,20 @@ User captures close-up (+ wide) photo
         ▼
 ┌───────────────────────────────────────┐
 │  PotholePhotoValidator.validate()      │
-│  • SceneHeuristics (road / indoor…)    │
-│  • ContentClassifier (person/plant…)   │
-│  • PotholeBlobLocator (negative blob)  │
+│  • SceneHeuristics / ContentClassifier │
+│  • PotholeBlobLocator (negatives)      │
+│  • Optional PotholeDetector (Phase A)  │
 │  • RoadSceneHeuristics (wide vs close) │
 └───────────────────────────────────────┘
-        │ Accepted
+        │ Accepted (+ cached detection)
         ▼
 ┌───────────────────────────────────────┐
 │  PotholeRiskAnalyzer.analyze()         │
-│  • User: PotholePosition (L/M/R)       │
-│  • User: severity (optional input)     │
-│  • PotholeBlobLocator (lane-limited)   │
+│  • Prefer YOLO bbox / seg mask if strong│
+│  • Else PotholeBlobLocator (lane)      │
 │  • Risk score → width/depth/severity   │
 └───────────────────────────────────────┘
-        │
-        ▼
-User submits report (GPS + photos + severity + note)
 ```
-
-**Future path (not active in validator today):**
-
-```text
-pothole_detect.tflite (YOLOv8-Seg) → PotholeDetector → mask/bbox → PotholeRiskAnalyzer.enrichWithMaskGeometry
-CloudPotholeAnalysisClient → overrides local analyze() when installed
-depth.tflite → MonocularDepthEstimator → depth contrast in mask (planned)
-```
-
 ---
 
 ## 3. Models & classifiers
@@ -100,7 +88,7 @@ Formulas (reference Pothole Watch port):
 | Formats | Auto-detect **SSD**, **YOLOv8 det**, **YOLOv8-Seg** |
 | Class label | `Pothole` (`pothole_labels.txt`) |
 | Score threshold | **`YOLO_MIN_SCORE = 0.18`** |
-| Status | **Not invoked** by `PotholePhotoValidator` in current build; `.tflite` not in repo |
+| Status | **Phase A:** loaded via `PotholeDetectorHolder` when asset present; wired into validator + risk analyzer |
 
 Train/export: `tools/train_pothole_model/train_yolov8.py` (Ultralytics).
 
@@ -271,11 +259,11 @@ Export writes `output/training_metrics.json` from `results.results_dict`.
 
 ## 8. Planned improvements (from calibration docs)
 
-1. **Train YOLOv8-Seg** on Indian roads + 30% hard negatives → ship `pothole_detect.tflite`.
-2. Wire **detector into validator** (or cloud) — retire pure heuristics after ~150–200 labelled photos (`CALIBRATION_NOTES.md`).
+1. **Train YOLOv8-Seg** on Indian roads + 30% hard negatives → ship `pothole_detect.tflite` (**Phase A + India mix shipped Aug 2026**; hard reject still off — see backlog **#33M** and [`MODEL_UPDATE_PROCESS.md`](../tools/train_pothole_model/MODEL_UPDATE_PROCESS.md)).
+2. Optionally enable `PotholeDetectorGate.YOLO_HARD_REJECT_ENABLED` after the India sample targets + manhole gate in that process.
 3. Implement **`CloudPotholeAnalysisClient`** for manholes/walls that overlap pothole blob signatures.
-4. Add **automated confusion matrix** script over `calibration_close_up/` + `Pothole Negative samples/` when thresholds change.
-5. Align UI copy with actual backend (heuristic vs LiteRT) when path stabilizes.
+4. Add **automated confusion matrix** script over calibration sets when thresholds change.
+5. Later epics: IMU events (**#33 Phase C shipped**), video keyframes, auto-report + Unconfirmed queue (**#33** Phases D–H).
 
 ---
 
@@ -294,6 +282,7 @@ Export writes `output/training_metrics.json` from `results.results_dict`.
 | `app/.../data/PotholePosition.kt` | User-dependent lane bands |
 | `app/src/main/assets/ml/pothole_labels.txt` | Class name for detector |
 | `tools/train_pothole_model/` | Training + calibration docs |
+| `tools/train_pothole_model/MODEL_UPDATE_PROCESS.md` | #33M sample targets + Supabase retrain loop |
 | `tools/calibrate/*.java` | Offline evaluation tools |
 
 ---

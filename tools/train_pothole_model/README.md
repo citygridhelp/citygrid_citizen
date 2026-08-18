@@ -1,5 +1,9 @@
 # Train & update the pothole AI model (outside the APK)
 
+**Model update process (#33M):** per-category photo targets, Supabase export
+loop, cadence, and promotion gates —
+[MODEL_UPDATE_PROCESS.md](MODEL_UPDATE_PROCESS.md).
+
 The app loads its detection model from:
 
 ```
@@ -10,6 +14,10 @@ app/src/main/assets/ml/pothole_labels.txt
 The Android side (`PotholeDetector.kt`) **auto-detects** whether that `.tflite` is
 an SSD model (legacy) or a **YOLOv8 / YOLOv8-Seg** model — so you can switch
 backends just by replacing the asset.
+
+**Phase A (app):** Validator + risk analyzer already call the detector when the
+`.tflite` file is present. Missing file → heuristics-only (no crash). After you
+copy a trained model into `assets/ml/`, rebuild the APK to activate neural scoring.
 
 Recommended (best accuracy on Indian roads, mask-friendly for width/depth):
 
@@ -75,7 +83,8 @@ background" image feature or add empty `.txt` files). Include:
 - Vehicles, people, buildings (no road)
 
 A good starting target is **~1500–3000 pothole images + ~30% negatives**, with a
-roughly 85% / 15% train / val split.
+roughly 85% / 15% train / val split. India-specific next/solid counts (manhole,
+wide, bumps, road-only) are in [MODEL_UPDATE_PROCESS.md](MODEL_UPDATE_PROCESS.md) §1.
 
 ### Quick augmentation tips inside Roboflow
 
@@ -119,6 +128,10 @@ The script writes to `output/`:
 - `output/pothole_labels.txt`
 - `output/training_metrics.json`
 - `output/runs/pothole/` — full Ultralytics run folder (mAP curves, sample preds)
+
+**Windows note:** Ultralytics 8.4+ only exports LiteRT/TFLite on Linux/macOS.
+On Windows the training script falls back to **ONNX → onnx2tf** (float32).
+Install deps via `pip install -r requirements.txt` (includes `onnx2tf` + TensorFlow).
 
 ---
 

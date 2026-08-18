@@ -73,6 +73,11 @@ data class TripSessionSnapshot(
     val tripModeEnabled: Boolean,
     val tripNavActive: Boolean,
     val tripStreetFollow: Boolean,
+    val tripCameraMode: String = if (tripStreetFollow) {
+        TripCameraMode.STREET.name
+    } else {
+        TripCameraMode.MAP.name
+    },
     val vehicleName: String,
     val destLat: Double?,
     val destLon: Double?,
@@ -90,6 +95,7 @@ data class TripSessionSnapshot(
         o.put("tripModeEnabled", tripModeEnabled)
         o.put("tripNavActive", tripNavActive)
         o.put("tripStreetFollow", tripStreetFollow)
+        o.put("tripCameraMode", tripCameraMode)
         o.put("vehicleName", vehicleName)
         o.put("destLat", destLat ?: JSONObject.NULL)
         o.put("destLon", destLon ?: JSONObject.NULL)
@@ -123,10 +129,16 @@ data class TripSessionSnapshot(
                     }
                 }
             }
+            val streetFollow = o.optBoolean("tripStreetFollow", true)
+            val cameraMode = TripCameraMode.fromStorage(
+                if (o.has("tripCameraMode")) o.optString("tripCameraMode") else null,
+                streetFollowLegacy = streetFollow,
+            )
             TripSessionSnapshot(
                 tripModeEnabled = o.optBoolean("tripModeEnabled", false),
                 tripNavActive = o.optBoolean("tripNavActive", false),
-                tripStreetFollow = o.optBoolean("tripStreetFollow", true),
+                tripStreetFollow = cameraMode.isHeadingUp,
+                tripCameraMode = cameraMode.name,
                 vehicleName = o.optString("vehicleName", "CAR"),
                 destLat = dbl("destLat"),
                 destLon = dbl("destLon"),

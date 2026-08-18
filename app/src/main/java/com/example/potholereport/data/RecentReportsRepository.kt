@@ -25,6 +25,8 @@ data class PersistedPotholeReport(
     /** Wide context photo; empty for legacy reports. */
     val widePhotoPath: String = "",
     val severity: PotholeSeverity = PotholeSeverity.MODERATE,
+    /** Civic category; legacy rows without this field are treated as potholes. */
+    val issueType: CivicIssueType = CivicIssueType.POTHOLE,
     val note: String = "",
     /** True when the user was signed in at submit time (shown under MY REPORTS). */
     val submittedSignedIn: Boolean = false,
@@ -40,8 +42,12 @@ data class PersistedPotholeReport(
     val wardKey: String = "",
     val wardNumber: Int = 0,
     val wardName: String = "",
-    /** Close-up lane: L / M / R / F ([PotholePosition.code]). */
+    /** Lane span: L / M / R / LM / MR / LMR ([PotholePosition.code]; legacy F → LMR). */
     val potholePosition: String = PotholePosition.MIDDLE.code,
+    /** Open / closed / broken / overflowing — manhole reports only. */
+    val manholeCondition: String = "",
+    /** Morning / afternoon / evening / night — stray-dog (incident) reports. */
+    val incidentTimeOfDay: String = "",
     /** GPS / device heading at submit (degrees). NaN if unknown. */
     val reportBearingDeg: Float = Float.NaN,
     /** Traffic flow toward (degrees). NaN if unknown. */
@@ -64,6 +70,43 @@ data class PersistedPotholeReport(
     fun hasWard(): Boolean = wardNumber > 0 && wardName.isNotBlank()
 
     fun potholePositionEnum(): PotholePosition = PotholePosition.fromCode(potholePosition)
+
+    fun manholeConditionEnum(): ManholeCondition? = ManholeCondition.fromStored(manholeCondition)
+
+    fun incidentTimeOfDayEnum(): IncidentTimeOfDay? = IncidentTimeOfDay.fromStored(incidentTimeOfDay)
+
+    fun cloudCitizenNote(): String {
+        val withManhole = ManholeCondition.mergeIntoNote(manholeConditionEnum(), note)
+        return IncidentTimeOfDay.mergeIntoNote(incidentTimeOfDayEnum(), withManhole)
+    }
+
+    fun withManholeFromNote(): PersistedPotholeReport {
+        val stored = manholeConditionEnum()
+        if (stored != null) {
+            return copy(note = ManholeCondition.stripFromNote(note))
+        }
+        val (parsed, rest) = ManholeCondition.parseFromNote(note)
+        if (parsed == null) return this
+        return copy(
+            issueType = CivicIssueType.MANHOLE,
+            manholeCondition = parsed.name,
+            note = rest,
+        )
+    }
+
+    fun withIncidentTimeFromNote(): PersistedPotholeReport {
+        val stored = incidentTimeOfDayEnum()
+        if (stored != null) {
+            return copy(note = IncidentTimeOfDay.stripFromNote(note))
+        }
+        val (parsed, rest) = IncidentTimeOfDay.parseFromNote(note)
+        if (parsed == null) return this
+        return copy(
+            issueType = CivicIssueType.STRAY_DOG,
+            incidentTimeOfDay = parsed.name,
+            note = rest,
+        )
+    }
 
     fun trafficFacingMode(): TrafficFacingMode = TrafficFacingMode.fromStorage(trafficFacing)
 
@@ -117,6 +160,9 @@ object RecentReportsRepository {
         }
     }
 
+    /** Application context after [init], else null. */
+    fun appContextOrNull(): Context? = synchronized(lock) { appContext }
+
     /** All reports with municipal assignee, newest first (for Accountability tab). */
     fun reportsForAccountability(): List<PersistedPotholeReport> {
         synchronized(lock) {
@@ -140,23 +186,42 @@ object RecentReportsRepository {
     }
 
     /**
-     * Recent thumbnails: [cityKey] matches and either legacy (no coords) or coords inside [bbox].
+     * City reports eligible for the home Reports strip (metro bbox when known).
+     * Sorting / limit applied by [sortReportsForStrip].
      */
-    fun recentForCityInMetro(cityKey: String, bbox: BoundingBox?, limit: Int = 5): List<PersistedPotholeReport> {
+    fun reportsForCityInMetro(cityKey: String, bbox: BoundingBox?): List<PersistedPotholeReport> {
         synchronized(lock) {
-            return cache
-                .asSequence()
-                .filter { r ->
-                    if (r.cityKey != cityKey) return@filter false
-                    if (bbox == null) return@filter true
-                    if (!r.hasCoordinates()) return@filter true
-                    bbox.contains(r.latitude, r.longitude)
-                }
-                .sortedByDescending { it.createdAtMs }
-                .take(limit)
-                .toList()
+            return cache.filter { r ->
+                if (r.cityKey != cityKey) return@filter false
+                if (bbox == null) return@filter true
+                if (!r.hasCoordinates()) return@filter true
+                bbox.contains(r.latitude, r.longitude)
+            }
         }
     }
+
+    fun reportById(id: Long): PersistedPotholeReport? {
+        synchronized(lock) {
+            return cache.find { it.id == id }
+        }
+    }
+
+    fun allNewestFirst(): List<PersistedPotholeReport> {
+        synchronized(lock) {
+            return cache.sortedByDescending { it.createdAtMs }
+        }
+    }
+
+    /**
+     * Reports strip: [cityKey] matches and either legacy (no coords) or coords inside [bbox].
+     */
+    fun recentForCityInMetro(
+        cityKey: String,
+        bbox: BoundingBox?,
+        limit: Int = 5,
+        sort: ReportsStripSort = ReportsStripSort.RECENT,
+    ): List<PersistedPotholeReport> =
+        sortReportsForStrip(reportsForCityInMetro(cityKey, bbox), sort, limit)
 
     /**
      * Returns an existing OPEN / IN_PROGRESS report from this reporter within the
@@ -168,6 +233,7 @@ object RecentReportsRepository {
         latitude: Double,
         longitude: Double,
         gpsAccuracyM: Float? = null,
+        issueType: CivicIssueType = CivicIssueType.POTHOLE,
     ): PersistedPotholeReport? {
         synchronized(lock) {
             return PotholeDuplicateGuard.findActiveDuplicate(
@@ -177,6 +243,7 @@ object RecentReportsRepository {
                 latitude = latitude,
                 longitude = longitude,
                 gpsAccuracyM = gpsAccuracyM,
+                issueType = issueType,
             )
         }
     }
@@ -225,7 +292,7 @@ object RecentReportsRepository {
     fun addReport(
         cityKey: String,
         closeUpUri: Uri,
-        wideUri: Uri,
+        wideUri: Uri? = null,
         latitude: Double,
         longitude: Double,
         severity: PotholeSeverity,
@@ -235,6 +302,9 @@ object RecentReportsRepository {
         potholePosition: PotholePosition = PotholePosition.MIDDLE,
         reportBearingDeg: Float = Float.NaN,
         trafficFacing: TrafficFacingMode = TrafficFacingMode.UNKNOWN,
+        issueType: CivicIssueType = CivicIssueType.POTHOLE,
+        manholeCondition: ManholeCondition? = null,
+        incidentTimeOfDay: IncidentTimeOfDay? = null,
     ): AddReportResult {
         val ctx = appContext ?: return AddReportResult.Failed
         return synchronized(lock) {
@@ -244,16 +314,22 @@ object RecentReportsRepository {
                 cityKey = cityKey,
                 latitude = latitude,
                 longitude = longitude,
+                issueType = issueType,
             )?.let { return@synchronized AddReportResult.DuplicateActive(it) }
 
             val dir = File(ctx.filesDir, "report_photos").apply { mkdirs() }
             val id = System.currentTimeMillis()
             val closeDest = File(dir, "${id}_close.jpg")
-            val wideDest = File(dir, "${id}_wide.jpg")
             if (!copyUriToFile(ctx, closeUpUri, closeDest)) return@synchronized AddReportResult.Failed
-            if (!copyUriToFile(ctx, wideUri, wideDest)) {
-                closeDest.delete()
-                return@synchronized AddReportResult.Failed
+            val widePath = if (wideUri != null) {
+                val wideDest = File(dir, "${id}_wide.jpg")
+                if (!copyUriToFile(ctx, wideUri, wideDest)) {
+                    closeDest.delete()
+                    return@synchronized AddReportResult.Failed
+                }
+                wideDest.absolutePath
+            } else {
+                ""
             }
             val areaLabel = resolveAreaLabel(ctx, latitude, longitude).takeIf { isMeaningfulAreaName(it) }.orEmpty()
             val routing = BengaluruMunicipalRouting.resolve(cityKey, latitude, longitude)
@@ -269,16 +345,82 @@ object RecentReportsRepository {
                 latitude = latitude,
                 longitude = longitude,
                 areaLabel = areaLabel,
-                widePhotoPath = wideDest.absolutePath,
+                widePhotoPath = widePath,
                 severity = severity,
+                issueType = issueType,
                 note = note.trim(),
                 submittedSignedIn = submittedSignedIn,
                 status = PotholeReportStatus.OPEN,
                 reporterUserId = reporterUserId,
                 potholePosition = potholePosition.code,
+                manholeCondition = manholeCondition?.name.orEmpty(),
+                incidentTimeOfDay = incidentTimeOfDay?.name.orEmpty(),
                 reportBearingDeg = reportBearingDeg,
                 trafficBearingDeg = trafficBearing ?: Float.NaN,
                 trafficFacing = trafficFacing.storageKey,
+            ).withAssignee(routing.assignee)
+            routing.ward?.let { entry = entry.withWard(it) }
+            cache.add(0, entry)
+            while (cache.size > MAX_STORED) {
+                val removed = cache.removeAt(cache.lastIndex)
+                deleteReportFiles(removed)
+            }
+            saveToDisk(ctx)
+            AddReportResult.Success(entry)
+        }
+    }
+
+    /**
+     * Location-only OPEN pothole filed when 5 users confirm the same unregistered
+     * spot. No photos — shown on every map; skipped by cloud photo sync.
+     */
+    fun addCrowdConfirmedOpenReport(
+        cityKey: String,
+        latitude: Double,
+        longitude: Double,
+        severity: PotholeSeverity,
+        note: String,
+        reporterUserId: String,
+    ): AddReportResult {
+        val ctx = appContext ?: return AddReportResult.Failed
+        if (!latitude.isFinite() || !longitude.isFinite()) return AddReportResult.Failed
+        return synchronized(lock) {
+            val nearby = cache.firstOrNull { report ->
+                report.cityKey == cityKey &&
+                    report.issueType == CivicIssueType.POTHOLE &&
+                    report.hasCoordinates() &&
+                    report.status.blocksNewReportAtSamePlace() &&
+                    PotholeDuplicateGuard.distanceMeters(
+                        latitude,
+                        longitude,
+                        report.latitude,
+                        report.longitude,
+                    ) <= PotholeDuplicateGuard.SAME_POTHOLE_RADIUS_METERS
+            }
+            if (nearby != null) return@synchronized AddReportResult.DuplicateActive(nearby)
+
+            val id = System.currentTimeMillis()
+            val areaLabel = resolveAreaLabel(ctx, latitude, longitude)
+                .takeIf { isMeaningfulAreaName(it) }
+                .orEmpty()
+            val routing = BengaluruMunicipalRouting.resolve(cityKey, latitude, longitude)
+            val owner = reporterUserId.ifBlank { "crowd-hazard" }
+            var entry = PersistedPotholeReport(
+                id = id,
+                cityKey = cityKey,
+                createdAtMs = id,
+                photoPath = "",
+                latitude = latitude,
+                longitude = longitude,
+                areaLabel = areaLabel,
+                widePhotoPath = "",
+                severity = severity,
+                issueType = CivicIssueType.POTHOLE,
+                note = note.trim(),
+                submittedSignedIn = owner != "local" && owner != "crowd-hazard",
+                status = PotholeReportStatus.OPEN,
+                reporterUserId = owner,
+                potholePosition = PotholePosition.MIDDLE.code,
             ).withAssignee(routing.assignee)
             routing.ward?.let { entry = entry.withWard(it) }
             cache.add(0, entry)
@@ -456,7 +598,7 @@ object RecentReportsRepository {
                         reportBearingDeg = row.reportBearingDeg ?: Float.NaN,
                         trafficBearingDeg = row.trafficBearingDeg ?: Float.NaN,
                         trafficFacing = row.trafficFacingStorageKey(),
-                    )
+                    ).withManholeFromNote().withIncidentTimeFromNote()
                     if (row.assigneeName.isBlank()) {
                         entry = entry.withAssignee(MunicipalAssignmentResolver.resolve(row.cityKey, lat, lon))
                     }
@@ -629,7 +771,7 @@ object RecentReportsRepository {
                     reportBearingDeg = row.reportBearingDeg ?: Float.NaN,
                     trafficBearingDeg = row.trafficBearingDeg ?: Float.NaN,
                     trafficFacing = row.trafficFacingStorageKey(),
-                )
+                ).withManholeFromNote().withIncidentTimeFromNote()
                 if (assignee != null && row.assigneeName.isBlank()) {
                     entry = entry.withAssignee(assignee)
                 }
@@ -712,6 +854,7 @@ object RecentReportsRepository {
                             areaLabel = o.optString("area", ""),
                             widePhotoPath = o.optString("widePath", ""),
                             severity = PotholeSeverity.fromStored(o.optString("severity", "")),
+                            issueType = CivicIssueType.fromStored(o.optString("issueType", "")),
                             note = o.optString("note", ""),
                             submittedSignedIn = o.optBoolean("signedIn", false),
                             status = PotholeReportStatus.fromStored(o.optString("status", "")),
@@ -725,6 +868,8 @@ object RecentReportsRepository {
                             wardNumber = o.optInt("wardNumber", 0),
                             wardName = o.optString("wardName", ""),
                             potholePosition = o.optString("potholePosition", PotholePosition.MIDDLE.code),
+                            manholeCondition = o.optString("manholeCondition", ""),
+                            incidentTimeOfDay = o.optString("incidentTimeOfDay", ""),
                             reportBearingDeg = o.optDouble("reportBearingDeg", Double.NaN).toFloat(),
                             trafficBearingDeg = o.optDouble("trafficBearingDeg", Double.NaN).toFloat(),
                             trafficFacing = o.optString("trafficFacing", ""),
@@ -732,7 +877,7 @@ object RecentReportsRepository {
                             cloudSynced = o.optBoolean("cloudSynced", false),
                             storageClosePath = o.optString("storageClose", ""),
                             storageWidePath = o.optString("storageWide", ""),
-                        )
+                        ).withManholeFromNote().withIncidentTimeFromNote(),
                     )
                 }
             }.filter { r ->
@@ -766,6 +911,9 @@ object RecentReportsRepository {
                         put("widePath", r.widePhotoPath)
                     }
                     put("severity", r.severity.name)
+                    if (r.issueType != CivicIssueType.POTHOLE) {
+                        put("issueType", r.issueType.name)
+                    }
                     if (r.note.isNotBlank()) {
                         put("note", r.note)
                     }
@@ -788,6 +936,12 @@ object RecentReportsRepository {
                     }
                     if (r.potholePosition.isNotBlank() && r.potholePosition != PotholePosition.MIDDLE.code) {
                         put("potholePosition", r.potholePosition)
+                    }
+                    if (r.manholeCondition.isNotBlank()) {
+                        put("manholeCondition", r.manholeCondition)
+                    }
+                    if (r.incidentTimeOfDay.isNotBlank()) {
+                        put("incidentTimeOfDay", r.incidentTimeOfDay)
                     }
                     if (!r.reportBearingDeg.isNaN()) {
                         put("reportBearingDeg", r.reportBearingDeg.toDouble())

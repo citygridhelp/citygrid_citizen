@@ -11,6 +11,7 @@ import android.provider.Settings
 import android.location.Geocoder
 import android.location.Location
 import android.location.LocationManager
+import android.os.Looper
 import android.os.SystemClock
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -34,8 +35,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -43,6 +42,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.systemGestureExclusion
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -51,16 +51,31 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -74,10 +89,16 @@ import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Straight
@@ -98,13 +119,16 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -141,14 +165,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.zIndex
@@ -162,6 +187,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -177,16 +203,18 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationListenerCompat
-import androidx.core.location.LocationManagerCompat
-import androidx.core.os.CancellationSignal
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.potholereport.BuildConfig
 import com.example.potholereport.data.BengaluruGbaBoundary
 import com.example.potholereport.data.BengaluruGbaWards
 import com.example.potholereport.data.CitizenNotificationsRepository
 import com.example.potholereport.data.CitizenUiSettingsRepository
+import com.example.potholereport.data.CitizenGps
+import com.example.potholereport.data.CitizenRuntimePermissions
+import com.example.potholereport.data.CityGridSupport
 import com.example.potholereport.data.CityLaunchConfig
 import com.example.potholereport.data.CityMetroKeys
 import com.example.potholereport.data.CityMetroLocation
@@ -194,19 +222,48 @@ import com.example.potholereport.data.EmailChangeStartResult
 import com.example.potholereport.data.EmailChangeVerifyResult
 import com.example.potholereport.data.LoginResult
 import com.example.potholereport.data.CityWeatherForecast
+import com.example.potholereport.data.CityWeatherRainGrid
 import com.example.potholereport.data.CityWeatherRepository
+import com.example.potholereport.data.CityWeatherAlertBriefing
+import com.example.potholereport.data.WeatherAlertCadence
 import com.example.potholereport.data.DeviceReporterId
 import com.example.potholereport.data.MapCursorColor
 import com.example.potholereport.data.MapCursorStyle
+import com.example.potholereport.data.TripCaptureCabinSource
+import com.example.potholereport.data.TripCaptureCameraMapLayout
+import com.example.potholereport.data.TripCaptureDisplayMode
+import com.example.potholereport.data.TripCaptureSource
+import com.example.potholereport.data.TripFeatureGates
 import com.example.potholereport.data.NetworkReachability
 import com.example.potholereport.data.PersistedPotholeReport
+import com.example.potholereport.data.CivicIssueType
 import com.example.potholereport.data.PotholeSeverity
+import com.example.potholereport.data.matchesCivicFilters
 import com.example.potholereport.data.PotholeReportStatus
 import com.example.potholereport.data.RainCriticality
 import com.example.potholereport.data.RecentReportsRepository
-import com.example.potholereport.data.TRIP_POTHOLE_NOTIFY_WITHIN_M
+import com.example.potholereport.data.ReportsStripSort
+import com.example.potholereport.data.sortReportsForStrip
+import com.example.potholereport.data.JourneyStartEta
+import com.example.potholereport.data.TripAlertScheduler
+import com.example.potholereport.data.TripDangerBlink
 import com.example.potholereport.data.TripNavigationMatcher
 import com.example.potholereport.data.TripDeviceHeadingTracker
+import com.example.potholereport.data.TripDeadReckoning
+import com.example.potholereport.data.TripImuBumpAnalyzer
+import com.example.potholereport.data.TripImuBumpDetector
+import com.example.potholereport.data.TripImuBumpEvent
+import com.example.potholereport.data.TripImuBumpLog
+import com.example.potholereport.data.TripImuBumpUserResponse
+import com.example.potholereport.data.TripRoadKeyframeBuffer
+import com.example.potholereport.data.TripAvoidRejoinAnalyzer
+import com.example.potholereport.data.TripCrowdHazardStore
+import com.example.potholereport.data.TripHazardKind
+import com.example.potholereport.data.TripCompanionLan
+import com.example.potholereport.data.TripUnconfirmedDetectionStore
+import com.example.potholereport.ml.TripBumpVisionGate
+import com.example.potholereport.ml.TripBumpVisionPipeline
+import com.example.potholereport.ml.TripBumpVisionTier
 import com.example.potholereport.data.TripPlaceLabels
 import com.example.potholereport.data.TripPotholeAlert
 import com.example.potholereport.data.fuseNavHeadingDeg
@@ -214,21 +271,36 @@ import com.example.potholereport.data.withFusedNavHeading
 import com.example.potholereport.data.TripRouteProgress
 import com.example.potholereport.data.TripDeviationAction
 import com.example.potholereport.data.TripTurnGuidance
+import com.example.potholereport.data.TripPlaceSearch
+import com.example.potholereport.data.TripPlaceSearchBounds
+import com.example.potholereport.data.TripPlaceSuggestion
 import com.example.potholereport.data.TripRecentPlace
 import com.example.potholereport.data.TripRecentPlacesRepository
 import com.example.potholereport.data.TripSessionRepository
+import com.example.potholereport.data.TripRouteOfflineCache
 import com.example.potholereport.data.TripSessionSnapshot
+import com.example.potholereport.data.SosAssistNavRequest
+import com.example.potholereport.data.SosNearbyRepository
+import com.example.potholereport.data.TripCameraMode
+import com.example.potholereport.data.TripPlayMotionTracker
+import com.example.potholereport.data.TripRoutePotholeRanking
 import com.example.potholereport.data.TripStreetCamera
 import com.example.potholereport.data.TripVoiceGuidance
+import com.example.potholereport.data.TripDeviceRole
 import com.example.potholereport.ui.settings.CitizenSettingsDialog
 import com.example.potholereport.data.formatRecentReportCaption
 import com.example.potholereport.data.formatTripPlaceAge
 import com.example.potholereport.data.formatTripPotholeAlertLine
+import com.example.potholereport.data.formatTripPotholeSideLetter
 import com.example.potholereport.data.notifyTripPotholeAlert
 import com.example.potholereport.data.tripPotholeAlertAccentArgb
+import com.example.potholereport.data.tripPotholeAlertInkArgb
 import com.example.potholereport.data.remote.OsrmRouteClient
 import com.example.potholereport.data.remote.OsrmRouteResult
 import com.example.potholereport.data.remote.OsrmRouteStep
+import com.example.potholereport.data.remote.OverpassNearbyClient
+import com.example.potholereport.data.remote.NearbyOsmPoi
+import com.example.potholereport.data.remote.pickNonOverlappingPois
 import com.example.potholereport.data.remote.ReportSyncRepository
 import com.example.potholereport.data.remote.TripVehicle
 import com.example.potholereport.data.isMeaningfulAreaName
@@ -239,6 +311,25 @@ import com.example.potholereport.ui.profile.CartoonAvatar
 import com.example.potholereport.ui.profile.ProfileDialog
 import com.example.potholereport.ui.report.NewReportScreen
 import com.example.potholereport.ui.theme.PotholeReportTheme
+import com.example.potholereport.ui.theme.CitizenBorder
+import com.example.potholereport.ui.theme.CitizenSpace
+import com.example.potholereport.ui.neighbourhood.MapHeatFab
+import com.example.potholereport.ui.neighbourhood.NeighbourhoodPalette
+import com.example.potholereport.ui.neighbourhood.NeighbourhoodSeverityHeatRow
+import com.example.potholereport.ui.neighbourhood.WeatherMapTicker
+import com.example.potholereport.ui.theme.CitizenType
+import com.example.potholereport.ui.theme.CitizenInk
+import com.example.potholereport.ui.theme.CitizenSelection
+import com.example.potholereport.ui.theme.CitizenIcon
+import com.example.potholereport.ui.theme.CitizenHeader
+import com.example.potholereport.ui.theme.CitizenRadius
+import com.example.potholereport.ui.theme.CitizenMapChrome
+import com.example.potholereport.ui.theme.CitizenAccountabilityCopy
+import com.example.potholereport.ui.theme.CitizenPrivacyCopy
+import com.example.potholereport.ui.theme.CitizenStatTotal
+import com.example.potholereport.ui.theme.citizenReportStatusColor
+import com.example.potholereport.ui.theme.CitizenSectionHeader
+import com.example.potholereport.ui.theme.rememberMapUiScale
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
@@ -258,32 +349,16 @@ import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
 private val DarkBlue = Color(0xFF1A1A2E)
-
-/**
- * Scales map / trip chrome from screen width so small phones stay compact.
- * Reference width: 360dp → 1f. Labels stay single-line (ellipsis, no wrap).
- */
-private data class MapUiScale(val factor: Float) {
-    fun dp(base: Float): Dp = (base * factor).dp
-    fun sp(base: Float): TextUnit = (base * factor).sp
-}
-
-@Composable
-private fun rememberMapUiScale(): MapUiScale {
-    val widthDp = LocalConfiguration.current.screenWidthDp.coerceAtLeast(1)
-    val factor = (widthDp / 360f).coerceIn(0.84f, 1.08f)
-    return remember(widthDp) { MapUiScale(factor) }
-}
 
 @Composable
 fun HomeScreen(
@@ -305,10 +380,40 @@ fun HomeScreen(
     uiRefreshEpoch: Int = 0,
     /** Bumps when reports are added or removed so map / lists refresh. */
     onRecentReportsMutated: () -> Unit = {},
+    /** Short snackbar confirmations (submit, delete, trip). */
+    onFeedbackMessage: (String) -> Unit = {},
+    /** App 5 shell: hide brand header/tabs, show Issue Map chrome. */
+    neighbourhoodChrome: Boolean = false,
+    onLeaveMap: () -> Unit = {},
+    onChromeHiddenChange: (Boolean) -> Unit = {},
+    onGpsFix: (Location) -> Unit = {},
+    openTripPlannerTick: Int = 0,
+    openProfileTick: Int = 0,
+    openSettingsTick: Int = 0,
+    openMyReportsTick: Int = 0,
+    openUnconfirmedReportsTick: Int = 0,
+    openUnregisteredReportsTick: Int = 0,
+    openSignInTick: Int = 0,
+    requestReportTick: Int = 0,
+    requestReportIssueType: String = CivicIssueType.POTHOLE.name,
+    /** Bump when opening Issue Map from Home so the camera zooms to nearby issues. */
+    focusNearbyTick: Int = 0,
+    /** Map tab selected — treat as city-map fullscreen immediately (no card flash). */
+    neighbourhoodMapActive: Boolean = false,
+    mapSeverityFilterKey: String? = null,
+    onMapSeverityFilterKeyChange: ((String?) -> Unit)? = null,
+    mapIssueTypeFilterKey: String? = null,
+    onMapIssueTypeFilterKeyChange: ((String?) -> Unit)? = null,
+    areaHeatEnabled: Boolean = false,
+    onAreaHeatEnabledChange: ((Boolean) -> Unit)? = null,
+    shellBottomPadding: Dp = 0.dp,
+    mapVisible: Boolean = true,
+    onModalVisibleChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val uiScale = rememberMapUiScale()
     var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
     var showReportSignInModal by rememberSaveable { mutableStateOf(false) }
     var pendingModalSignupName by rememberSaveable { mutableStateOf("") }
@@ -317,6 +422,9 @@ fun HomeScreen(
     var pendingModalSignupVerification by rememberSaveable { mutableStateOf(false) }
     /** Fullscreen trip Report opens in-composition (never Nav + MapView teardown). */
     var showInlineNewReport by remember { mutableStateOf(false) }
+    var showInlineMyReports by remember { mutableStateOf(false) }
+    var inlineReportCloseUpUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var inlineReportIssueType by rememberSaveable { mutableStateOf(CivicIssueType.POTHOLE.name) }
 
     fun clearPendingModalSignup() {
         pendingModalSignupName = ""
@@ -340,12 +448,12 @@ fun HomeScreen(
     var gpsMetroCity by remember { mutableStateOf<String?>(null) }
     /** Bumped when the user taps locate so the map re-applies region even if lat/lng match a previous GPS fix. */
     var mapLocateEpoch by remember { mutableIntStateOf(0) }
-    var mapTouchActive by remember { mutableStateOf(false) }
     var accountMenuExpanded by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
     var showNotificationsDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var showUnconfirmedDialog by remember { mutableStateOf(false) }
     var showGpsEnableDialog by remember { mutableStateOf(false) }
     var mapCursorStyle by remember {
         mutableStateOf(CitizenUiSettingsRepository.mapCursorStyle(context))
@@ -353,6 +461,37 @@ fun HomeScreen(
     var mapCursorColor by remember {
         mutableStateOf(CitizenUiSettingsRepository.mapCursorColor(context))
     }
+    var tripCaptureDisplay by remember {
+        mutableStateOf(CitizenUiSettingsRepository.tripCaptureDisplayMode(context))
+    }
+    var tripCaptureLayout by remember {
+        mutableStateOf(CitizenUiSettingsRepository.tripCaptureCameraMapLayout(context))
+    }
+    var tripCaptureRoad by remember {
+        mutableStateOf(CitizenUiSettingsRepository.tripCaptureRoadSource(context))
+    }
+    var tripCaptureCabin by remember {
+        mutableStateOf(CitizenUiSettingsRepository.tripCaptureCabinSource(context))
+    }
+    var tripCompanionPairingCode by remember {
+        mutableStateOf(CitizenUiSettingsRepository.tripCompanionPairingCode(context))
+    }
+    LaunchedEffect(Unit) {
+        if (!TripFeatureGates.USB_CAMERA_ENABLED) return@LaunchedEffect
+        CitizenUiSettingsRepository.activateUsbCamera1ForTripCapture(context)
+        tripCaptureRoad = CitizenUiSettingsRepository.tripCaptureRoadSource(context)
+        tripCaptureDisplay = CitizenUiSettingsRepository.tripCaptureDisplayMode(context)
+    }
+    var imuBumpEnabled by remember {
+        mutableStateOf(CitizenUiSettingsRepository.imuBumpDetectionEnabled(context))
+    }
+    var swerveDetectionEnabled by remember {
+        mutableStateOf(CitizenUiSettingsRepository.swerveDetectionEnabled(context))
+    }
+    var roadVideoAutoDetectEnabled by remember {
+        mutableStateOf(CitizenUiSettingsRepository.roadVideoAutoDetectEnabled(context))
+    }
+    var showCompanionCamera by remember { mutableStateOf(false) }
     var notificationsBadgeEpoch by remember { mutableIntStateOf(0) }
     val unreadNotificationCount = remember(
         isSignedIn,
@@ -368,7 +507,15 @@ fun HomeScreen(
     }
 
     suspend fun applyLocationFromDevice() {
-        val location = fetchCalibratedLocation(context) ?: return
+        val location = CitizenGps.fetchCalibrated(context) ?: return
+        // Apply the fix immediately — do not wait on geocode (fails / hangs offline).
+        lastGpsLocation = Location(location)
+        savedGpsLat = location.latitude
+        savedGpsLon = location.longitude
+        savedGpsAccuracyM = if (location.hasAccuracy()) location.accuracy else null
+        userLocation = Location(location)
+        gpsMetroCity = cityForLocation(location)
+        SosNearbyRepository.refreshIfNeeded(location.latitude, location.longitude)
         val addresses = withContext(Dispatchers.IO) {
             runCatching {
                 @Suppress("DEPRECATION")
@@ -379,12 +526,6 @@ fun HomeScreen(
                 )
             }.getOrNull()
         }
-        lastGpsLocation = Location(location)
-        savedGpsLat = location.latitude
-        savedGpsLon = location.longitude
-        savedGpsAccuracyM = if (location.hasAccuracy()) location.accuracy else null
-        userLocation = Location(location)
-        gpsMetroCity = cityForLocation(location)
         if (!addresses.isNullOrEmpty()) {
             val resolved = CityMetroKeys.canonical(
                 addresses[0].locality
@@ -405,8 +546,12 @@ fun HomeScreen(
      */
     suspend fun resolveMyLocationTripOrigin(): Location? {
         val live = lastGpsLocation?.let { Location(it) }
-        val refined = fetchHighAccuracyGpsLocation(context, timeoutMs = 10_000L)
-        val best = pickBestTripOrigin(livePin = live, freshGps = refined)
+        // Fresh precise pin → start routing immediately (no 10s GPS wait).
+        if (CitizenGps.isUsable(live, maxAgeMs = 5_000L, maxAccuracyM = 20f)) {
+            return live
+        }
+        val refined = CitizenGps.fetchHighAccuracyGps(context, timeoutMs = 2_500L)
+        val best = CitizenGps.pickBestTripOrigin(livePin = live, freshGps = refined)
         if (best != null) {
             lastGpsLocation = Location(best)
             savedGpsLat = best.latitude
@@ -421,13 +566,13 @@ fun HomeScreen(
 
     /**
      * Same GPS path as the Locate button: prefer a fresh calibrated fix, then fall back
-     * to the last known pin. Used so Trip "My location" start matches the blue locate pin.
+     * to the last known pin. Used so Trip "My location" start matches the green locate pin.
      */
     suspend fun refreshCalibratedGpsPin(bumpMapLocate: Boolean = true): Location? {
         val live = lastGpsLocation?.let { Location(it) }
-        val fresh = fetchHighAccuracyGpsLocation(context, timeoutMs = 8_000L)
-            ?: fetchCalibratedLocation(context)
-        val gps = pickBestTripOrigin(livePin = live, freshGps = fresh)
+        val fresh = CitizenGps.fetchHighAccuracyGps(context, timeoutMs = 2_500L)
+            ?: CitizenGps.fetchCalibrated(context)
+        val gps = CitizenGps.pickBestTripOrigin(livePin = live, freshGps = fresh)
             ?: live
         if (gps != null) {
             lastGpsLocation = Location(gps)
@@ -483,15 +628,42 @@ fun HomeScreen(
         }
     }
 
+    // Keep SOS Medical + Roadside places warm from live GPS — do not wait for SOS open.
+    val sosPrefetchLifecycle = LocalLifecycleOwner.current
+    LaunchedEffect(lastGpsLocation?.latitude, lastGpsLocation?.longitude) {
+        val loc = lastGpsLocation ?: return@LaunchedEffect
+        SosNearbyRepository.refreshIfNeeded(loc.latitude, loc.longitude)
+    }
+    LaunchedEffect(sosPrefetchLifecycle) {
+        sosPrefetchLifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (isActive) {
+                val loc = lastGpsLocation
+                if (loc != null) {
+                    SosNearbyRepository.refreshIfNeeded(loc.latitude, loc.longitude)
+                } else if (hasLocationPermission(context) && isDeviceLocationEnabled(context)) {
+                    val fresh = withContext(Dispatchers.IO) {
+                        runCatching { CitizenGps.fetchCalibrated(context) }.getOrNull()
+                    }
+                    if (fresh != null) {
+                        lastGpsLocation = Location(fresh)
+                        SosNearbyRepository.refreshIfNeeded(fresh.latitude, fresh.longitude)
+                    }
+                }
+                delay(45_000L)
+            }
+        }
+    }
+
+    val locationLifecycle = LocalLifecycleOwner.current
     @SuppressLint("MissingPermission")
-    DisposableEffect(tripNavigationActive) {
-        if (!tripNavigationActive || !hasLocationPermission(context) || !isDeviceLocationEnabled(context)) {
+    DisposableEffect(tripNavigationActive, locationLifecycle) {
+        if (!hasLocationPermission(context) || !isDeviceLocationEnabled(context)) {
             onDispose { }
         } else {
             val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
             val listener = object : LocationListenerCompat {
                 override fun onLocationChanged(location: Location) {
-                    if (!shouldAcceptNavigationLocation(
+                    if (!CitizenGps.shouldAcceptStream(
                             current = lastGpsLocation,
                             candidate = location,
                             navigationActive = tripNavigationActive,
@@ -506,37 +678,67 @@ fun HomeScreen(
                     savedGpsAccuracyM = if (accepted.hasAccuracy()) accepted.accuracy else null
                     userLocation = Location(accepted)
                     gpsMetroCity = cityForLocation(accepted)
+                    SosNearbyRepository.refreshIfNeeded(accepted.latitude, accepted.longitude)
                 }
             }
-            if (runCatching {
+            fun startUpdates() {
+                val gpsOn = runCatching {
                     locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
                 }.getOrDefault(false)
-            ) {
-                runCatching {
-                    locationManager.requestLocationUpdates(
-                        LocationManager.GPS_PROVIDER,
-                        500L,
-                        0.5f,
-                        listener,
-                    )
+                if (gpsOn) {
+                    val minTime = if (tripNavigationActive) {
+                        CitizenGps.TRIP_GPS_MIN_TIME_MS
+                    } else {
+                        CitizenGps.IDLE_GPS_MIN_TIME_MS
+                    }
+                    val minDist = if (tripNavigationActive) {
+                        CitizenGps.TRIP_GPS_MIN_DISTANCE_M
+                    } else {
+                        CitizenGps.IDLE_GPS_MIN_DISTANCE_M
+                    }
+                    runCatching {
+                        locationManager.requestLocationUpdates(
+                            LocationManager.GPS_PROVIDER,
+                            minTime,
+                            minDist,
+                            listener,
+                            Looper.getMainLooper(),
+                        )
+                    }
+                } else if (
+                    runCatching {
+                        locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+                    }.getOrDefault(false)
+                ) {
+                    // Network only when satellite GPS is off — cheaper and avoids cell-drift vs GPS.
+                    runCatching {
+                        locationManager.requestLocationUpdates(
+                            LocationManager.NETWORK_PROVIDER,
+                            8_000L,
+                            12f,
+                            listener,
+                            Looper.getMainLooper(),
+                        )
+                    }
                 }
             }
-            if (runCatching {
-                    locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-                }.getOrDefault(false)
-            ) {
-                runCatching {
-                    // Network is fallback-only; keep it slow so it cannot dominate the pin.
-                    locationManager.requestLocationUpdates(
-                        LocationManager.NETWORK_PROVIDER,
-                        5_000L,
-                        8f,
-                        listener,
-                    )
+            fun stopUpdates() {
+                runCatching { locationManager.removeUpdates(listener) }
+            }
+            val observer = LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_RESUME -> startUpdates()
+                    Lifecycle.Event.ON_PAUSE -> stopUpdates()
+                    else -> Unit
                 }
+            }
+            locationLifecycle.lifecycle.addObserver(observer)
+            if (locationLifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                startUpdates()
             }
             onDispose {
-                runCatching { locationManager.removeUpdates(listener) }
+                locationLifecycle.lifecycle.removeObserver(observer)
+                stopUpdates()
             }
         }
     }
@@ -550,94 +752,209 @@ fun HomeScreen(
     val isMyReportsTab = isSignedIn && selectedTabIndex == 2
     /** In-composition overlay — not a Dialog window (Dialog was minimizing / dismissing the app). */
     var mapFullscreen by rememberSaveable { mutableStateOf(false) }
+    val displayFullscreen = mapFullscreen
     // Back-to-exit-fullscreen is handled inside ReportAndTrackSection so trip can
     // turn off when collapsing without an active navigation session.
+
+    LaunchedEffect(displayFullscreen, tripNavigationActive) {
+        onChromeHiddenChange(displayFullscreen || tripNavigationActive)
+    }
+    LaunchedEffect(lastGpsLocation) {
+        lastGpsLocation?.let(onGpsFix)
+    }
+    var handledProfileTick by remember { mutableIntStateOf(0) }
+    var handledSettingsTick by remember { mutableIntStateOf(0) }
+    var handledSignInTick by remember { mutableIntStateOf(0) }
+    var handledRequestReportTick by remember { mutableIntStateOf(0) }
+    var handledMyReportsTick by remember { mutableIntStateOf(0) }
+    var handledUnconfirmedReportsTick by remember { mutableIntStateOf(0) }
+    var handledUnregisteredReportsTick by remember { mutableIntStateOf(0) }
+    var myReportsStartUnconfirmed by remember { mutableStateOf(false) }
+    var myReportsStartUnregistered by remember { mutableStateOf(false) }
+    LaunchedEffect(openProfileTick) {
+        if (openProfileTick > 0 && openProfileTick != handledProfileTick) {
+            handledProfileTick = openProfileTick
+            if (isSignedIn) showProfileDialog = true else showReportSignInModal = true
+        }
+    }
+    LaunchedEffect(openSettingsTick) {
+        if (openSettingsTick > 0 && openSettingsTick != handledSettingsTick) {
+            handledSettingsTick = openSettingsTick
+            if (isSignedIn) showSettingsDialog = true else showReportSignInModal = true
+        }
+    }
+    LaunchedEffect(openSignInTick) {
+        if (openSignInTick > 0 && openSignInTick != handledSignInTick) {
+            handledSignInTick = openSignInTick
+            if (!isSignedIn) showReportSignInModal = true
+        }
+    }
+    LaunchedEffect(openMyReportsTick) {
+        if (openMyReportsTick > 0 && openMyReportsTick != handledMyReportsTick) {
+            handledMyReportsTick = openMyReportsTick
+            if (isSignedIn) {
+                myReportsStartUnconfirmed = false
+                myReportsStartUnregistered = false
+                showInlineMyReports = true
+                onModalVisibleChange(true)
+            } else {
+                showReportSignInModal = true
+            }
+        }
+    }
+    LaunchedEffect(openUnconfirmedReportsTick) {
+        if (openUnconfirmedReportsTick > 0 &&
+            openUnconfirmedReportsTick != handledUnconfirmedReportsTick
+        ) {
+            handledUnconfirmedReportsTick = openUnconfirmedReportsTick
+            if (isSignedIn) {
+                myReportsStartUnconfirmed = false
+                myReportsStartUnregistered = false
+                showUnconfirmedDialog = true
+            } else {
+                showReportSignInModal = true
+            }
+        }
+    }
+    LaunchedEffect(openUnregisteredReportsTick) {
+        if (openUnregisteredReportsTick > 0 &&
+            openUnregisteredReportsTick != handledUnregisteredReportsTick
+        ) {
+            handledUnregisteredReportsTick = openUnregisteredReportsTick
+            if (isSignedIn) {
+                myReportsStartUnconfirmed = false
+                myReportsStartUnregistered = true
+                showInlineMyReports = true
+                onModalVisibleChange(true)
+            } else {
+                showReportSignInModal = true
+            }
+        }
+    }
+    LaunchedEffect(requestReportTick, requestReportIssueType) {
+        if (requestReportTick > 0 && requestReportTick != handledRequestReportTick) {
+            handledRequestReportTick = requestReportTick
+            if (isSignedIn) {
+                // Stay in this composition — Nav to NewReport tears down MapView and
+                // the saved tick re-opens the page on pop (looks stuck / won't close).
+                inlineReportIssueType = requestReportIssueType
+                showInlineNewReport = true
+                onModalVisibleChange(true)
+            } else {
+                showReportSignInModal = true
+            }
+        }
+    }
+    LaunchedEffect(
+        showReportSignInModal,
+        showInlineNewReport,
+        showInlineMyReports,
+    ) {
+        // Window Dialogs (Settings, Profile, About) already sit above the shell.
+        // Hiding Profile for those revealed the map compass behind the card.
+        onModalVisibleChange(
+            showReportSignInModal || showInlineNewReport || showInlineMyReports,
+        )
+    }
 
     // Always consume system back while a report overlay is up — otherwise a bottom
     // edge tap can fall through to Activity finish (looks like the app "minimized").
     BackHandler(enabled = showInlineNewReport) {
         showInlineNewReport = false
+        inlineReportCloseUpUri = null
+    }
+    BackHandler(enabled = showInlineMyReports) {
+        showInlineMyReports = false
     }
     BackHandler(enabled = showReportSignInModal) {
         showReportSignInModal = false
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        if (!mapFullscreen) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "CITY GRID",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = if (!displayFullscreen && mapVisible) shellBottomPadding else 0.dp),
+    ) {
+        if (!displayFullscreen && !neighbourhoodChrome) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                    .padding(CitizenHeader.Padding),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "CITY GRID",
+                    style = CitizenType.Brand,
+                color = MaterialTheme.colorScheme.onBackground
+            )
 
-                Spacer(Modifier.weight(1f))
-                Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.weight(1f))
+                Spacer(modifier = Modifier.width(CitizenSpace.Sm))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (isSignedIn) {
-                        NotificationsHeaderBell(
-                            unreadCount = unreadNotificationCount,
-                            onClick = { showNotificationsDialog = true },
-                        )
-                        Spacer(Modifier.width(4.dp))
-                    }
-                    AccountHeaderIcon(
-                        isSignedIn = isSignedIn,
-                        avatarId = avatarId,
-                        menuExpanded = accountMenuExpanded,
-                        onMenuExpandedChange = { accountMenuExpanded = it },
-                        onRequestSignIn = { showReportSignInModal = true },
-                        onOpenProfile = {
-                            if (isSignedIn) showProfileDialog = true
-                        },
-                        onOpenNotifications = {
-                            if (isSignedIn) showNotificationsDialog = true
-                        },
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isSignedIn) {
+                    NotificationsHeaderBell(
+                        unreadCount = unreadNotificationCount,
+                        onClick = { showNotificationsDialog = true },
+                    )
+                        Spacer(modifier = Modifier.width(CitizenSpace.Xs))
+                }
+                AccountHeaderIcon(
+                    isSignedIn = isSignedIn,
+                    avatarId = avatarId,
+                    menuExpanded = accountMenuExpanded,
+                    onMenuExpandedChange = { accountMenuExpanded = it },
+                    onRequestSignIn = { showReportSignInModal = true },
+                    onOpenProfile = {
+                        if (isSignedIn) showProfileDialog = true
+                    },
+                    onOpenNotifications = {
+                        if (isSignedIn) showNotificationsDialog = true
+                    },
                         onOpenSettings = {
                             if (isSignedIn) showSettingsDialog = true
                         },
-                        onShowAbout = { showAboutDialog = true },
+                        onOpenUnconfirmed = {
+                            if (isSignedIn) showUnconfirmedDialog = true
+                        },
+                    onShowAbout = { showAboutDialog = true },
+                )
+
+                    Spacer(modifier = Modifier.width(CitizenSpace.Sm))
+
+                Button(
+                    onClick = onEmergencyClick,
+                    modifier = Modifier
+                            .height(CitizenIcon.CapsuleCompact)
+                            .defaultMinSize(minWidth = 56.dp, minHeight = CitizenIcon.CapsuleCompact),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB74233)),
+                        shape = CitizenRadius.Capsule,
+                        contentPadding = PaddingValues(
+                            horizontal = CitizenSpace.Md,
+                            vertical = 0.dp,
+                        )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Call,
+                        contentDescription = null,
+                            modifier = Modifier.size(CitizenIcon.Dense),
+                        tint = Color.White
                     )
-
-                    Spacer(Modifier.width(8.dp))
-
-                    Button(
-                        onClick = onEmergencyClick,
-                        modifier = Modifier
-                            .heightIn(min = 40.dp)
-                            .defaultMinSize(minWidth = 56.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB74233)),
-                        shape = RoundedCornerShape(0.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Call,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = Color.White
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            "SOS",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                            color = Color.White,
-                        )
-                    }
+                        Spacer(modifier = Modifier.width(CitizenSpace.Xs))
+                    Text(
+                        "SOS",
+                            style = CitizenType.ChipCompact,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        color = Color.White,
+                    )
                 }
             }
+        }
 
-            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
+        HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
         }
 
         Column(
@@ -645,30 +962,33 @@ fun HomeScreen(
                 .weight(1f)
                 .fillMaxWidth(),
         ) {
-            if (!mapFullscreen) {
-                HomeTabBannerAndTabs(
-                    isSignedIn = isSignedIn,
-                    selectedTabIndex = selectedTabIndex,
-                    onTabSelected = { selectedTabIndex = it },
-                )
+            if (!displayFullscreen && !neighbourhoodChrome) {
+            HomeTabBannerAndTabs(
+                isSignedIn = isSignedIn,
+                selectedTabIndex = selectedTabIndex,
+                onTabSelected = { selectedTabIndex = it },
+            )
             }
 
             when {
                 // Keep ReportAndTrack in one composition slot for expand/collapse so trip state survives.
-                mapFullscreen || selectedTabIndex == 0 -> {
+                displayFullscreen || selectedTabIndex == 0 -> {
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
                             .then(
-                                if (mapFullscreen) {
+                                if (displayFullscreen || neighbourhoodChrome) {
                                     Modifier
-                                } else {
-                                    Modifier.verticalScroll(scrollState, enabled = !mapTouchActive)
+            } else {
+                                    // Keep scroll always enabled — toggling enabled mid-gesture
+                                    // recomposes this Column and stutters MapLibre pan/zoom.
+                                    // MapView requestDisallowInterceptTouchEvent owns the gesture.
+                                    Modifier.verticalScroll(scrollState)
                                 },
                             ),
                     ) {
-                        if (!mapFullscreen) Spacer(Modifier.height(12.dp))
+                        if (!displayFullscreen) Spacer(modifier = Modifier.height(CitizenSpace.Md))
                         ReportAndTrackSection(
                             isSignedIn = isSignedIn,
                             onReportPotholeGuest = { showReportSignInModal = true },
@@ -678,27 +998,39 @@ fun HomeScreen(
                                 // MapView or delay — that left a BackHandler gap that finished
                                 // the Activity (app looked like it minimized).
                                 if (isSignedIn) {
-                                    showInlineNewReport = true
+                                    coroutineScope.launch {
+                                        inlineReportIssueType = CivicIssueType.POTHOLE.name
+                                        inlineReportCloseUpUri = resolveTripRoadCloseUpUri(
+                                            context,
+                                            tripCaptureRoad,
+                                        )
+                                        showInlineNewReport = true
+                                    }
                                 } else {
                                     showReportSignInModal = true
                                 }
                             },
                             suppressFullscreenBack = showInlineNewReport || showReportSignInModal,
-                            mapCoveredByOverlay = showInlineNewReport || showReportSignInModal,
+                            mapCoveredByOverlay = showInlineNewReport || showReportSignInModal || !mapVisible,
                             selectedCity = selectedCity,
                             onCitySelected = { selectedCity = it },
                             gpsMetroCity = gpsMetroCity,
                             userLocation = userLocation,
                             recentReportsEpoch = recentReportsEpoch,
                             onReportsMutated = onRecentReportsMutated,
-                            mapFullscreen = mapFullscreen,
-                            onMapFullscreenChange = { mapFullscreen = it },
+                            mapFullscreen = displayFullscreen,
+                            onMapFullscreenChange = { on ->
+                                mapFullscreen = on
+                            },
                             onLocateMe = {
                                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                                     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
                                 ) {
                                     coroutineScope.launch {
-                                        // Immediate feedback: snap to last known GPS first, then refine with calibrated fix.
+                                        // Immediate feedback: snap to last known GPS first, then refine.
+                                        // Only bump locate once — a second bump after calibration felt like
+                                        // an automatic zoom a few seconds later.
+                                        val hadPin = lastGpsLocation != null
                                         lastGpsLocation?.let { last ->
                                             userLocation = Location(last)
                                             val city = cityForLocation(last)
@@ -708,19 +1040,17 @@ fun HomeScreen(
                                             }
                                             mapLocateEpoch++
                                         }
-                                        refreshCalibratedGpsPin(bumpMapLocate = true)
+                                        refreshCalibratedGpsPin(bumpMapLocate = !hadPin)
                                     }
                                 } else {
-                                    permissionLauncher.launch(
-                                        arrayOf(
-                                            Manifest.permission.ACCESS_FINE_LOCATION,
-                                            Manifest.permission.ACCESS_COARSE_LOCATION
-                                        )
-                                    )
+                                    val extra = CitizenRuntimePermissions.forLocationAndTrip(context)
+                                    if (extra.isNotEmpty()) {
+                                        permissionLauncher.launch(extra)
+                                    }
                                 }
                             },
                             onEnsureFreshGpsForTrip = { resolveMyLocationTripOrigin() },
-                            onMapTouchChanged = { mapTouchActive = it },
+                            onMapTouchChanged = { },
                             onMapPanEndedAtCenter = pickMapCenter@{ lat, lng ->
                                 if (!CityMetroLocation.coordinatesInMetroCity(selectedCity, lat, lng)) {
                                     return@pickMapCenter
@@ -733,10 +1063,31 @@ fun HomeScreen(
                             mapLocateEpoch = mapLocateEpoch,
                             gpsPinLocation = lastGpsLocation,
                             onTripNavigationActiveChanged = { tripNavigationActive = it },
+                            onFeedbackMessage = onFeedbackMessage,
                             mapCursorStyle = mapCursorStyle,
                             mapCursorColor = mapCursorColor,
+                            tripCaptureDisplay = tripCaptureDisplay,
+                            tripCaptureLayout = tripCaptureLayout,
+                            tripCaptureRoad = tripCaptureRoad,
+                            tripCaptureCabin = tripCaptureCabin,
+                            tripCompanionPairingCode = tripCompanionPairingCode,
+                            imuBumpEnabled = imuBumpEnabled,
+                            swerveDetectionEnabled = swerveDetectionEnabled,
+                            roadVideoAutoDetectEnabled = roadVideoAutoDetectEnabled,
+                            reporterUserId = if (isSignedIn) anonymousUserId else "",
+                            onNotificationsMutated = { notificationsBadgeEpoch++ },
+                            neighbourhoodChrome = neighbourhoodChrome,
+                            neighbourhoodMapActive = neighbourhoodMapActive,
+                            openTripPlannerTick = openTripPlannerTick,
+                            focusCityOverviewTick = focusNearbyTick,
+                            sharedSeverityFilterKey = mapSeverityFilterKey,
+                            onSharedSeverityFilterKeyChange = onMapSeverityFilterKeyChange,
+                            sharedIssueTypeFilterKey = mapIssueTypeFilterKey,
+                            onSharedIssueTypeFilterKeyChange = onMapIssueTypeFilterKeyChange,
+                            sharedHeatEnabled = areaHeatEnabled,
+                            onSharedHeatEnabledChange = onAreaHeatEnabledChange,
                         )
-                        if (!mapFullscreen) Spacer(Modifier.height(16.dp))
+                        if (!displayFullscreen) Spacer(modifier = Modifier.height(CitizenSpace.Lg))
                     }
                 }
                 isMyReportsTab -> {
@@ -751,11 +1102,15 @@ fun HomeScreen(
                                 .fillMaxWidth()
                                 .verticalScroll(myReportsScrollState),
                         ) {
-                            Spacer(Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height(CitizenSpace.Md))
                             MyReportsSection(
                                 reporterUserId = anonymousUserId,
+                                cityKey = selectedCity,
+                                signedIn = isSignedIn,
                                 recentReportsEpoch = recentReportsEpoch,
                                 onReportsMutated = onRecentReportsMutated,
+                                onFeedbackMessage = onFeedbackMessage,
+                                onReviewUnconfirmed = { showUnconfirmedDialog = true },
                             )
                         }
                         MyReportsTabFooter()
@@ -766,11 +1121,11 @@ fun HomeScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .verticalScroll(scrollState, enabled = !mapTouchActive),
+                            .verticalScroll(scrollState),
                     ) {
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Md))
                         AccountabilitySection(recentReportsEpoch = recentReportsEpoch)
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Lg))
                     }
                 }
             }
@@ -818,25 +1173,83 @@ fun HomeScreen(
                     DeviceReporterId.getOrCreate(context)
                 },
                 submittedWhileSignedIn = isSignedIn,
+                issueType = CivicIssueType.fromStored(inlineReportIssueType),
+                initialCloseUpUri = inlineReportCloseUpUri,
                 onClose = {
                     showInlineNewReport = false
+                    inlineReportCloseUpUri = null
+                    inlineReportIssueType = CivicIssueType.POTHOLE.name
                 },
                 onReportPersisted = onRecentReportsMutated,
-                onSyncMessage = { },
+                onSyncMessage = onFeedbackMessage,
                 modifier = Modifier.fillMaxSize(),
             )
+        }
+    }
+
+    if (showInlineMyReports) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(50f)
+                .background(NeighbourhoodPalette.Page),
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "My reports",
+                        style = CitizenType.ScreenTitle,
+                        color = NeighbourhoodPalette.Ink,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 8.dp),
+                    )
+                    IconButton(onClick = { showInlineMyReports = false }) {
+                        Icon(
+                            Icons.Outlined.Close,
+                            contentDescription = "Close",
+                            tint = NeighbourhoodPalette.Navy,
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(myReportsScrollState)
+                        .padding(horizontal = CitizenSpace.Lg),
+                ) {
+                    MyReportsSection(
+                        reporterUserId = anonymousUserId,
+                        cityKey = selectedCity,
+                        signedIn = isSignedIn,
+                        recentReportsEpoch = recentReportsEpoch,
+                        startOnUnconfirmed = myReportsStartUnconfirmed,
+                        startOnUnregistered = myReportsStartUnregistered,
+                        onReportsMutated = onRecentReportsMutated,
+                        onFeedbackMessage = onFeedbackMessage,
+                        onReviewUnconfirmed = { showUnconfirmedDialog = true },
+                    )
+                    Spacer(modifier = Modifier.height(CitizenSpace.Xl))
+                }
+            }
         }
     }
 
     if (showGpsEnableDialog) {
         AlertDialog(
             onDismissRequest = { showGpsEnableDialog = false },
-            title = { Text("Turn on location", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            title = { Text("Turn on location", style = CitizenType.ScreenTitle) },
             text = {
                 Text(
-                    "City Grid needs GPS so we can show your position on the map and tag reports with the right place. Allow location access and turn on GPS in your device settings.",
-                    fontSize = 14.sp,
-                    color = Color(0xFF5A5A5A),
+                    "Location is off. Tap Enable to allow location, camera, and nearby devices in one step — for the map, reports, and a second phone over Wi‑Fi or USB cable. USB tethering itself is a system USB setting (not an app permission) and only appears after you plug the cable.",
+                    style = CitizenType.Helper,
+                    color = CitizenInk.Helper,
                 )
             },
             confirmButton = {
@@ -845,24 +1258,22 @@ fun HomeScreen(
                         showGpsEnableDialog = false
                         when {
                             !hasLocationPermission(context) -> {
-                                permissionLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.ACCESS_FINE_LOCATION,
-                                        Manifest.permission.ACCESS_COARSE_LOCATION,
-                                    ),
-                                )
+                                val extra = CitizenRuntimePermissions.forLocationAndTrip(context)
+                                if (extra.isNotEmpty()) {
+                                    permissionLauncher.launch(extra)
+                                }
                             }
                             !isDeviceLocationEnabled(context) -> openLocationSettings(context)
                             else -> coroutineScope.launch { applyLocationFromDevice() }
                         }
                     },
                 ) {
-                    Text("Enable", fontWeight = FontWeight.Bold)
+                    Text("Enable", style = CitizenType.Label)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showGpsEnableDialog = false }) {
-                    Text("Not now")
+                    Text("Not now", style = CitizenType.Label, color = CitizenInk.Helper)
                 }
             },
         )
@@ -883,6 +1294,8 @@ fun HomeScreen(
             },
             onStartEmailChange = onProfileStartEmailChange,
             onVerifyEmailChange = onProfileVerifyEmailChange,
+            startInEditMode = neighbourhoodChrome,
+            showSignOut = !neighbourhoodChrome,
         )
     }
 
@@ -895,37 +1308,90 @@ fun HomeScreen(
         )
     }
 
+    if (showUnconfirmedDialog) {
+        UnconfirmedDetectionsDialog(
+            cityKey = selectedCity,
+            reporterUserId = anonymousUserId,
+            signedIn = isSignedIn,
+            onDismiss = { showUnconfirmedDialog = false },
+            onReportsMutated = onRecentReportsMutated,
+            onFeedbackMessage = onFeedbackMessage,
+        )
+    }
+
     if (showSettingsDialog) {
         CitizenSettingsDialog(
             onDismiss = { showSettingsDialog = false },
             onSettingsChanged = {
                 mapCursorStyle = CitizenUiSettingsRepository.mapCursorStyle(context)
                 mapCursorColor = CitizenUiSettingsRepository.mapCursorColor(context)
+                tripCaptureDisplay = CitizenUiSettingsRepository.tripCaptureDisplayMode(context)
+                tripCaptureLayout = CitizenUiSettingsRepository.tripCaptureCameraMapLayout(context)
+                tripCaptureRoad = CitizenUiSettingsRepository.tripCaptureRoadSource(context)
+                tripCaptureCabin = CitizenUiSettingsRepository.tripCaptureCabinSource(context)
+                tripCompanionPairingCode =
+                    CitizenUiSettingsRepository.tripCompanionPairingCode(context)
+                imuBumpEnabled = CitizenUiSettingsRepository.imuBumpDetectionEnabled(context)
+                swerveDetectionEnabled =
+                    CitizenUiSettingsRepository.swerveDetectionEnabled(context)
+                roadVideoAutoDetectEnabled =
+                    CitizenUiSettingsRepository.roadVideoAutoDetectEnabled(context)
+            },
+            onOpenCompanionCamera = {
+                showSettingsDialog = false
+                showCompanionCamera = true
             },
         )
+    }
+
+    if (showCompanionCamera) {
+        TripCompanionCameraDialog(onDismiss = { showCompanionCamera = false })
     }
 
     if (showAboutDialog) {
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
-            title = { Text("About City Grid", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            containerColor = Color.White,
+            title = {
+                Text(
+                    "About City Grid",
+                    style = CitizenType.ScreenTitle,
+                    color = Color(0xFF111827),
+                )
+            },
             text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
                 Text(
                     "City Grid helps citizens report potholes and other road hazards with photos and location. " +
-                        "When you are signed in, you can track your submissions in My Reports. " +
-                        "Your reporter identity stays private on public maps and recent reports.\n\n" +
-                        "City Grid is an independent app â€” not affiliated with BBMP or any government body. " +
-                        "Reporting and municipal zone officers are available for Bengaluru (BBMP) in this release. " +
-                        "More cities will be added when official directories are verified.\n\n" +
+                            "When you are signed in, you can track your submissions in My Reports.",
+                        style = CitizenType.Helper,
+                        color = CitizenInk.Helper,
+                    )
+                    Text(
+                        CityGridSupport.WEEKEND_PDF_COPY,
+                        style = CitizenType.Helper,
+                        color = CitizenInk.Helper,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    Text(
+                        "${CitizenPrivacyCopy.DETAIL}\n\n" +
+                            "${CitizenAccountabilityCopy.ABOUT_INDEPENDENT} " +
+                            "Reporting and municipal zone officers are available for Bengaluru (GBA / BBMP) in this release.\n\n" +
                         "BBMP directory: https://bbmp.gov.in/\n\n" +
                         "Version ${BuildConfig.VERSION_NAME}",
-                    fontSize = 14.sp,
-                    color = Color(0xFF5A5A5A),
+                        style = CitizenType.Helper,
+                        color = CitizenInk.Helper,
+                        modifier = Modifier.padding(top = 12.dp),
                 )
+                }
             },
             confirmButton = {
                 TextButton(onClick = { showAboutDialog = false }) {
-                    Text("OK", fontWeight = FontWeight.Bold)
+                    Text("OK", style = CitizenType.Label, color = Color(0xFF1B2A4A))
                 }
             },
         )
@@ -938,31 +1404,35 @@ private fun NotificationsHeaderBell(
     unreadCount: Int,
     onClick: () -> Unit,
 ) {
-    Box {
-        IconButton(
-            onClick = onClick,
-            modifier = Modifier.size(44.dp),
+    Box(modifier = Modifier.size(CitizenIcon.CapsuleCompact)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = Icons.Outlined.Notifications,
                 contentDescription = "Notifications",
                 tint = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.size(CitizenIcon.CapsuleCompact),
             )
         }
         if (unreadCount > 0) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 6.dp, end = 6.dp)
-                    .size(16.dp)
-                    .background(Color(0xFFB74233), CircleShape),
+                    .size(14.dp)
+                    .background(CitizenSelection.Active, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = if (unreadCount > 9) "9+" else unreadCount.toString(),
-                    color = Color.White,
-                    fontSize = 8.sp,
+                    style = CitizenType.Caption,
+                    color = CitizenSelection.ActiveContent,
                     fontWeight = FontWeight.Bold,
+                    fontSize = 8.sp,
                 )
             }
         }
@@ -979,27 +1449,34 @@ private fun AccountHeaderIcon(
     onOpenProfile: () -> Unit,
     onOpenNotifications: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenUnconfirmed: () -> Unit,
     onShowAbout: () -> Unit,
 ) {
     Box {
         if (isSignedIn) {
-            IconButton(
-                onClick = { onMenuExpandedChange(true) },
-                modifier = Modifier.size(44.dp),
+            Box(
+                modifier = Modifier
+                    .size(CitizenIcon.CapsuleCompact)
+                    .clip(CircleShape)
+                    .clickable { onMenuExpandedChange(true) },
+                contentAlignment = Alignment.Center,
             ) {
-                CartoonAvatar(avatarId = avatarId, size = 40.dp)
+                CartoonAvatar(avatarId = avatarId, size = CitizenIcon.CapsuleCompact)
             }
         } else {
-            OutlinedIconButton(
-                onClick = onRequestSignIn,
-                modifier = Modifier.size(44.dp),
-                shape = RoundedCornerShape(0.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+            Box(
+                modifier = Modifier
+                    .size(CitizenIcon.CapsuleCompact)
+                    .border(CitizenBorder.Thin, MaterialTheme.colorScheme.primary, CircleShape)
+                    .clip(CircleShape)
+                    .clickable(onClick = onRequestSignIn),
+                contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Person,
                     contentDescription = "Sign in",
                     tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(CitizenIcon.Chip),
                 )
             }
         }
@@ -1026,6 +1503,19 @@ private fun AccountHeaderIcon(
                     },
                     leadingIcon = {
                         Icon(Icons.Outlined.Notifications, contentDescription = null)
+                    },
+                )
+                DropdownMenuItem(
+                    text = {
+                        val n = TripUnconfirmedDetectionStore.count()
+                        Text(if (n > 0) "Unconfirmed ($n)" else "Unconfirmed")
+                    },
+                    onClick = {
+                        onMenuExpandedChange(false)
+                        onOpenUnconfirmed()
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Outlined.HelpOutline, contentDescription = null)
                     },
                 )
                 DropdownMenuItem(
@@ -1060,26 +1550,37 @@ private fun TopTab(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val uiScale = rememberMapUiScale()
+    val compactChrome = LocalConfiguration.current.screenWidthDp < 370
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         TextButton(
             onClick = onClick,
-            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
-            modifier = Modifier.fillMaxWidth()
+            contentPadding = PaddingValues(
+                horizontal = uiScale.dp(if (compactChrome) 2f else 4f),
+                vertical = uiScale.dp(if (compactChrome) 6f else 8f),
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = CitizenIcon.Tap),
         ) {
             Text(
                 text = title,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                color = if (selected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                style = if (selected) CitizenType.Tab else CitizenType.Tab.copy(fontWeight = FontWeight.SemiBold),
+                color = if (selected) {
+                    MaterialTheme.colorScheme.onBackground
+                } else {
+                    CitizenInk.Helper
+                },
                 textAlign = TextAlign.Center,
-                lineHeight = 14.sp
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Box(
             modifier = Modifier
                 .height(2.dp)
                 .fillMaxWidth()
-                .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
+                .background(if (selected) CitizenSelection.Active else Color.Transparent)
         )
     }
 }
@@ -1103,12 +1604,12 @@ private fun CityWeatherSubline(selectedCity: String) {
     }
 
     val rainColor = when (forecast?.rainCriticality) {
-        RainCriticality.STORM -> Color(0xFFB91C1C)
-        RainCriticality.HEAVY -> Color(0xFFC2410C)
-        RainCriticality.MEDIUM -> Color(0xFFB45309)
-        RainCriticality.LIGHT -> Color(0xFF0369A1)
+        RainCriticality.STORM -> Color(0xFF9333EA)
+        RainCriticality.HEAVY -> Color(0xFFEA580C)
+        RainCriticality.MEDIUM -> Color(0xFF65A30D)
+        RainCriticality.LIGHT -> Color(0xFF7C6BF2)
         RainCriticality.NONE -> Color(0xFF4B5563)
-        null -> Color.Gray
+        null -> CitizenInk.Helper
     }
 
     Text(
@@ -1118,9 +1619,8 @@ private fun CityWeatherSubline(selectedCity: String) {
             forecast != null -> forecast!!.summaryLine
             else -> "Weather forecast unavailable"
         },
-        fontSize = 11.sp,
-        lineHeight = 13.sp,
-        color = if (forecast != null) rainColor else Color.Gray,
+        style = CitizenType.Helper,
+        color = if (forecast != null) rainColor else CitizenInk.Helper,
         maxLines = 2,
         overflow = TextOverflow.Ellipsis,
     )
@@ -1148,33 +1648,60 @@ private fun ReportAndTrackSection(
     onTripNavigationActiveChanged: (Boolean) -> Unit,
     recentReportsEpoch: Int,
     onReportsMutated: () -> Unit = {},
+    onFeedbackMessage: (String) -> Unit = {},
     mapFullscreen: Boolean,
     onMapFullscreenChange: (Boolean) -> Unit,
-    mapCursorStyle: MapCursorStyle = MapCursorStyle.VEHICLE,
+    mapCursorStyle: MapCursorStyle = MapCursorStyle.CAR,
     mapCursorColor: MapCursorColor = MapCursorColor.BLUE,
+    tripCaptureDisplay: TripCaptureDisplayMode = TripCaptureDisplayMode.MAP_ONLY,
+    tripCaptureLayout: TripCaptureCameraMapLayout = TripCaptureCameraMapLayout.SWITCH,
+    tripCaptureRoad: TripCaptureSource = TripCaptureSource.PHONE_BACK,
+    tripCaptureCabin: TripCaptureCabinSource = TripCaptureCabinSource.OFF,
+    tripCompanionPairingCode: String = "",
+    imuBumpEnabled: Boolean = true,
+    swerveDetectionEnabled: Boolean = true,
+    roadVideoAutoDetectEnabled: Boolean = true,
+    reporterUserId: String = "",
+    onNotificationsMutated: () -> Unit = {},
+    neighbourhoodChrome: Boolean = false,
+    neighbourhoodMapActive: Boolean = false,
+    openTripPlannerTick: Int = 0,
+    focusCityOverviewTick: Int = 0,
+    sharedSeverityFilterKey: String? = null,
+    onSharedSeverityFilterKeyChange: ((String?) -> Unit)? = null,
+    sharedIssueTypeFilterKey: String? = null,
+    onSharedIssueTypeFilterKeyChange: ((String?) -> Unit)? = null,
+    sharedHeatEnabled: Boolean = false,
+    onSharedHeatEnabledChange: ((Boolean) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val tripScope = rememberCoroutineScope()
+    val uiScale = rememberMapUiScale()
+    val compactChrome = LocalConfiguration.current.screenWidthDp < 370
     var tripNavigatePreparing by remember { mutableStateOf(false) }
+    var mapDestPickEpoch by remember { mutableIntStateOf(0) }
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    if (!mapFullscreen) {
+    if (!mapFullscreen && !neighbourhoodChrome) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
+            .padding(horizontal = CitizenSpace.Lg)
             .clickable {
                 if (isSignedIn) onReportPotholeSignedIn()
                 else onReportPotholeGuest()
             },
         colors = CardDefaults.cardColors(containerColor = Color(0xFFB74233)),
-        shape = RoundedCornerShape(50),
+        shape = CitizenRadius.Capsule,
         border = BorderStroke(1.dp, Color(0xFF8B2F24)),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 56.dp)
-                .padding(horizontal = 24.dp, vertical = 12.dp),
+                .heightIn(min = CitizenIcon.Tap)
+                .padding(
+                    horizontal = uiScale.dp(if (compactChrome) 18f else 24f),
+                    vertical = uiScale.dp(if (compactChrome) 10f else 12f),
+                ),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
@@ -1186,44 +1713,90 @@ private fun ReportAndTrackSection(
                     imageVector = Icons.Default.CameraAlt,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(CitizenIcon.Chip),
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(uiScale.dp(8f)))
                 Text(
                     "REPORT A POTHOLE",
                     color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    lineHeight = 16.sp,
+                    style = CitizenType.Cta,
                     textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(uiScale.dp(4f)))
             Text(
                 "Signed in but report anonymously",
-                color = Color.White.copy(alpha = 0.8f),
-                fontSize = 10.sp,
-                lineHeight = 12.sp,
+                color = Color.White.copy(alpha = 0.95f),
+                style = CitizenType.CtaSub,
                 textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
 
-    Spacer(Modifier.height(24.dp))
+    Spacer(modifier = Modifier.height(uiScale.dp(if (compactChrome) 18f else 24f)))
     }
 
     var expanded by remember { mutableStateOf(false) }
     /** null = all severities on the map. */
-    var mapSeverityFilterKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var localSeverityFilterKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var localIssueTypeFilterKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var localHeatEnabled by rememberSaveable { mutableStateOf(false) }
+    val sharedFilters = onSharedSeverityFilterKeyChange != null
+    val mapSeverityFilterKey =
+        if (sharedFilters) sharedSeverityFilterKey else localSeverityFilterKey
     val mapSeverityFilter = remember(mapSeverityFilterKey) {
         mapSeverityFilterKey?.let { key -> PotholeSeverity.entries.find { it.name == key } }
     }
+    val mapIssueTypeFilterKey =
+        if (onSharedIssueTypeFilterKeyChange != null) sharedIssueTypeFilterKey else localIssueTypeFilterKey
+    val mapIssueTypeFilter = remember(mapIssueTypeFilterKey) {
+        mapIssueTypeFilterKey?.let { key -> CivicIssueType.entries.find { it.name == key } }
+    }
+    fun setSeverityFilterKey(value: String?) {
+        if (onSharedSeverityFilterKeyChange != null) onSharedSeverityFilterKeyChange(value)
+        else localSeverityFilterKey = value
+    }
+    fun setIssueTypeFilterKey(value: String?) {
+        if (onSharedIssueTypeFilterKeyChange != null) onSharedIssueTypeFilterKeyChange(value)
+        else localIssueTypeFilterKey = value
+    }
     var severityMenuExpanded by remember { mutableStateOf(false) }
-    var areaHeatEnabled by rememberSaveable { mutableStateOf(false) }
+    val areaHeatEnabled = if (onSharedHeatEnabledChange != null) sharedHeatEnabled else localHeatEnabled
+    var weatherMapEnabled by rememberSaveable { mutableStateOf(false) }
+    fun setAreaHeatEnabled(value: Boolean) {
+        if (onSharedHeatEnabledChange != null) onSharedHeatEnabledChange(value)
+        else localHeatEnabled = value
+        if (value) weatherMapEnabled = false
+    }
+    fun setWeatherMapEnabled(value: Boolean) {
+        // Flip local state only. Heat XOR and the rain overlay are deferred so this
+        // tap cannot recompose the neighbourhood shell / MapView in the same frame
+        // as a bottom-edge predictive-back (that finished the Activity).
+        if (weatherMapEnabled == value) return
+        if (value && areaHeatEnabled) setAreaHeatEnabled(false)
+        weatherMapEnabled = value
+    }
+    var weatherCadenceName by rememberSaveable {
+        mutableStateOf(CitizenUiSettingsRepository.weatherMapCadence(context).name)
+    }
+    val weatherCadence = remember(weatherCadenceName) {
+        WeatherAlertCadence.entries.find { it.name == weatherCadenceName }
+            ?: WeatherAlertCadence.NOW
+    }
+    var weatherBriefing by remember { mutableStateOf<CityWeatherAlertBriefing?>(null) }
+    var weatherRainGrid by remember { mutableStateOf<CityWeatherRainGrid?>(null) }
     var tripModeEnabled by rememberSaveable { mutableStateOf(false) }
     var tripDestLat by rememberSaveable { mutableStateOf<Double?>(null) }
     var tripDestLon by rememberSaveable { mutableStateOf<Double?>(null) }
     var tripDestLabel by rememberSaveable { mutableStateOf("") }
+    /** Bumped when destination is chosen so the map can fly to that area. */
+    var tripDestFocusEpoch by remember { mutableIntStateOf(0) }
+    /** Bumped when Direction is pressed — fit the full route in view. */
+    var tripRouteOverviewEpoch by remember { mutableIntStateOf(0) }
     /** null lat/lon = start from current GPS location. */
     var tripStartLat by rememberSaveable { mutableStateOf<Double?>(null) }
     var tripStartLon by rememberSaveable { mutableStateOf<Double?>(null) }
@@ -1234,10 +1807,88 @@ private fun ReportAndTrackSection(
     val tripVehicle = remember(tripVehicleName) {
         TripVehicle.entries.find { it.name == tripVehicleName } ?: TripVehicle.CAR
     }
-    /** False until user taps Navigate — preview route can show earlier; this starts turn-by-turn. */
+    /** False until user taps Navigate — this starts turn-by-turn. */
     var tripNavActive by rememberSaveable { mutableStateOf(false) }
-    /** Street-follow POV while navigating (2D top-down, heading-up). 3D tilt deferred. */
-    var tripStreetFollow by rememberSaveable { mutableStateOf(true) }
+    var pendingBumpEvent by remember { mutableStateOf<TripImuBumpEvent?>(null) }
+    val pendingBumpHolder = remember { arrayOfNulls<TripImuBumpEvent>(1) }
+    pendingBumpHolder[0] = pendingBumpEvent
+    var bumpAnalyzing by remember { mutableStateOf(false) }
+    var bumpVisionSummary by remember { mutableStateOf<String?>(null) }
+    var bumpVisionTier by remember { mutableStateOf<TripBumpVisionTier?>(null) }
+    var bumpReportCreated by remember { mutableStateOf(false) }
+    var bumpUnconfirmedSaved by remember { mutableStateOf(false) }
+    var bumpLocationOnly by remember { mutableStateOf(false) }
+    var bumpUnconfirmedId by remember { mutableStateOf<Long?>(null) }
+    var pendingAvoidPrompt by remember { mutableStateOf(false) }
+    var avoidPromptLat by remember { mutableStateOf<Double?>(null) }
+    var avoidPromptLon by remember { mutableStateOf<Double?>(null) }
+    val bumpGpsHolder = remember { arrayOfNulls<Location>(1) }
+    bumpGpsHolder[0] = gpsPinLocation
+    val bumpVehicleHolder = remember { arrayOfNulls<TripVehicle>(1) }
+    bumpVehicleHolder[0] = tripVehicle
+    val lastBumpEpochHolder = remember { longArrayOf(0L) }
+    val navActiveHolder = remember { booleanArrayOf(false) }
+    navActiveHolder[0] = tripNavActive
+    val avoidWasOffRouteHolder = remember { booleanArrayOf(false) }
+    val avoidOffRouteStartedHolder = remember { longArrayOf(0L) }
+    val avoidPeakOffRouteHolder = remember { doubleArrayOf(0.0) }
+    val lastAvoidPromptHolder = remember { longArrayOf(0L) }
+    // Session toggle for #32 Camera / Camera+map (Switch). Reset when Navigate starts.
+    var tripCaptureShowCamera by rememberSaveable { mutableStateOf(false) }
+    /**
+     * Nav-screen road-video master switch (bottom-right).
+     * Off = map-only navigate (no camera / “Checking road video”).
+     * Bump sensing still runs from IMU + GPS → Unconfirmed.
+     * On = capture per Settings (Camera / Camera+map / sources).
+     */
+    var tripRoadVideoEnabled by rememberSaveable { mutableStateOf(false) }
+    val tripRoadVideoHolder = remember { booleanArrayOf(false) }
+    tripRoadVideoHolder[0] = tripRoadVideoEnabled
+    val tripCaptureSplitActive =
+        tripCaptureDisplay == TripCaptureDisplayMode.CAMERA_AND_MAP &&
+            tripCaptureLayout == TripCaptureCameraMapLayout.SPLIT
+    val tripCaptureSwitchEnabled =
+        tripCaptureDisplay == TripCaptureDisplayMode.CAMERA ||
+            (tripCaptureDisplay == TripCaptureDisplayMode.CAMERA_AND_MAP &&
+                tripCaptureLayout == TripCaptureCameraMapLayout.SWITCH)
+    fun applyRoadVideoFromSettings(enabled: Boolean) {
+        tripRoadVideoEnabled = enabled
+        if (!enabled) {
+            tripCaptureShowCamera = false
+            TripRoadKeyframeBuffer.clear()
+            return
+        }
+        // Resume using current Settings capture mode.
+        tripCaptureShowCamera = when {
+            tripCaptureSplitActive -> false
+            tripCaptureDisplay == TripCaptureDisplayMode.CAMERA -> true
+            tripCaptureDisplay == TripCaptureDisplayMode.CAMERA_AND_MAP &&
+                tripCaptureLayout == TripCaptureCameraMapLayout.SWITCH -> true
+            else -> false
+        }
+    }
+    LaunchedEffect(tripNavActive) {
+        if (!tripNavActive) {
+            tripRoadVideoEnabled = false
+            tripCaptureShowCamera = false
+        }
+    }
+    LaunchedEffect(tripCaptureDisplay, tripCaptureLayout, tripRoadVideoEnabled) {
+        // If settings change while video is on, re-apply display layout.
+        if (tripNavActive && tripRoadVideoEnabled) {
+            applyRoadVideoFromSettings(true)
+        }
+    }
+    /** After destination is set, routes/ETA/alts stay hidden until Direction is pressed. */
+    var tripDirectionsRevealed by rememberSaveable { mutableStateOf(false) }
+    var tripPendingRouteOverview by remember { mutableStateOf(false) }
+    /** Intermediate stops between start and destination (Direction mode). */
+    var tripStops by remember { mutableStateOf<List<TripStopPlace>>(emptyList()) }
+    /** Trip map camera: Street / Map / Play (cycle on the interchangeable control). */
+    var tripCameraModeName by rememberSaveable { mutableStateOf(TripCameraMode.STREET.name) }
+    val tripCameraMode = TripCameraMode.fromStorage(tripCameraModeName)
+    /** True for Street + Play (heading-up follow); false for Map overview. */
+    val tripStreetFollow = tripCameraMode.isHeadingUp
     /** Device compass heading (0–360°); turns the vehicle cursor when the phone turns. */
     var tripDeviceHeadingDeg by remember { mutableStateOf<Float?>(null) }
 
@@ -1252,12 +1903,16 @@ private fun ReportAndTrackSection(
         }
         onMapFullscreenChange(false)
     }
-    BackHandler(enabled = mapFullscreen && !imeVisible && !suppressFullscreenBack) {
+    BackHandler(
+        enabled = mapFullscreen && !imeVisible && !suppressFullscreenBack,
+    ) {
         exitMapFullscreen()
     }
 
-    DisposableEffect(tripModeEnabled, tripNavActive) {
-        // Need compass for pre-nav blue sector and for heading-up while navigating.
+    DisposableEffect(tripModeEnabled, tripNavActive, swerveDetectionEnabled) {
+        // Need compass for heading-up while navigating (and trip map orientation).
+        // Heading crooks alone no longer enqueue Avoid — lane-change overtakes looked
+        // identical. Avoid prompts come from leave-route → rejoin + bump signal.
         if (!tripModeEnabled && !tripNavActive) {
             tripDeviceHeadingDeg = null
             onDispose { }
@@ -1270,6 +1925,230 @@ private fun ReportAndTrackSection(
                 tracker.stop()
                 tripDeviceHeadingDeg = null
             }
+        }
+    }
+    // #33 Phase C — IMU bump sensing while Navigate is on (camera optional; GPS required).
+    DisposableEffect(tripNavActive, imuBumpEnabled, tripVehicle) {
+        val deviceRole = CitizenUiSettingsRepository.tripDeviceRole(context)
+        val allow =
+            tripNavActive &&
+                imuBumpEnabled &&
+                deviceRole != TripDeviceRole.CAMERA_ONLY &&
+                TripImuBumpAnalyzer.peakThresholdMps2(tripVehicle) != null
+        if (!allow) {
+            onDispose { }
+        } else {
+            val mainExecutor = ContextCompat.getMainExecutor(context)
+            val detector = TripImuBumpDetector(
+                context = context,
+                vehicleProvider = { bumpVehicleHolder[0] ?: TripVehicle.CAR },
+                speedMpsProvider = {
+                    val gps = bumpGpsHolder[0]
+                    gps?.speed?.takeIf { gps.hasSpeed() && it.isFinite() }
+                },
+                onBumpPeak = { peak, now ->
+                    mainExecutor.execute {
+                        if (pendingBumpHolder[0] != null) return@execute
+                        lastBumpEpochHolder[0] = now
+                        if (tripRoadVideoHolder[0]) {
+                            TripRoadKeyframeBuffer.beginBurst(now)
+                        }
+                        val gps = bumpGpsHolder[0]
+                        val vehicle = bumpVehicleHolder[0] ?: TripVehicle.CAR
+                        val event = TripImuBumpEvent(
+                            id = TripImuBumpLog.allocateId(),
+                            detectedAtEpochMs = now,
+                            peakMps2 = peak,
+                            lat = gps?.latitude,
+                            lon = gps?.longitude,
+                            speedMps = gps?.speed?.takeIf { gps.hasSpeed() && it.isFinite() },
+                            accuracyM = gps?.accuracy?.takeIf { gps.hasAccuracy() && it.isFinite() },
+                            vehicle = vehicle,
+                            bearingDeg = gps?.bearing?.takeIf { gps.hasBearing() && it.isFinite() },
+                        )
+                        TripImuBumpLog.add(event)
+                        pendingBumpEvent = event
+                    }
+                },
+            )
+            detector.start()
+            onDispose { detector.stop() }
+        }
+    }
+    LaunchedEffect(tripNavActive) {
+        if (!tripNavActive) {
+            pendingBumpEvent = null
+            bumpAnalyzing = false
+            bumpVisionSummary = null
+            bumpVisionTier = null
+            bumpReportCreated = false
+            bumpUnconfirmedSaved = false
+            bumpLocationOnly = false
+            bumpUnconfirmedId = null
+            pendingAvoidPrompt = false
+            TripRoadKeyframeBuffer.clear()
+        }
+    }
+    // #33 Phase D — analyze ~15 s road keyframe window around the bump (or GPS-only).
+    LaunchedEffect(pendingBumpEvent?.id) {
+        val event = pendingBumpEvent ?: return@LaunchedEffect
+        bumpAnalyzing = true
+        bumpVisionSummary = null
+        bumpVisionTier = null
+        bumpReportCreated = false
+        bumpUnconfirmedSaved = false
+        bumpLocationOnly = !tripRoadVideoEnabled
+        bumpUnconfirmedId = null
+        val outcome = TripBumpVisionPipeline.analyzeBump(
+            context = context,
+            event = event,
+            cityKey = selectedCity,
+            reporterUserId = reporterUserId.takeIf { it.isNotBlank() },
+            signedIn = isSignedIn,
+        )
+        if (pendingBumpEvent?.id != event.id) return@LaunchedEffect
+        bumpAnalyzing = false
+        bumpVisionTier = outcome.vision.tier
+        bumpReportCreated = outcome.reportCreated
+        bumpUnconfirmedSaved = outcome.unconfirmedId != null
+        bumpUnconfirmedId = outcome.unconfirmedId
+        bumpLocationOnly = outcome.vision.tier == TripBumpVisionTier.NO_FRAMES ||
+            outcome.vision.tier == TripBumpVisionTier.NO_MODEL ||
+            outcome.vision.frameCount <= 0
+        bumpVisionSummary = buildString {
+            append(outcome.vision.summary)
+            outcome.blockedReason?.let { append(' ').append(it) }
+        }
+        if (outcome.reportCreated) {
+            onReportsMutated()
+            CitizenNotificationsRepository.notifyVisionCapture(
+                title = "Pothole auto-captured",
+                body = "Bump + road video drafted a report. ${outcome.vision.summary}",
+            )
+            onNotificationsMutated()
+            onFeedbackMessage("Auto-drafted pothole report from road video")
+        } else if (outcome.unconfirmedId != null) {
+            CitizenNotificationsRepository.notifyVisionCapture(
+                title = "Bump saved (Unconfirmed)",
+                body = outcome.vision.summary.ifBlank {
+                    "A bump was saved for your review."
+                },
+                reportId = outcome.unconfirmedId,
+            )
+            onNotificationsMutated()
+            onFeedbackMessage("Bump saved to Unconfirmed")
+        }
+        delay(18_000L)
+        if (pendingBumpEvent?.id == event.id) {
+            TripImuBumpLog.updateResponse(event.id, TripImuBumpUserResponse.DISMISSED)
+            pendingBumpEvent = null
+        }
+    }
+    // #33 continuous vision — while Navigate + road video ON, YOLO-score newest frames
+    // and auto-capture potholes (High → report, Medium → Unconfirmed). No IMU required.
+    val visionHitCooldown = remember {
+        object {
+            var lastHitEpochMs = 0L
+            var lastHitLat = Double.NaN
+            var lastHitLon = Double.NaN
+        }
+    }
+    LaunchedEffect(
+        tripNavActive,
+        tripRoadVideoEnabled,
+        roadVideoAutoDetectEnabled,
+    ) {
+        if (!tripNavActive || !tripRoadVideoEnabled || !roadVideoAutoDetectEnabled) return@LaunchedEffect
+        while (true) {
+            delay(TripBumpVisionGate.VISION_SCAN_INTERVAL_MS)
+            if (!tripNavActive || !tripRoadVideoEnabled || !roadVideoAutoDetectEnabled) break
+            if (pendingBumpEvent != null || bumpAnalyzing) continue
+            if (TripRoadKeyframeBuffer.size() < TripBumpVisionGate.VISION_MIN_FRAMES) continue
+            val gps = bumpGpsHolder[0] ?: continue
+            val lat = gps.latitude.takeIf { it.isFinite() } ?: continue
+            val lon = gps.longitude.takeIf { it.isFinite() } ?: continue
+            val now = System.currentTimeMillis()
+            if (now - visionHitCooldown.lastHitEpochMs < TripBumpVisionGate.VISION_HIT_COOLDOWN_MS) {
+                val dLat = visionHitCooldown.lastHitLat
+                val dLon = visionHitCooldown.lastHitLon
+                if (dLat.isFinite() && dLon.isFinite()) {
+                    val movedM = TripNavigationMatcher.haversineM(dLat, dLon, lat, lon)
+                    if (movedM < TripBumpVisionGate.VISION_HIT_COOLDOWN_M) continue
+                } else {
+                    continue
+                }
+            }
+            val outcome = TripBumpVisionPipeline.analyzeRoadVideo(
+                context = context,
+                aroundEpochMs = now,
+                lat = lat,
+                lon = lon,
+                cityKey = selectedCity,
+                reporterUserId = reporterUserId.takeIf { it.isNotBlank() },
+                signedIn = isSignedIn,
+                roadBearingDeg = gps.bearing.takeIf { gps.hasBearing() && it.isFinite() },
+            )
+            when {
+                outcome.reportCreated -> {
+                    visionHitCooldown.lastHitEpochMs = now
+                    visionHitCooldown.lastHitLat = lat
+                    visionHitCooldown.lastHitLon = lon
+                    onReportsMutated()
+                    val score = outcome.vision.maxScore
+                    val scorePart = score?.let {
+                        " YOLO ${"%.2f".format(java.util.Locale.US, it)}"
+                    }.orEmpty()
+                    CitizenNotificationsRepository.notifyVisionCapture(
+                        title = "Pothole auto-captured",
+                        body = "Road video drafted a report near your route.$scorePart",
+                    )
+                    onNotificationsMutated()
+                    onFeedbackMessage("Pothole auto-captured from road video")
+                }
+                outcome.unconfirmedId != null -> {
+                    visionHitCooldown.lastHitEpochMs = now
+                    visionHitCooldown.lastHitLat = lat
+                    visionHitCooldown.lastHitLon = lon
+                    val score = outcome.vision.maxScore
+                    val scorePart = score?.let {
+                        " Score ${"%.2f".format(java.util.Locale.US, it)}."
+                    }.orEmpty()
+                    CitizenNotificationsRepository.notifyVisionCapture(
+                        title = "Possible pothole (Unconfirmed)",
+                        body = "Road video saved a candidate for your review.$scorePart",
+                        reportId = outcome.unconfirmedId,
+                    )
+                    onNotificationsMutated()
+                    onFeedbackMessage("Possible pothole saved to Unconfirmed")
+                }
+            }
+        }
+    }
+    // Companion road feed: keep LAN navigator alive whenever Navigate + road video
+    // is ON (even if the map is showing and the camera preview is hidden).
+    LaunchedEffect(
+        tripNavActive,
+        tripModeEnabled,
+        mapFullscreen,
+        tripRoadVideoEnabled,
+        tripCaptureRoad,
+        tripCompanionPairingCode,
+    ) {
+        val wantCompanion =
+            tripNavActive &&
+                tripModeEnabled &&
+                mapFullscreen &&
+                tripRoadVideoEnabled &&
+                tripCaptureRoad == TripCaptureSource.COMPANION
+        if (!wantCompanion) {
+            TripCompanionLan.stopNavigator()
+            return@LaunchedEffect
+        }
+        TripCompanionLan.startNavigator(context, tripCompanionPairingCode)
+        try {
+            kotlinx.coroutines.awaitCancellation()
+        } finally {
+            TripCompanionLan.stopNavigator()
         }
     }
     /**
@@ -1290,6 +2169,12 @@ private fun ReportAndTrackSection(
             }
         }
     }
+    // Keep the display awake during turn-by-turn; power button still turns the screen off.
+    val tripKeepAwakeView = LocalView.current
+    DisposableEffect(tripNavActive) {
+        tripKeepAwakeView.keepScreenOn = tripNavActive
+        onDispose { tripKeepAwakeView.keepScreenOn = false }
+    }
     val tripLifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(tripLifecycleOwner, tripModeEnabled, tripNavActive) {
         val observer = LifecycleEventObserver { _, event ->
@@ -1303,7 +2188,106 @@ private fun ReportAndTrackSection(
     val tripStartUsesMyLocation = tripStartLat == null && tripStartLon == null
     val heatAvailable = CityMetroKeys.canonical(selectedCity) == "BENGALURU"
     LaunchedEffect(heatAvailable) {
-        if (!heatAvailable) areaHeatEnabled = false
+        if (!heatAvailable) setAreaHeatEnabled(false)
+    }
+    LaunchedEffect(mapIssueTypeFilterKey) {
+        if (mapIssueTypeFilterKey != CivicIssueType.POTHOLE.name) setAreaHeatEnabled(false)
+        if (!CivicIssueType.supportsSeverityFilter(mapIssueTypeFilterKey)) {
+            setSeverityFilterKey(null)
+        }
+    }
+    var neighbourhoodLayer by rememberSaveable { mutableStateOf("ROADS") }
+    LaunchedEffect(Unit) {
+        if (!neighbourhoodChrome) {
+            weatherMapEnabled = false
+            weatherBriefing = null
+            weatherRainGrid = null
+        }
+    }
+    var handledOpenTripTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(openTripPlannerTick) {
+        if (openTripPlannerTick > 0 && openTripPlannerTick != handledOpenTripTick) {
+            handledOpenTripTick = openTripPlannerTick
+            tripModeEnabled = true
+            // Planner (destination search, vehicle, Direction) only draws on fullscreen.
+            onMapFullscreenChange(true)
+        }
+    }
+    val weatherAvailable = CityWeatherRepository.supportsWeatherMap(selectedCity)
+    val mapHeatFabVisible = heatAvailable &&
+        mapIssueTypeFilterKey == CivicIssueType.POTHOLE.name &&
+        neighbourhoodChrome &&
+        (mapFullscreen || neighbourhoodMapActive) &&
+        !(tripModeEnabled && mapFullscreen)
+    LaunchedEffect(areaHeatEnabled) {
+        if (areaHeatEnabled) weatherMapEnabled = false
+    }
+    LaunchedEffect(weatherAvailable) {
+        if (!weatherAvailable) {
+            weatherMapEnabled = false
+            weatherBriefing = null
+            weatherRainGrid = null
+        }
+    }
+    LaunchedEffect(neighbourhoodLayer) {
+        if (!neighbourhoodChrome) return@LaunchedEffect
+        when (neighbourhoodLayer) {
+            "SAFETY" -> onFeedbackMessage("Safety layer — coming in a later page.")
+            "CIVIC" -> onFeedbackMessage("Civic types — coming in a later page.")
+        }
+    }
+    var weatherOverlayArmed by remember { mutableStateOf(false) }
+    LaunchedEffect(weatherMapEnabled) {
+        if (!weatherMapEnabled) {
+            weatherOverlayArmed = false
+            weatherBriefing = null
+            return@LaunchedEffect
+        }
+        delay(80)
+        if (weatherMapEnabled && areaHeatEnabled) setAreaHeatEnabled(false)
+        delay(600)
+        if (weatherMapEnabled) weatherOverlayArmed = true
+    }
+    LaunchedEffect(weatherMapEnabled, selectedCity, weatherCadence) {
+        if (!weatherMapEnabled || !CityWeatherRepository.supportsWeatherMap(selectedCity)) {
+            weatherBriefing = null
+            weatherRainGrid = null
+            return@LaunchedEffect
+        }
+        weatherBriefing = null
+        var firstFetch = true
+        while (true) {
+            val hours = weatherCadence.hours
+            try {
+                weatherRainGrid = withContext(Dispatchers.IO) {
+                    CityWeatherRepository.fetchRainGrid(
+                        selectedCity,
+                        hours,
+                        forceRefresh = firstFetch,
+                    )
+                }
+                firstFetch = false
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Keep the last good overlay; do not crash the map session.
+            }
+            try {
+                weatherBriefing = withContext(Dispatchers.IO) {
+                    CityWeatherRepository.fetchAlertBriefing(selectedCity, hours)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Ticker can stay on “Updating weather…”; do not crash the map.
+            }
+            val nowIst = java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Kolkata"))
+            val minutes = nowIst.minute
+            val seconds = nowIst.second
+            val msToNextHour =
+                ((60 - minutes) * 60 - seconds).coerceAtLeast(30) * 1000L
+            delay(minOf(msToNextHour, 15 * 60 * 1000L))
+        }
     }
     LaunchedEffect(tripModeEnabled) {
         if (!tripModeEnabled) {
@@ -1317,6 +2301,9 @@ private fun ReportAndTrackSection(
             tripNavOriginLat = null
             tripNavOriginLon = null
             tripNavActive = false
+            tripDirectionsRevealed = false
+            tripPendingRouteOverview = false
+            tripStops = emptyList()
             TripSessionRepository.clear(context)
         }
     }
@@ -1358,6 +2345,12 @@ private fun ReportAndTrackSection(
         savedMapCenterLon = lon
         savedMapZoom = zoom
     }
+    var mapCityOverviewEpoch by remember { mutableIntStateOf(0) }
+    LaunchedEffect(focusCityOverviewTick) {
+        if (focusCityOverviewTick <= 0) return@LaunchedEffect
+        resetMapCameraToDefault()
+        mapCityOverviewEpoch++
+    }
     LaunchedEffect(expanded, citySearchQuery) {
         if (!expanded) return@LaunchedEffect
         val q = citySearchQuery.trim()
@@ -1375,22 +2368,37 @@ private fun ReportAndTrackSection(
         else indiaPopularPlaces.filter { it.contains(citySearchQuery.trim(), ignoreCase = true) }
     }
 
-    if (!mapFullscreen) {
+    if (!mapFullscreen && !neighbourhoodChrome) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = CitizenSpace.Lg),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        val metroMatchesGps = gpsMetroCity != null && selectedCity == gpsMetroCity
-        val cityChipBorderColor = when {
-            metroMatchesGps -> Color(0xFF000000)
-            gpsMetroCity != null -> Color(0xFF111827)
-            else -> Color(0xFF0F172A)
-        }
-        val cityChipBorderWidth = if (metroMatchesGps) 2.5.dp else 2.dp
-
         Column(modifier = Modifier.weight(1f)) {
-            Text("$selectedCity - POTHOLE DENSITY", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    selectedCity,
+                    style = CitizenType.Section,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    " - ",
+                    style = CitizenType.Section,
+                )
+                Text(
+                    "POTHOLE DENSITY",
+                    style = CitizenType.SectionTrailing,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            }
             CityWeatherSubline(selectedCity = selectedCity)
         }
 
@@ -1401,10 +2409,19 @@ private fun ReportAndTrackSection(
                     searchedPlaces = emptyList()
                     expanded = true
                 },
-                label = { Text("CHANGE CITY", fontSize = 10.sp) },
-                shape = RoundedCornerShape(0.dp),
-                border = BorderStroke(cityChipBorderWidth, cityChipBorderColor),
-                colors = AssistChipDefaults.assistChipColors(labelColor = MaterialTheme.colorScheme.primary)
+                modifier = Modifier.height(CitizenIcon.CapsuleCompact),
+                label = {
+                    Text(
+                        "CHANGE CITY",
+                        style = CitizenType.ChipCompact,
+                    )
+                },
+                shape = CitizenRadius.Capsule,
+                border = BorderStroke(CitizenBorder.Thin, CitizenSelection.InactiveBorder),
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = Color.Transparent,
+                    labelColor = MaterialTheme.colorScheme.onBackground,
+                ),
             )
             
             DropdownMenu(
@@ -1422,13 +2439,13 @@ private fun ReportAndTrackSection(
                     placeholder = { Text("Search cities (Bengaluru live now)", fontSize = 10.sp) },
                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp),
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(CitizenSpace.Xs))
                 if (citySearchQuery.isBlank()) {
                     Text(
                         "More cities coming soon",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                        fontSize = 9.sp,
-                        color = Color(0xFF7B7B7B),
+                        modifier = Modifier.padding(horizontal = CitizenSpace.Lg, vertical = CitizenSpace.Xs),
+                        style = CitizenType.Caption,
+                        color = CitizenInk.Muted,
                     )
                 }
 
@@ -1455,8 +2472,8 @@ private fun ReportAndTrackSection(
                                 if (!cityEnabled) {
                                     Text(
                                         "Coming soon",
-                                        fontSize = 9.sp,
-                                        color = Color(0xFF9E9E9E),
+                                        style = CitizenType.Caption,
+                                        color = CitizenInk.Muted,
                                     )
                                 }
                             }
@@ -1468,7 +2485,7 @@ private fun ReportAndTrackSection(
                             }
                             resetMapCameraToDefault()
                             onCitySelected(cityKey)
-                            mapSeverityFilterKey = null
+                            setSeverityFilterKey(null)
                             expanded = false
                         },
                     )
@@ -1477,10 +2494,10 @@ private fun ReportAndTrackSection(
         }
     }
 
-    Spacer(Modifier.height(8.dp))
+    Spacer(modifier = Modifier.height(CitizenSpace.Sm))
     }
 
-    val mapSeverityFilterLabel = mapSeverityFilter?.title ?: "All"
+    val mapSeverityFilterLabel = mapSeverityFilter?.title ?: "ALL"
     val gpsAccuracyText = remember(gpsPinLocation?.accuracy, gpsPinLocation?.time) {
         val loc = gpsPinLocation
         if (loc != null && loc.hasAccuracy()) {
@@ -1489,51 +2506,55 @@ private fun ReportAndTrackSection(
             "GPS searching..."
         }
     }
-    if (!mapFullscreen) {
+    if (!mapFullscreen && !neighbourhoodChrome) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = CitizenSpace.Lg),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
             Text(
                 "Severity",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
+                style = CitizenType.Label,
                 color = MaterialTheme.colorScheme.onBackground,
             )
-            Spacer(Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(CitizenSpace.Sm))
             Box {
                 AssistChip(
                     onClick = { severityMenuExpanded = true },
+                    modifier = Modifier.height(CitizenIcon.CapsuleCompact),
                     label = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 mapSeverityFilterLabel,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                style = CitizenType.Chip,
                             )
                             Icon(
                                 imageVector = Icons.Filled.ArrowDropDown,
                                 contentDescription = null,
-                                modifier = Modifier.size(18.dp),
+                                modifier = Modifier.size(CitizenIcon.Chip),
                                 tint = if (mapSeverityFilter != null) {
-                                    Color(0xFFB91C1C)
+                                    CitizenSelection.Active
                                 } else {
                                     MaterialTheme.colorScheme.onBackground
                                 },
                             )
                         }
                     },
-                    shape = RoundedCornerShape(0.dp),
+                    shape = CitizenRadius.Capsule,
                     border = BorderStroke(
-                        1.dp,
-                        if (mapSeverityFilter != null) Color(0xFFB91C1C) else Color(0xFF9CA3AF),
+                        CitizenBorder.Thin,
+                        if (mapSeverityFilter != null) CitizenSelection.Active else CitizenSelection.InactiveBorder,
                     ),
                     colors = AssistChipDefaults.assistChipColors(
+                        containerColor = if (mapSeverityFilter != null) {
+                            CitizenSelection.ActiveSoft
+                        } else {
+                            Color.Transparent
+                        },
                         labelColor = if (mapSeverityFilter != null) {
-                            Color(0xFFB91C1C)
+                            CitizenSelection.Active
                         } else {
                             MaterialTheme.colorScheme.onBackground
                         },
@@ -1544,9 +2565,9 @@ private fun ReportAndTrackSection(
                     onDismissRequest = { severityMenuExpanded = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("All") },
+                        text = { Text("ALL") },
                         onClick = {
-                            mapSeverityFilterKey = null
+                            setSeverityFilterKey(null)
                             severityMenuExpanded = false
                         },
                     )
@@ -1554,7 +2575,7 @@ private fun ReportAndTrackSection(
                         DropdownMenuItem(
                             text = { Text(severity.title) },
                             onClick = {
-                                mapSeverityFilterKey = severity.name
+                                setSeverityFilterKey(severity.name)
                                 severityMenuExpanded = false
                             },
                         )
@@ -1577,72 +2598,83 @@ private fun ReportAndTrackSection(
                 }
             },
             label = {
-                Text("Trip", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text("Trip", style = CitizenType.Chip)
             },
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Filled.Navigation,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(CitizenIcon.Chip),
                 )
             },
-            shape = RoundedCornerShape(50),
+            shape = CitizenRadius.Capsule,
             border = BorderStroke(
-                1.dp,
-                if (tripNavActive) Color(0xFFB91C1C) else Color(0xFF9CA3AF),
+                CitizenBorder.Thin,
+                if (tripNavActive) CitizenSelection.Active else CitizenSelection.InactiveBorder,
             ),
             colors = FilterChipDefaults.filterChipColors(
                 containerColor = Color.Transparent,
                 labelColor = MaterialTheme.colorScheme.onBackground,
                 iconColor = MaterialTheme.colorScheme.onBackground,
-                selectedContainerColor = Color(0xFFB91C1C),
-                selectedLabelColor = Color.White,
-                selectedLeadingIconColor = Color.White,
+                selectedContainerColor = CitizenSelection.Active,
+                selectedLabelColor = CitizenSelection.ActiveContent,
+                selectedLeadingIconColor = CitizenSelection.ActiveContent,
             ),
-            modifier = Modifier.padding(end = 8.dp),
+            modifier = Modifier
+                .height(CitizenIcon.CapsuleCompact)
+                .padding(end = CitizenSpace.Sm),
         )
         if (heatAvailable) {
             FilterChip(
                 selected = areaHeatEnabled,
-                onClick = { areaHeatEnabled = !areaHeatEnabled },
+                modifier = Modifier
+                    .height(CitizenIcon.CapsuleCompact)
+                    .padding(end = CitizenSpace.Sm),
+                onClick = { setAreaHeatEnabled(!areaHeatEnabled) },
                 label = {
                     Text(
                         "Heat",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        style = CitizenType.Chip,
                     )
                 },
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Filled.Whatshot,
                         contentDescription = null,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(CitizenIcon.Chip),
                     )
                 },
-                shape = RoundedCornerShape(50),
+                shape = CitizenRadius.Capsule,
                 border = BorderStroke(
-                    1.dp,
-                    if (areaHeatEnabled) Color(0xFFB91C1C) else Color(0xFF9CA3AF),
+                    CitizenBorder.Thin,
+                    if (areaHeatEnabled) CitizenSelection.Active else CitizenSelection.InactiveBorder,
                 ),
                 colors = FilterChipDefaults.filterChipColors(
                     containerColor = Color.Transparent,
                     labelColor = MaterialTheme.colorScheme.onBackground,
                     iconColor = MaterialTheme.colorScheme.onBackground,
-                    selectedContainerColor = Color(0xFFB91C1C),
-                    selectedLabelColor = Color.White,
-                    selectedLeadingIconColor = Color.White,
+                    selectedContainerColor = CitizenSelection.Active,
+                    selectedLabelColor = CitizenSelection.ActiveContent,
+                    selectedLeadingIconColor = CitizenSelection.ActiveContent,
                 ),
             )
         }
     }
 
-    Spacer(Modifier.height(8.dp))
+    Spacer(modifier = Modifier.height(CitizenSpace.Sm))
     }
 
     var tripAlerts by remember { mutableStateOf<List<TripPotholeAlert>>(emptyList()) }
     var tripRoutePoints by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
     var tripRouteSteps by remember { mutableStateOf<List<OsrmRouteStep>>(emptyList()) }
     var tripRouteOptions by remember { mutableStateOf<List<OsrmRouteResult>>(emptyList()) }
+    /** #23.2 chip hints aligned with [tripRouteOptions] (e.g. safer-road label). */
+    var tripRouteSaferHints by remember { mutableStateOf<List<String?>>(emptyList()) }
+    /**
+     * Background OSRM result filled as soon as origin + destination are known,
+     * before Direction / Navigation — so those taps can paint instantly.
+     */
+    var tripRoutePrefetch by remember { mutableStateOf<TripRoutePrefetchCache?>(null) }
     /** Preview corridors retained after Navigate for deviation “tap to use”. */
     var tripKnownAlternates by remember { mutableStateOf<List<OsrmRouteResult>>(emptyList()) }
     var tripSelectedRouteIndex by remember { mutableIntStateOf(0) }
@@ -1652,18 +2684,58 @@ private fun ReportAndTrackSection(
     var tripRouteDurationSec by remember { mutableStateOf<Double?>(null) }
     var tripRouteStatus by remember { mutableStateOf(TripRouteStatus.IDLE) }
     var tripArrived by remember { mutableStateOf(false) }
+    /** Nearby shops / localities shown after arrival (non-overlapping labels + card). */
+    var tripArrivalPlaces by remember { mutableStateOf<List<NearbyOsmPoi>>(emptyList()) }
+    var showTripArrivalCard by remember { mutableStateOf(false) }
+    var tripArrivalLookupDone by remember { mutableStateOf(false) }
+
+    /**
+     * Offline-capable cursor: coasts from last GPS + gyro/compass heading along the
+     * known route when satellite updates pause (no internet / weak A-GPS).
+     */
+    var tripCursorLocation by remember { mutableStateOf<Location?>(gpsPinLocation) }
+    LaunchedEffect(
+        tripNavActive,
+        gpsPinLocation?.latitude,
+        gpsPinLocation?.longitude,
+        gpsPinLocation?.speed,
+        gpsPinLocation?.bearing,
+        gpsPinLocation?.elapsedRealtimeNanos,
+        tripDeviceHeadingDeg,
+        tripRoutePoints,
+    ) {
+        if (!tripNavActive) {
+            tripCursorLocation = gpsPinLocation
+            return@LaunchedEffect
+        }
+        while (isActive) {
+            tripCursorLocation = TripDeadReckoning.displayLocation(
+                lastFix = gpsPinLocation,
+                deviceHeadingDeg = tripDeviceHeadingDeg,
+                routePoints = tripRoutePoints,
+            )
+            delay(200)
+        }
+    }
+    /** Map / follow / progress use this; raw [gpsPinLocation] stays for online reroute. */
+    val tripMapGps = tripCursorLocation ?: gpsPinLocation
     var tripRerouting by remember { mutableStateOf(false) }
     var tripRouteRequestEpoch by remember { mutableIntStateOf(0) }
     var mapConnectivityEpoch by remember { mutableIntStateOf(0) }
+    var tripNavOnline by remember {
+        mutableStateOf(NetworkReachability.hasInternet(context))
+    }
     var rerouteOriginLat by remember { mutableStateOf<Double?>(null) }
     var rerouteOriginLon by remember { mutableStateOf<Double?>(null) }
     var lastRerouteAtMs by remember { mutableStateOf(0L) }
     var tripStartCorrectionDone by remember { mutableStateOf(false) }
     /** Dashed return-to-route polyline while hybrid prefers rejoin. */
     var tripRejoinPoints by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
-    /** Index into [tripKnownAlternates] offered for tap-to-confirm, or null. */
+    /** Index into [tripKnownAlternates] briefly offered (legacy tap UI); usually null — alts auto-adopt. */
     var tripOfferedAlternateIndex by remember { mutableStateOf<Int?>(null) }
     val announcedPotholeIds = remember { mutableSetOf<Long>() }
+    val potholeSpeakCounts = remember { mutableMapOf<Long, Int>() }
+    val potholeLastSpeakAtMs = remember { mutableMapOf<Long, Long>() }
     val bbox = remember(selectedCity) { metroBboxForCity(selectedCity) }
 
     // Holders so the connectivity callback always sees the latest trip/GPS state.
@@ -1671,18 +2743,32 @@ private fun ReportAndTrackSection(
         object {
             var navActive = false
             var arrived = false
+            var modeEnabled = false
+            var directionsRevealed = false
+            var hasDest = false
             var gps: Location? = null
         }
     }
     tripNavOnlineHolder.navActive = tripNavActive
     tripNavOnlineHolder.arrived = tripArrived
+    tripNavOnlineHolder.modeEnabled = tripModeEnabled
+    tripNavOnlineHolder.directionsRevealed = tripDirectionsRevealed
+    tripNavOnlineHolder.hasDest = tripDestLat != null && tripDestLon != null
     tripNavOnlineHolder.gps = gpsPinLocation
 
-    // When internet returns mid-trip: refresh basemap tiles and quietly update the route.
+    // Connectivity: offline chip during nav; on reconnect refresh tiles + sync routes.
     DisposableEffect(Unit) {
         val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
-        val unregister = NetworkReachability.registerOnlineListener(context) {
+        val onlineSnap = object {
+            var online = NetworkReachability.hasInternet(context)
+        }
+        onlineSnap.online = tripNavOnline
+        val unregister = NetworkReachability.registerConnectivityListener(context) { online ->
             mainHandler.post {
+                val wasOffline = !onlineSnap.online
+                onlineSnap.online = online
+                tripNavOnline = online
+                if (!online || !wasOffline) return@post
                 mapConnectivityEpoch++
                 val holder = tripNavOnlineHolder
                 if (holder.navActive && !holder.arrived) {
@@ -1694,6 +2780,10 @@ private fun ReportAndTrackSection(
                         tripRerouting = true
                         tripRouteRequestEpoch++
                     }
+                } else if (holder.modeEnabled && holder.hasDest) {
+                    // Planning / Direction: drop warm packs so OSRM re-fetches from live start.
+                    tripRoutePrefetch = null
+                    tripRouteRequestEpoch++
                 }
             }
         }
@@ -1710,24 +2800,179 @@ private fun ReportAndTrackSection(
         tripRouteUserPicked = true
     }
 
-    fun confirmOfferedKnownAlternate() {
-        val idx = tripOfferedAlternateIndex ?: return
-        val option = tripKnownAlternates.getOrNull(idx) ?: return
+    fun clearTripDeviationUi() {
+        tripRejoinPoints = emptyList()
+        tripOfferedAlternateIndex = null
+    }
+
+    fun adoptKnownAlternate(index: Int) {
+        val option = tripKnownAlternates.getOrNull(index) ?: return
+        // Already navigating this corridor — don't re-apply or toast-spam.
+        if (TripNavigationMatcher.routesLookAlike(option.points, tripRoutePoints)) {
+            if (tripRejoinPoints.isNotEmpty() || tripOfferedAlternateIndex != null) {
+                clearTripDeviationUi()
+            }
+            return
+        }
         tripRoutePoints = option.points
         tripRouteSteps = option.steps
         tripRouteDurationSec = option.durationSeconds
         tripRouteStatus = TripRouteStatus.ACTIVE
+        tripSelectedRouteIndex = 0
         tripOfferedAlternateIndex = null
         tripRejoinPoints = emptyList()
         tripRerouting = false
         rerouteOriginLat = null
         rerouteOriginLon = null
         lastRerouteAtMs = SystemClock.elapsedRealtime()
+        onFeedbackMessage("Continuing on alternate route")
     }
 
-    fun clearTripDeviationUi() {
-        tripRejoinPoints = emptyList()
-        tripOfferedAlternateIndex = null
+    fun confirmOfferedKnownAlternate() {
+        val idx = tripOfferedAlternateIndex ?: return
+        adoptKnownAlternate(idx)
+    }
+
+    /** Paint planner / map from a background prefetch (no network). */
+    fun applyTripPrefetchToPlanner(
+        cache: TripRoutePrefetchCache,
+        preferPrevious: OsrmRouteResult? = null,
+    ): Boolean {
+        if (cache.routes.isEmpty()) return false
+        val selectedIndex = if (preferPrevious != null) {
+            cache.routes.indexOfFirst { osrmRoutesLookAlike(it, preferPrevious) }
+                .takeIf { it >= 0 } ?: 0
+        } else {
+            0
+        }
+        tripRouteOptions = cache.routes
+        tripRouteSaferHints = cache.hints
+        tripSelectedRouteIndex = selectedIndex
+        val selected = cache.routes[selectedIndex]
+        tripRoutePoints = selected.points
+        tripRouteSteps = selected.steps
+        tripRouteDurationSec = selected.durationSeconds
+        tripRouteStatus = TripRouteStatus.ACTIVE
+        tripArrived = false
+        return true
+    }
+
+    fun currentPlannerOriginLatLon(): Pair<Double, Double>? {
+        val lat = tripStartLat ?: gpsPinLocation?.latitude
+        val lon = tripStartLon ?: gpsPinLocation?.longitude
+        if (lat == null || lon == null || !lat.isFinite() || !lon.isFinite()) return null
+        return lat to lon
+    }
+
+    fun tryApplyMatchingPrefetch(
+        originLat: Double,
+        originLon: Double,
+        destLat: Double,
+        destLon: Double,
+        viaPoints: List<Pair<Double, Double>>,
+        preferPrevious: OsrmRouteResult? = null,
+    ): Boolean {
+        val cache = tripRoutePrefetch ?: return false
+        if (!tripRoutePrefetchMatches(
+                cache,
+                originLat,
+                originLon,
+                destLat,
+                destLon,
+                tripVehicle,
+                viaPoints,
+            )
+        ) {
+            return false
+        }
+        return applyTripPrefetchToPlanner(cache, preferPrevious)
+    }
+
+    /** Persist a successful OSRM pack for offline Direction after start drift. */
+    fun rememberTripRouteOffline(
+        originLat: Double,
+        originLon: Double,
+        destLat: Double,
+        destLon: Double,
+        viaPoints: List<Pair<Double, Double>>,
+        routes: List<OsrmRouteResult>,
+        hints: List<String?>,
+    ) {
+        TripRouteOfflineCache.remember(
+            context = context,
+            originLat = originLat,
+            originLon = originLon,
+            destLat = destLat,
+            destLon = destLon,
+            vehicle = tripVehicle,
+            viaPoints = viaPoints,
+            routes = routes,
+            hints = hints,
+        )
+    }
+
+    /**
+     * Offline Direction: destination already known + cached route pack.
+     * [looseOrigin] allows GPS / start updates while offline.
+     */
+    fun tryApplyOfflineRouteCache(
+        originLat: Double,
+        originLon: Double,
+        destLat: Double,
+        destLon: Double,
+        viaPoints: List<Pair<Double, Double>>,
+        preferPrevious: OsrmRouteResult? = null,
+        looseOrigin: Boolean = true,
+    ): Boolean {
+        val entry = TripRouteOfflineCache.findBest(
+            context = context,
+            originLat = originLat,
+            originLon = originLon,
+            destLat = destLat,
+            destLon = destLon,
+            vehicle = tripVehicle,
+            viaPoints = viaPoints,
+            looseOrigin = looseOrigin,
+        ) ?: return false
+        val cache = TripRoutePrefetchCache(
+            originLat = entry.originLat,
+            originLon = entry.originLon,
+            destLat = entry.destLat,
+            destLon = entry.destLon,
+            vehicle = entry.vehicle,
+            viaPoints = entry.viaPoints,
+            routes = entry.routes,
+            hints = entry.hints,
+        )
+        tripRoutePrefetch = cache
+        return applyTripPrefetchToPlanner(cache, preferPrevious)
+    }
+
+    fun tryApplyAnyCachedRoute(
+        originLat: Double,
+        originLon: Double,
+        destLat: Double,
+        destLon: Double,
+        viaPoints: List<Pair<Double, Double>>,
+        preferPrevious: OsrmRouteResult? = null,
+        offlineLooseOrigin: Boolean = false,
+    ): Boolean {
+        if (
+            tryApplyMatchingPrefetch(
+                originLat, originLon, destLat, destLon, viaPoints, preferPrevious,
+            )
+        ) {
+            return true
+        }
+        return tryApplyOfflineRouteCache(
+            originLat = originLat,
+            originLon = originLon,
+            destLat = destLat,
+            destLon = destLon,
+            viaPoints = viaPoints,
+            preferPrevious = preferPrevious,
+            looseOrigin = offlineLooseOrigin,
+        )
     }
 
     // Restore trip after leaving Home mid-navigation (report / tab / process recreate).
@@ -1739,7 +2984,7 @@ private fun ReportAndTrackSection(
         val snap = TripSessionRepository.restore(context) ?: return@LaunchedEffect
         if (!snap.tripModeEnabled) return@LaunchedEffect
         tripModeEnabled = true
-        tripStreetFollow = snap.tripStreetFollow
+        tripCameraModeName = TripCameraMode.fromStorage(snap.tripCameraMode, snap.tripStreetFollow).name
         tripVehicleName = snap.vehicleName
         tripDestLat = snap.destLat
         tripDestLon = snap.destLon
@@ -1753,16 +2998,91 @@ private fun ReportAndTrackSection(
             tripRoutePoints = snap.routePoints
             tripRouteDurationSec = snap.routeDurationSec
             tripRouteStatus = TripRouteStatus.ACTIVE
+            tripDirectionsRevealed = true
         }
         tripNavActive = snap.tripNavActive
+        if (snap.tripNavActive) tripDirectionsRevealed = true
         onTripNavigationActiveChanged(snap.tripModeEnabled || snap.tripNavActive)
         // Trip UI lives on the fullscreen map — reopen it when restoring a session.
         onMapFullscreenChange(true)
     }
+
+    // SOS Roadside Assist → navigate here / add stop (after Emergency closes).
+    val sosAssistLifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(sosAssistLifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event != Lifecycle.Event.ON_RESUME) return@LifecycleEventObserver
+            val req = SosAssistNavRequest.consume() ?: return@LifecycleEventObserver
+            when (req.mode) {
+                SosAssistNavRequest.Mode.REPLACE_AS_DESTINATION -> {
+                    tripModeEnabled = true
+                    tripStops = emptyList()
+                    tripDestLat = req.latitude
+                    tripDestLon = req.longitude
+                    tripDestLabel = req.label
+                    tripArrived = false
+                    showTripArrivalCard = false
+                    tripArrivalPlaces = emptyList()
+                    tripDirectionsRevealed = true
+                    tripRouteUserPicked = false
+                    tripPendingRouteOverview = false
+                    tripRoutePrefetch = null
+                    tripStartCorrectionDone = false
+                    onMapFullscreenChange(true)
+                    tripScope.launch {
+                        val gps = onEnsureFreshGpsForTrip() ?: gpsPinLocation
+                        tripNavOriginLat = gps?.latitude
+                        tripNavOriginLon = gps?.longitude
+                        tripNavActive = true
+                        tripRouteRequestEpoch++
+                        onFeedbackMessage("Navigating to ${req.label}")
+                    }
+                }
+                SosAssistNavRequest.Mode.ADD_AS_STOP -> {
+                    if (tripDestLat == null || tripDestLon == null) {
+                        // No destination yet — treat as new destination.
+                        tripModeEnabled = true
+                        tripDestLat = req.latitude
+                        tripDestLon = req.longitude
+                        tripDestLabel = req.label
+                        tripDirectionsRevealed = true
+                        tripRouteUserPicked = false
+                        tripPendingRouteOverview = true
+                        tripRoutePrefetch = null
+                        onMapFullscreenChange(true)
+                        tripRouteRequestEpoch++
+                        onFeedbackMessage("Added ${req.label} as destination")
+                    } else {
+                        tripModeEnabled = true
+                        val stop = TripStopPlace(
+                            label = req.label,
+                            latitude = req.latitude,
+                            longitude = req.longitude,
+                        )
+                        tripStops = if (tripStops.size >= MAX_TRIP_STOPS) {
+                            tripStops.drop(1) + stop
+                        } else {
+                            tripStops + stop
+                        }
+                        tripRouteUserPicked = false
+                        tripDirectionsRevealed = true
+                        tripRoutePrefetch = null
+                        onMapFullscreenChange(true)
+                        tripRouteRequestEpoch++
+                        onFeedbackMessage("Added ${req.label} as a stop")
+                    }
+                }
+            }
+        }
+        sosAssistLifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { sosAssistLifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(
         tripModeEnabled,
         tripNavActive,
         tripStreetFollow,
+        tripCameraModeName,
         tripVehicleName,
         tripDestLat,
         tripDestLon,
@@ -1782,6 +3102,7 @@ private fun ReportAndTrackSection(
                 tripModeEnabled = tripModeEnabled,
                 tripNavActive = tripNavActive,
                 tripStreetFollow = tripStreetFollow,
+                tripCameraMode = tripCameraMode.name,
                 vehicleName = tripVehicleName,
                 destLat = tripDestLat,
                 destLon = tripDestLon,
@@ -1797,6 +3118,126 @@ private fun ReportAndTrackSection(
         )
     }
 
+    /**
+     * As soon as start + destination are known (search or map tap), warm OSRM
+     * in the background so Direction / Navigation can show instantly.
+     */
+    LaunchedEffect(
+        tripModeEnabled,
+        tripNavActive,
+        tripDirectionsRevealed,
+        tripStartLat,
+        tripStartLon,
+        tripDestLat,
+        tripDestLon,
+        tripVehicle,
+        tripStops,
+        if (tripStartUsesMyLocation) {
+            gpsPinLocation?.latitude?.let { (it * 200).toInt() }
+        } else {
+            null
+        },
+        if (tripStartUsesMyLocation) {
+            gpsPinLocation?.longitude?.let { (it * 200).toInt() }
+        } else {
+            null
+        },
+    ) {
+        if (!tripModeEnabled || tripNavActive || tripDirectionsRevealed) return@LaunchedEffect
+        val destLat = tripDestLat
+        val destLon = tripDestLon
+        if (destLat == null || destLon == null) {
+            tripRoutePrefetch = null
+            return@LaunchedEffect
+        }
+        val origin = currentPlannerOriginLatLon()
+        if (origin == null) {
+            tripRoutePrefetch = null
+            return@LaunchedEffect
+        }
+        val (originLat, originLon) = origin
+        val viaPoints = tripStops.map { it.latitude to it.longitude }
+        val existing = tripRoutePrefetch
+        if (
+            existing != null &&
+            tripRoutePrefetchMatches(
+                existing,
+                originLat,
+                originLon,
+                destLat,
+                destLon,
+                tripVehicle,
+                viaPoints,
+            )
+        ) {
+            return@LaunchedEffect
+        }
+        delay(180)
+        if (!NetworkReachability.hasInternet(context)) {
+            // Offline: warm in-memory prefetch from durable cache so Direction still works
+            // when the destination is known and the start / GPS has moved.
+            val offline = TripRouteOfflineCache.findBest(
+                context = context,
+                originLat = originLat,
+                originLon = originLon,
+                destLat = destLat,
+                destLon = destLon,
+                vehicle = tripVehicle,
+                viaPoints = viaPoints,
+                looseOrigin = true,
+            )
+            if (offline != null) {
+                tripRoutePrefetch = TripRoutePrefetchCache(
+                    originLat = offline.originLat,
+                    originLon = offline.originLon,
+                    destLat = offline.destLat,
+                    destLon = offline.destLon,
+                    vehicle = offline.vehicle,
+                    viaPoints = offline.viaPoints,
+                    routes = offline.routes,
+                    hints = offline.hints,
+                )
+            }
+            return@LaunchedEffect
+        }
+        val gps = gpsPinLocation
+        val snapRadius = OsrmRouteClient.snapRadiusForAccuracy(
+            gps?.takeIf { it.hasAccuracy() }?.accuracy,
+        )
+        val routes = runCatching {
+            OsrmRouteClient.fetchRoutes(
+                originLat,
+                originLon,
+                destLat,
+                destLon,
+                tripVehicle,
+                snapRadiusM = snapRadius,
+                viaPoints = viaPoints,
+            )
+        }.getOrNull().orEmpty()
+        if (routes.isEmpty()) return@LaunchedEffect
+        val ranked = rankTripRoutesByPotholeRisk(selectedCity, routes)
+        tripRoutePrefetch = TripRoutePrefetchCache(
+            originLat = originLat,
+            originLon = originLon,
+            destLat = destLat,
+            destLon = destLon,
+            vehicle = tripVehicle,
+            viaPoints = viaPoints,
+            routes = ranked.routes,
+            hints = ranked.hints,
+        )
+        rememberTripRouteOffline(
+            originLat = originLat,
+            originLon = originLon,
+            destLat = destLat,
+            destLon = destLon,
+            viaPoints = viaPoints,
+            routes = ranked.routes,
+            hints = ranked.hints,
+        )
+    }
+
     /** Fetch route for preview (start+dest) and again while navigating / rerouting. */
     LaunchedEffect(
         tripModeEnabled,
@@ -1806,6 +3247,7 @@ private fun ReportAndTrackSection(
         tripDestLat,
         tripDestLon,
         tripVehicle,
+        tripStops,
         // Coarse GPS bucket (~500 m) so preview does not refetch/reset the user's
         // chosen alternate on every small location jitter.
         if (tripStartUsesMyLocation) {
@@ -1821,11 +3263,14 @@ private fun ReportAndTrackSection(
         tripRouteRequestEpoch,
         tripNavOriginLat,
         tripNavOriginLon,
+        tripDirectionsRevealed,
     ) {
         if (!tripModeEnabled) {
             tripRoutePoints = emptyList()
             tripRouteSteps = emptyList()
             tripRouteOptions = emptyList()
+            tripRouteSaferHints = emptyList()
+            tripRoutePrefetch = null
             tripKnownAlternates = emptyList()
             tripSelectedRouteIndex = 0
             tripRouteUserPicked = false
@@ -1842,6 +3287,8 @@ private fun ReportAndTrackSection(
             tripStartCorrectionDone = false
             clearTripDeviationUi()
             announcedPotholeIds.clear()
+            potholeSpeakCounts.clear()
+            potholeLastSpeakAtMs.clear()
             return@LaunchedEffect
         }
         val destLat = tripDestLat
@@ -1850,8 +3297,28 @@ private fun ReportAndTrackSection(
             tripRoutePoints = emptyList()
             tripRouteSteps = emptyList()
             tripRouteOptions = emptyList()
+            tripRouteSaferHints = emptyList()
+            tripRoutePrefetch = null
             tripKnownAlternates = emptyList()
             tripSelectedRouteIndex = 0
+            tripNextTurn = null
+            tripRouteProgress = null
+            tripRouteDurationSec = null
+            tripRouteStatus = TripRouteStatus.IDLE
+            tripAlerts = emptyList()
+            tripRerouting = false
+            clearTripDeviationUi()
+            return@LaunchedEffect
+        }
+        // Planning: keep route hidden until Direction, but leave [tripRoutePrefetch] warm.
+        if (!tripNavActive && !tripDirectionsRevealed) {
+            tripRoutePoints = emptyList()
+            tripRouteSteps = emptyList()
+            tripRouteOptions = emptyList()
+            tripRouteSaferHints = emptyList()
+            tripKnownAlternates = emptyList()
+            tripSelectedRouteIndex = 0
+            tripRouteUserPicked = false
             tripNextTurn = null
             tripRouteProgress = null
             tripRouteDurationSec = null
@@ -1878,6 +3345,10 @@ private fun ReportAndTrackSection(
             // Only true for mid-trip off-route / start-correction refetches — not the
             // initial Navigate press (that must keep the user's chosen alternate).
             val isRerouteRequest = rerouteOriginLat != null
+            val routeSnapRadius = OsrmRouteClient.snapRadiusForAccuracy(
+                gps?.takeIf { it.hasAccuracy() }?.accuracy,
+            )
+            val stopVias = tripStops.map { it.latitude to it.longitude }
             // Offline: keep the current polyline and live GPS cursor — never hang on OSRM.
             if (isRerouteRequest && !NetworkReachability.hasInternet(context)) {
                 tripRerouting = false
@@ -1909,61 +3380,164 @@ private fun ReportAndTrackSection(
                         tripKnownAlternates = tripRouteOptions
                     }
                     tripRouteOptions = emptyList()
+                    tripRouteSaferHints = emptyList()
                     tripRouteStatus = TripRouteStatus.ACTIVE
                     tripRerouting = false
                     clearTripDeviationUi()
                 } else {
+                    // Prefer warm prefetch / offline pack for the first Navigate tap (no Direction first).
+                    if (
+                        !isRerouteRequest &&
+                        tryApplyAnyCachedRoute(
+                            originLat,
+                            originLon,
+                            destLat,
+                            destLon,
+                            stopVias,
+                            offlineLooseOrigin = !NetworkReachability.hasInternet(context),
+                        )
+                    ) {
+                        tripKnownAlternates = tripRouteOptions
+                        tripRouteOptions = emptyList()
+                        tripRouteSaferHints = emptyList()
+                        tripRouteStatus = TripRouteStatus.ACTIVE
+                        tripRerouting = false
+                        clearTripDeviationUi()
+                        rerouteOriginLat = null
+                        rerouteOriginLon = null
+                    } else if (!NetworkReachability.hasInternet(context)) {
+                        // Offline with no usable pack — keep geometry if any; else NO_ROUTE.
+                        clearTripDeviationUi()
+                        if (preserveCurrentRouteOnFailure) {
+                            tripRouteStatus = TripRouteStatus.ACTIVE
+                        } else {
+                            tripRouteStatus = TripRouteStatus.NO_ROUTE
+                        }
+                        tripRerouting = false
+                        rerouteOriginLat = null
+                        rerouteOriginLon = null
+                    } else {
                     // Mid-trip refetch: prefer a route that matches the corridor in use.
                     clearTripDeviationUi()
                     val preferredPoints = tripRoutePoints
                     val routes = runCatching {
                         OsrmRouteClient.fetchRoutes(
-                            originLat, originLon, destLat, destLon, tripVehicle,
+                originLat, originLon, destLat, destLon, tripVehicle,
+                            snapRadiusM = routeSnapRadius,
+                            viaPoints = stopVias,
                         )
                     }.getOrNull().orEmpty()
                     val route = pickOsrmRouteMatchingPoints(routes, preferredPoints)
                     if (route != null && route.points.size >= 2) {
                         tripRouteOptions = emptyList()
+                        tripRouteSaferHints = emptyList()
                         // Refresh known alts from the new fetch so future detours can offer them.
                         if (routes.size > 1) {
-                            tripKnownAlternates = routes
+                            tripKnownAlternates = rankTripRoutesByPotholeRisk(selectedCity, routes).routes
                         }
                         tripSelectedRouteIndex = 0
                         tripRoutePoints = route.points
                         tripRouteSteps = route.steps
                         tripRouteDurationSec = route.durationSeconds
                         tripRouteStatus = TripRouteStatus.ACTIVE
+                        rememberTripRouteOffline(
+                            originLat = originLat,
+                            originLon = originLon,
+                            destLat = destLat,
+                            destLon = destLon,
+                            viaPoints = stopVias,
+                            routes = if (routes.isNotEmpty()) {
+                                rankTripRoutesByPotholeRisk(selectedCity, routes).routes
+                            } else {
+                                listOf(route)
+                            },
+                            hints = emptyList(),
+                        )
                         rerouteOriginLat = null
                         rerouteOriginLon = null
                     } else if (!preserveCurrentRouteOnFailure) {
                         tripRoutePoints = emptyList()
                         tripRouteSteps = emptyList()
                         tripRouteOptions = emptyList()
+                        tripRouteSaferHints = emptyList()
                         tripSelectedRouteIndex = 0
                         tripNextTurn = null
                         tripRouteDurationSec = null
                         tripRouteStatus = TripRouteStatus.NO_ROUTE
-                    } else {
+            } else {
                         // Keep previous geometry + steps so turn guidance does not blank out.
                         tripRouteStatus = TripRouteStatus.ACTIVE
                         rerouteOriginLat = null
                         rerouteOriginLon = null
                     }
+                    }
                 }
             } else {
+                val previous = tripRouteOptions.getOrNull(tripSelectedRouteIndex)
+                if (
+                    tryApplyAnyCachedRoute(
+                        originLat,
+                        originLon,
+                        destLat,
+                        destLon,
+                        stopVias,
+                        preferPrevious = if (tripRouteUserPicked) previous else null,
+                        offlineLooseOrigin = !NetworkReachability.hasInternet(context),
+                    )
+                ) {
+                    // Instant Direction paint from warm / offline cache — no OSRM round-trip.
+                    tripArrived = false
+                    rerouteOriginLat = null
+                    rerouteOriginLon = null
+                } else if (!NetworkReachability.hasInternet(context)) {
+                    if (preserveCurrentRouteOnFailure) {
+                        tripRouteStatus = TripRouteStatus.ACTIVE
+        } else {
+            tripRoutePoints = emptyList()
+                        tripRouteSteps = emptyList()
+                        tripRouteOptions = emptyList()
+                        tripRouteSaferHints = emptyList()
+                        tripSelectedRouteIndex = 0
+                        tripNextTurn = null
+                        tripRouteDurationSec = null
+                        tripRouteStatus = TripRouteStatus.NO_ROUTE
+                    }
+                } else {
                 val routes = runCatching {
                     OsrmRouteClient.fetchRoutes(
                         originLat, originLon, destLat, destLon, tripVehicle,
+                        snapRadiusM = routeSnapRadius,
+                        viaPoints = stopVias,
                     )
                 }.getOrNull().orEmpty()
                 if (routes.isNotEmpty()) {
-                    val previous = tripRouteOptions.getOrNull(tripSelectedRouteIndex)
-                    tripRouteOptions = routes
+                    val ranked = rankTripRoutesByPotholeRisk(selectedCity, routes)
+                    tripRouteOptions = ranked.routes
+                    tripRouteSaferHints = ranked.hints
+                    tripRoutePrefetch = TripRoutePrefetchCache(
+                        originLat = originLat,
+                        originLon = originLon,
+                        destLat = destLat,
+                        destLon = destLon,
+                        vehicle = tripVehicle,
+                        viaPoints = stopVias,
+                        routes = ranked.routes,
+                        hints = ranked.hints,
+                    )
+                    rememberTripRouteOffline(
+                        originLat = originLat,
+                        originLon = originLon,
+                        destLat = destLat,
+                        destLon = destLon,
+                        viaPoints = stopVias,
+                        routes = ranked.routes,
+                        hints = ranked.hints,
+                    )
                     val selectedIndex = when {
                         tripRouteUserPicked && previous != null -> {
-                            routes.indexOfFirst { osrmRoutesLookAlike(it, previous) }
+                            ranked.routes.indexOfFirst { osrmRoutesLookAlike(it, previous) }
                                 .takeIf { it >= 0 }
-                                ?: tripSelectedRouteIndex.coerceIn(0, routes.lastIndex)
+                                ?: tripSelectedRouteIndex.coerceIn(0, ranked.routes.lastIndex)
                         }
                         else -> 0
                     }
@@ -1972,7 +3546,7 @@ private fun ReportAndTrackSection(
                     } else {
                         tripSelectedRouteIndex = selectedIndex
                     }
-                    val selected = routes[tripSelectedRouteIndex]
+                    val selected = ranked.routes[tripSelectedRouteIndex]
                     tripRoutePoints = selected.points
                     tripRouteSteps = selected.steps
                     tripRouteDurationSec = selected.durationSeconds
@@ -1984,12 +3558,14 @@ private fun ReportAndTrackSection(
                     tripRoutePoints = emptyList()
                     tripRouteSteps = emptyList()
                     tripRouteOptions = emptyList()
+                    tripRouteSaferHints = emptyList()
                     tripSelectedRouteIndex = 0
                     tripNextTurn = null
                     tripRouteDurationSec = null
                     tripRouteStatus = TripRouteStatus.NO_ROUTE
                 } else {
                     tripRouteStatus = TripRouteStatus.ACTIVE
+                }
                 }
             }
             tripRerouting = false
@@ -2006,11 +3582,11 @@ private fun ReportAndTrackSection(
         tripModeEnabled,
         tripNavActive,
         tripRoutePoints,
-        gpsPinLocation?.latitude,
-        gpsPinLocation?.longitude,
-        gpsPinLocation?.bearing,
-        gpsPinLocation?.speed,
-        gpsPinLocation?.accuracy,
+        tripMapGps?.latitude,
+        tripMapGps?.longitude,
+        tripMapGps?.bearing,
+        tripMapGps?.speed,
+        tripMapGps?.accuracy,
         recentReportsEpoch,
         mapSeverityFilter,
     ) {
@@ -2021,7 +3597,7 @@ private fun ReportAndTrackSection(
             clearTripDeviationUi()
             return@LaunchedEffect
         }
-        val gps = gpsPinLocation
+        val gps = tripMapGps
         val driverLat = gps?.latitude ?: tripStartLat ?: tripRoutePoints.first().first
         val driverLon = gps?.longitude ?: tripStartLon ?: tripRoutePoints.first().second
         val progress = TripNavigationMatcher.routeProgress(
@@ -2054,10 +3630,18 @@ private fun ReportAndTrackSection(
         }
         val reports = bbox?.let { metroBbox ->
             withContext(Dispatchers.IO) {
-                RecentReportsRepository.reportsForMapInMetro(selectedCity, metroBbox)
+                val base = RecentReportsRepository.reportsForMapInMetro(selectedCity, metroBbox)
                     .filter { report ->
                         mapSeverityFilter == null || report.severity == mapSeverityFilter
                     }
+                val crowd = TripCrowdHazardStore.potholeReportsForViewer(
+                    context = context,
+                    cityKey = selectedCity,
+                    viewerUserId = reporterUserId.ifBlank { "local" },
+                ).filter { report ->
+                    mapSeverityFilter == null || report.severity == mapSeverityFilter
+                }
+                base + crowd
             }
         }.orEmpty()
         tripAlerts = if (tripArrived) {
@@ -2082,6 +3666,35 @@ private fun ReportAndTrackSection(
             tripRerouting ||
             tripArrived
         ) {
+            return@LaunchedEffect
+        }
+        val knownAltPoints = tripKnownAlternates.map { it.points }
+        val destLat = tripDestLat ?: tripRoutePoints.lastOrNull()?.first
+        val destLon = tripDestLon ?: tripRoutePoints.lastOrNull()?.second
+        // On a known alternate from preview → auto-continue that path (no tap, no rejoin dash).
+        val preferredAlt = TripNavigationMatcher.findPreferredKnownAlternateIndex(
+            knownAlternates = knownAltPoints,
+            activeRoute = tripRoutePoints,
+            driverLat = gps.latitude,
+            driverLon = gps.longitude,
+            activeOffRouteMeters = progress.offRouteMeters,
+            destLat = destLat,
+            destLon = destLon,
+        ) ?: TripNavigationMatcher.findPreferredKnownAlternateIndex(
+            knownAlternates = knownAltPoints,
+            activeRoute = tripRoutePoints,
+            driverLat = gps.latitude,
+            driverLon = gps.longitude,
+            activeOffRouteMeters = progress.offRouteMeters,
+            minImprovementM = 0.0,
+            destLat = destLat,
+            destLon = destLon,
+        )
+        if (preferredAlt != null) {
+            if (tripRejoinPoints.isNotEmpty() || tripOfferedAlternateIndex != null) {
+                clearTripDeviationUi()
+            }
+            adoptKnownAlternate(preferredAlt)
             return@LaunchedEffect
         }
         if (
@@ -2114,6 +3727,38 @@ private fun ReportAndTrackSection(
             gps.accuracy.takeIf { gps.hasAccuracy() }?.times(2.0f)?.toDouble() ?: 0.0,
         )
         val now = SystemClock.elapsedRealtime()
+        val offM = progress.offRouteMeters
+        val wallNow = System.currentTimeMillis()
+        if (offM > TripAvoidRejoinAnalyzer.MIN_OFF_ROUTE_M) {
+            if (!avoidWasOffRouteHolder[0]) {
+                avoidWasOffRouteHolder[0] = true
+                avoidOffRouteStartedHolder[0] = wallNow
+                avoidPeakOffRouteHolder[0] = offM
+            } else if (offM > avoidPeakOffRouteHolder[0]) {
+                avoidPeakOffRouteHolder[0] = offM
+            }
+        } else if (avoidWasOffRouteHolder[0]) {
+            val peak = avoidPeakOffRouteHolder[0]
+            val shouldAsk = swerveDetectionEnabled &&
+                TripAvoidRejoinAnalyzer.shouldPrompt(
+                    wasDodging = true,
+                    nowOffRouteMeters = offM,
+                    peakOffRouteMeters = peak,
+                    recentBumpEpochMs = lastBumpEpochHolder[0].takeIf { it > 0L },
+                    dodgeStartedAtMs = avoidOffRouteStartedHolder[0].takeIf { it > 0L },
+                    nowEpochMs = wallNow,
+                    lastPromptEpochMs = lastAvoidPromptHolder[0],
+                )
+            avoidWasOffRouteHolder[0] = false
+            avoidOffRouteStartedHolder[0] = 0L
+            avoidPeakOffRouteHolder[0] = 0.0
+            if (shouldAsk && pendingBumpEvent == null && !pendingAvoidPrompt) {
+                lastAvoidPromptHolder[0] = wallNow
+                avoidPromptLat = gps.latitude
+                avoidPromptLon = gps.longitude
+                pendingAvoidPrompt = true
+            }
+        }
         if (progress.offRouteMeters <= accuracyAwareThreshold) {
             // Back on the active corridor — drop rejoin / offer chrome.
             if (tripRejoinPoints.isNotEmpty() || tripOfferedAlternateIndex != null) {
@@ -2121,12 +3766,16 @@ private fun ReportAndTrackSection(
             }
             return@LaunchedEffect
         }
-        if (now - lastRerouteAtMs < 12_000L) {
+        // Parallel / intentional detours: reroute quickly. Tiny GPS wobble: wait a bit longer.
+        val rerouteCooldownMs = when {
+            progress.offRouteMeters >= 45.0 -> 2_500L
+            else -> 6_000L
+        }
+        if (now - lastRerouteAtMs < rerouteCooldownMs) {
             return@LaunchedEffect
         }
-        // No internet → skip OSRM; still show a local dashed rejoin when cheap.
+        // No internet → local adopt / rejoin-to-dest / wait for reconnect to U-turn-reroute.
         val speed = gps.speed.takeIf { gps.hasSpeed() }
-        val knownAltPoints = tripKnownAlternates.map { it.points }
         if (!NetworkReachability.hasInternet(context)) {
             val offlinePlan = TripNavigationMatcher.planDeviation(
                 routePoints = tripRoutePoints,
@@ -2136,90 +3785,102 @@ private fun ReportAndTrackSection(
                 progress = progress,
                 speedMps = speed,
                 fullRerouteDurationSec = null,
+                destLat = destLat,
+                destLon = destLon,
+                vehicle = tripVehicle,
+                vehicleNetworkSnapM = null,
             )
             when (offlinePlan.action) {
-                TripDeviationAction.OFFER_KNOWN_ALTERNATE -> {
-                    tripOfferedAlternateIndex = offlinePlan.knownAlternateIndex
-                    tripRejoinPoints = emptyList()
-                    lastRerouteAtMs = now
+                TripDeviationAction.ADOPT_KNOWN_ALTERNATE -> {
+                    offlinePlan.knownAlternateIndex?.let { idx ->
+                        adoptKnownAlternate(idx)
+                    }
                 }
                 TripDeviationAction.SHOW_REJOIN -> {
                     tripRejoinPoints = offlinePlan.rejoinPoints
                     tripOfferedAlternateIndex = null
                     lastRerouteAtMs = now
                 }
-                else -> Unit
+                TripDeviationAction.SUGGEST_UTURN,
+                TripDeviationAction.FULL_REROUTE,
+                -> {
+                    // Offline: cannot rematch vehicle network — keep dashed rejoin if short.
+                    val rejoin = TripNavigationMatcher.buildRejoinPolyline(
+                        tripRoutePoints,
+                        gps.latitude,
+                        gps.longitude,
+                    )
+                    if (
+                        rejoin != null &&
+                        rejoin.second <= TripNavigationMatcher.REJOIN_PREF_MAX_RETURN_M
+                    ) {
+                        tripRejoinPoints = rejoin.first
+                        tripOfferedAlternateIndex = null
+                        lastRerouteAtMs = now
+                    }
+                }
+                TripDeviationAction.NONE -> Unit
             }
             return@LaunchedEffect
         }
 
-        // Probe full-reroute ETA only when return looks borderline / costly.
-        val prelim = TripNavigationMatcher.planDeviation(
+        // Online: probe OSRM snap on this vehicle's network (car vs bike/foot paths).
+        val networkProbe = if (destLat != null && destLon != null) {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    OsrmRouteClient.fetchRoute(
+                        gps.latitude,
+                        gps.longitude,
+                        destLat,
+                        destLon,
+                        tripVehicle,
+                        snapRadiusM = OsrmRouteClient.snapRadiusForAccuracy(
+                            if (gps.hasAccuracy()) gps.accuracy else null,
+                        ),
+                    )
+                }.getOrNull()
+            }
+        } else {
+            null
+        }
+        val plan = TripNavigationMatcher.planDeviation(
             routePoints = tripRoutePoints,
             knownAlternates = knownAltPoints,
             driverLat = gps.latitude,
             driverLon = gps.longitude,
             progress = progress,
             speedMps = speed,
-            fullRerouteDurationSec = null,
+            fullRerouteDurationSec = networkProbe?.durationSeconds,
+            destLat = destLat,
+            destLon = destLon,
+            vehicle = tripVehicle,
+            vehicleNetworkSnapM = networkProbe?.startSnapMeters,
         )
-        when (prelim.action) {
-            TripDeviationAction.OFFER_KNOWN_ALTERNATE -> {
-                tripOfferedAlternateIndex = prelim.knownAlternateIndex
-                tripRejoinPoints = emptyList()
-                lastRerouteAtMs = now
+        when (plan.action) {
+            TripDeviationAction.ADOPT_KNOWN_ALTERNATE -> {
+                plan.knownAlternateIndex?.let { idx ->
+                    adoptKnownAlternate(idx)
+                }
                 return@LaunchedEffect
             }
             TripDeviationAction.SHOW_REJOIN -> {
-                // Confirm hybrid with a live OSRM duration when return is near the edge.
-                val returnM = prelim.rejoinReturnMeters
-                val needEtaProbe =
-                    returnM > TripNavigationMatcher.REJOIN_PREF_MAX_RETURN_M * 0.7
-                val fullRerouteSec = if (needEtaProbe) {
-                    val dLat = tripDestLat
-                    val dLon = tripDestLon
-                    if (dLat != null && dLon != null) {
-                        withContext(Dispatchers.IO) {
-                            runCatching {
-                                OsrmRouteClient.fetchRoute(
-                                    gps.latitude,
-                                    gps.longitude,
-                                    dLat,
-                                    dLon,
-                                    tripVehicle,
-                                )?.durationSeconds
-                            }.getOrNull()
-                        }
-                    } else {
-                        null
-                    }
-                } else {
-                    null
-                }
-                val confirmed = if (fullRerouteSec != null) {
-                    TripNavigationMatcher.planDeviation(
-                        routePoints = tripRoutePoints,
-                        knownAlternates = knownAltPoints,
-                        driverLat = gps.latitude,
-                        driverLon = gps.longitude,
-                        progress = progress,
-                        speedMps = speed,
-                        fullRerouteDurationSec = fullRerouteSec,
-                    )
-                } else {
-                    prelim
-                }
-                if (confirmed.action == TripDeviationAction.SHOW_REJOIN) {
-                    tripRejoinPoints = confirmed.rejoinPoints
-                    tripOfferedAlternateIndex = null
-                    lastRerouteAtMs = now
-                    return@LaunchedEffect
-                }
-                // Fall through to full reroute.
+                tripRejoinPoints = plan.rejoinPoints
+                tripOfferedAlternateIndex = null
+                lastRerouteAtMs = now
+                return@LaunchedEffect
+            }
+            TripDeviationAction.SUGGEST_UTURN -> {
+                clearTripDeviationUi()
+                onFeedbackMessage(
+                    "U-turn — this path isn't for ${tripVehicle.label.lowercase()}",
+                )
+                // Fall through to full vehicle-network reroute.
             }
             TripDeviationAction.FULL_REROUTE,
             TripDeviationAction.NONE,
-            -> Unit
+            -> {
+                clearTripDeviationUi()
+            }
         }
 
         lastRerouteAtMs = now
@@ -2230,6 +3891,41 @@ private fun ReportAndTrackSection(
         tripRouteRequestEpoch++
     }
     val nextTripAlert = tripAlerts.firstOrNull()
+    LaunchedEffect(tripPendingRouteOverview, tripDirectionsRevealed, tripRoutePoints, tripRouteStatus) {
+        if (!tripPendingRouteOverview || !tripDirectionsRevealed) return@LaunchedEffect
+        if (tripRoutePoints.size >= 2 && tripRouteStatus == TripRouteStatus.ACTIVE) {
+            tripRouteOverviewEpoch++
+            tripPendingRouteOverview = false
+        }
+    }
+    LaunchedEffect(tripNavActive) {
+        if (tripNavActive) onFeedbackMessage("Navigation started")
+    }
+    // Arrival: end navigation, zoom destination neighborhood, load nearby places card.
+    LaunchedEffect(tripArrived) {
+        if (!tripArrived) return@LaunchedEffect
+        if (!tripNavActive) return@LaunchedEffect
+        onFeedbackMessage("You have arrived")
+        val destLat = tripDestLat ?: tripRoutePoints.lastOrNull()?.first
+        val destLon = tripDestLon ?: tripRoutePoints.lastOrNull()?.second
+        delay(800)
+        tripNavActive = false
+        tripNavOriginLat = null
+        tripNavOriginLon = null
+        tripRouteStatus = TripRouteStatus.ARRIVED
+        showTripArrivalCard = true
+        tripArrivalPlaces = emptyList()
+        tripArrivalLookupDone = false
+        // Destination neighborhood (not full city overview).
+        tripDestFocusEpoch++
+        if (destLat != null && destLon != null && destLat.isFinite() && destLon.isFinite()) {
+            val raw = withContext(Dispatchers.IO) {
+                OverpassNearbyClient.fetchArrivalNearby(destLat, destLon)
+            }
+            tripArrivalPlaces = pickNonOverlappingPois(raw)
+        }
+        tripArrivalLookupDone = true
+    }
 
     var tripVoiceMuted by rememberSaveable {
         mutableStateOf(TripVoiceGuidance.isMuted(context))
@@ -2242,54 +3938,225 @@ private fun ReportAndTrackSection(
     LaunchedEffect(tripNavActive, tripRouteRequestEpoch) {
         if (!tripNavActive) {
             spokenTurnKeys.clear()
+            potholeSpeakCounts.clear()
+            potholeLastSpeakAtMs.clear()
+            announcedPotholeIds.clear()
             tripVoice.stop()
         }
     }
 
-    // One vibration + tone (+ optional voice) per report id while navigating.
-    LaunchedEffect(tripNavActive, tripArrived, nextTripAlert?.report?.id, nextTripAlert?.distanceMeters, tripVoiceMuted) {
-        if (!tripNavActive || tripArrived) return@LaunchedEffect
-        val alert = nextTripAlert ?: return@LaunchedEffect
-        if (alert.distanceMeters > TRIP_POTHOLE_NOTIFY_WITHIN_M) return@LaunchedEffect
-        val id = alert.report.id
-        if (!announcedPotholeIds.add(id)) return@LaunchedEffect
-        notifyTripPotholeAlert(context, alert.report.severity)
-        if (!tripVoiceMuted) {
-            tripVoice.speak(formatTripPotholeAlertLine(alert))
-        }
-    }
-
-    // Speak upcoming turns (far ~200 m, near ~50 m); skip when muted.
+    // #29 Turn-aware + speed-scaled pothole / turn voice (shared scheduler).
     LaunchedEffect(
         tripNavActive,
         tripArrived,
         tripVoiceMuted,
+        nextTripAlert?.report?.id,
+        nextTripAlert?.distanceMeters,
+        nextTripAlert?.alongRouteMeters,
         tripNextTurn?.instruction,
         tripNextTurn?.distanceMeters,
+        tripRouteProgress?.traveledMeters,
+        gpsPinLocation?.speed,
+        gpsPinLocation?.hasSpeed(),
     ) {
-        if (!tripNavActive || tripArrived || tripVoiceMuted) return@LaunchedEffect
-        val turn = tripNextTurn ?: return@LaunchedEffect
-        val phase = when {
-            turn.distanceMeters <= 50.0 -> "near"
-            turn.distanceMeters <= 200.0 -> "far"
-            else -> return@LaunchedEffect
+        if (!tripNavActive || tripArrived) return@LaunchedEffect
+        while (true) {
+            val gps = gpsPinLocation
+            val speed = gps?.speed?.takeIf { gps.hasSpeed() && it.isFinite() }
+            val result = TripAlertScheduler.evaluate(
+                traveledMeters = tripRouteProgress?.traveledMeters ?: 0.0,
+                speedMps = speed,
+                nextTurn = tripNextTurn,
+                alerts = tripAlerts,
+                nowElapsedMs = android.os.SystemClock.elapsedRealtime(),
+                potholeSpeakCounts = potholeSpeakCounts.toMap(),
+                potholeLastSpeakAtMs = potholeLastSpeakAtMs.toMap(),
+                spokenTurnKeys = spokenTurnKeys.toSet(),
+            )
+            for (cue in result.cues) {
+                when (cue) {
+                    is TripAlertScheduler.Cue.Combined -> {
+                        val id = cue.alert.report.id
+                        announcedPotholeIds.add(id)
+                        potholeSpeakCounts[id] = (potholeSpeakCounts[id] ?: 0) + 1
+                        potholeLastSpeakAtMs[id] = android.os.SystemClock.elapsedRealtime()
+                        spokenTurnKeys.add(cue.turnKey)
+                        spokenTurnKeys.add(TripAlertScheduler.turnKey(cue.guidance, "far"))
+                        if (cue.haptic) {
+                            notifyTripPotholeAlert(context, cue.alert.report.severity)
+                        }
+                        if (!tripVoiceMuted) tripVoice.speak(cue.speak)
+                    }
+                    is TripAlertScheduler.Cue.Pothole -> {
+                        val id = cue.alert.report.id
+                        announcedPotholeIds.add(id)
+                        potholeSpeakCounts[id] = (potholeSpeakCounts[id] ?: 0) + 1
+                        potholeLastSpeakAtMs[id] = android.os.SystemClock.elapsedRealtime()
+                        if (cue.haptic) {
+                            notifyTripPotholeAlert(context, cue.alert.report.severity)
+                        }
+                        if (!tripVoiceMuted) tripVoice.speak(cue.speak)
+                    }
+                    is TripAlertScheduler.Cue.Turn -> {
+                        if (!spokenTurnKeys.add(cue.key)) continue
+                        if (!tripVoiceMuted) tripVoice.speak(cue.speak)
+                    }
+                }
+            }
+            delay(750)
         }
-        val key = "${turn.maneuverType}|${turn.instruction}|$phase"
-        if (!spokenTurnKeys.add(key)) return@LaunchedEffect
-        val spoken = if (phase == "near") {
-            "In ${turn.distanceMeters.toInt().coerceAtLeast(1)} meters, ${turn.instruction}"
-        } else {
-            turn.instruction
-        }
-        tripVoice.speak(spoken)
     }
 
     @Composable
     fun MapSection(modifier: Modifier, showExpand: Boolean) {
         @Composable
         fun DensityMap(mapModifier: Modifier) {
+            val filterChromeInset =
+                if (neighbourhoodChrome && !tripModeEnabled && (mapFullscreen || neighbourhoodMapActive)) {
+                    // Keep inset stable when Weather turns on — changing it rebuilt chrome
+                    // in the same gesture as the left-edge back event.
+                    if (weatherAvailable) 128.dp else 88.dp
+                } else {
+                    0.dp
+                }
+            if (CitizenMapTiler.isConfigured) {
+                MapLibreDensityMap(
+                selectedCity = selectedCity,
+                    viewerUserId = reporterUserId.ifBlank { "local" },
+                userLocation = userLocation,
+                onLocateMe = {
+                    resetMapCameraToDefault()
+                    onLocateMe()
+                },
+                onMapViewControlUsed = { },
+                onMapTouchChanged = onMapTouchChanged,
+                onMapPanEndedAtCenter = onMapPanEndedAtCenter,
+                mapLocateEpoch = mapLocateEpoch,
+                lastConsumedMapLocateEpoch = lastConsumedMapLocateEpoch,
+                onMapLocateEpochConsumed = { lastConsumedMapLocateEpoch = it },
+                    mapCityOverviewEpoch = mapCityOverviewEpoch,
+                mapCameraUserPositioned = mapCameraUserPositioned,
+                savedMapCenterLat = savedMapCenterLat,
+                savedMapCenterLon = savedMapCenterLon,
+                savedMapZoom = savedMapZoom,
+                onMapCameraSnapshot = ::snapshotMapCamera,
+                onResetMapCamera = ::resetMapCameraToDefault,
+                    gpsPinLocation = tripMapGps,
+                gpsAccuracyText = gpsAccuracyText,
+                mapSeverityFilter = mapSeverityFilter,
+                    mapIssueTypeFilter = mapIssueTypeFilter,
+                    areaHeatEnabled = areaHeatEnabled && !(tripModeEnabled && mapFullscreen),
+                    weatherRainEnabled = weatherOverlayArmed && weatherMapEnabled &&
+                        !(tripModeEnabled && mapFullscreen),
+                    weatherRainGrid = weatherRainGrid.takeIf {
+                        weatherOverlayArmed && weatherMapEnabled && !(tripModeEnabled && mapFullscreen)
+                    },
+                    weatherBriefing = weatherBriefing.takeIf {
+                        weatherOverlayArmed && weatherMapEnabled && !(tripModeEnabled && mapFullscreen)
+                    },
+                    tripModeEnabled = tripModeEnabled && mapFullscreen,
+                    tripNavActive = tripNavActive && mapFullscreen,
+                    tripStreetFollow = tripStreetFollow,
+                    tripCameraMode = tripCameraMode,
+                    tripDeviceHeadingDeg = tripDeviceHeadingDeg,
+                    tripVehicle = tripVehicle,
+                    mapCursorStyle = mapCursorStyle,
+                    mapCursorColor = mapCursorColor,
+                tripRoutePoints = tripRoutePoints,
+                    tripRouteTraveledMeters = if (tripNavActive) {
+                        tripRouteProgress?.traveledMeters ?: 0.0
+                    } else {
+                        0.0
+                    },
+                    tripRouteOptions = tripRouteOptions.map { it.points },
+                    tripRouteEtas = tripRouteOptions.mapIndexed { index, option ->
+                        val base =
+                            "${formatTripEta(option.durationSeconds)}\n${formatTripDistance(option.distanceMeters)}"
+                        val hint = tripRouteSaferHints.getOrNull(index)
+                        if (hint.isNullOrBlank()) base else "$base\n$hint"
+                    },
+                    tripSelectedRouteIndex = tripSelectedRouteIndex,
+                    onSelectTripRouteIndex = { selectTripRouteOption(it) },
+                    tripRejoinPoints = tripRejoinPoints,
+                    tripOfferedAlternatePoints = tripOfferedAlternateIndex
+                        ?.let { tripKnownAlternates.getOrNull(it)?.points }
+                        .orEmpty(),
+                    onConfirmOfferedAlternate = { confirmOfferedKnownAlternate() },
+                tripAlerts = tripAlerts,
+                    arrivalPlaces = tripArrivalPlaces,
+                    tripStartLat = tripRoutePoints.firstOrNull()?.first
+                        ?: tripStartLat
+                        ?: gpsPinLocation?.latitude,
+                    tripStartLon = tripRoutePoints.firstOrNull()?.second
+                        ?: tripStartLon
+                        ?: gpsPinLocation?.longitude,
+                    tripDestinationLat = tripRoutePoints.lastOrNull()?.first ?: tripDestLat,
+                    tripDestinationLon = tripRoutePoints.lastOrNull()?.second ?: tripDestLon,
+                    tripStopPoints = tripStops.map { it.latitude to it.longitude },
+                recentReportsEpoch = recentReportsEpoch,
+                    mapConnectivityEpoch = mapConnectivityEpoch,
+                    mapFullscreen = mapFullscreen,
+                    onExitFullscreen = { exitMapFullscreen() },
+                    onEnterFullscreen = { onMapFullscreenChange(true) },
+                    onReportPothole = onRequestReportFromFullscreenMap,
+                    tripRoadVideoEnabled = tripRoadVideoEnabled,
+                    onToggleTripRoadVideo = {
+                        applyRoadVideoFromSettings(!tripRoadVideoEnabled)
+                    },
+                    onMapPickDestination = { lat, lon ->
+                        if (tripModeEnabled && !tripNavActive) {
+                            tripDestLat = lat
+                            tripDestLon = lon
+                            tripDestLabel = "Dropped pin"
+                            tripNavActive = false
+                            tripRouteUserPicked = false
+                            tripDirectionsRevealed = false
+                            tripPendingRouteOverview = false
+                            mapDestPickEpoch++
+                            tripDestFocusEpoch++
+                            tripScope.launch {
+                                val label = withContext(Dispatchers.IO) {
+                                    reverseGeocodeTripPlace(context, lat, lon).ifBlank {
+                                        String.format(Locale.US, "%.5f, %.5f", lat, lon)
+                                    }
+                                }
+                                if (tripDestLat == lat && tripDestLon == lon) {
+                                    tripDestLabel = label
+                                    TripRecentPlacesRepository.rememberDestination(
+                                        context,
+                                        label,
+                                        lat,
+                                        lon,
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    mapCoveredByOverlay = mapCoveredByOverlay,
+                    bottomChromeInset = filterChromeInset,
+                    compassTopInset = if (
+                        neighbourhoodChrome && neighbourhoodMapActive && !mapFullscreen
+                    ) {
+                        36.dp
+                    } else {
+                        0.dp
+                    },
+                    neighbourhoodMapActive = neighbourhoodChrome && neighbourhoodMapActive,
+                    heatFabVisible = mapHeatFabVisible,
+                    heatEnabled = areaHeatEnabled,
+                    onToggleHeat = if (mapHeatFabVisible) {
+                        { setAreaHeatEnabled(!areaHeatEnabled) }
+                    } else {
+                        null
+                    },
+                    tripDestFocusEpoch = tripDestFocusEpoch,
+                    tripRouteOverviewEpoch = tripRouteOverviewEpoch,
+                    modifier = mapModifier,
+                )
+            } else {
             OsmDensityMap(
                 selectedCity = selectedCity,
+                viewerUserId = reporterUserId.ifBlank { "local" },
                 userLocation = userLocation,
                 onLocateMe = {
                     resetMapCameraToDefault()
@@ -2307,14 +4174,24 @@ private fun ReportAndTrackSection(
                 savedMapZoom = savedMapZoom,
                 onMapCameraSnapshot = ::snapshotMapCamera,
                 onResetMapCamera = ::resetMapCameraToDefault,
-                gpsPinLocation = gpsPinLocation,
+                gpsPinLocation = tripMapGps,
                 gpsAccuracyText = gpsAccuracyText,
                 mapSeverityFilter = mapSeverityFilter,
+                mapIssueTypeFilter = mapIssueTypeFilter,
                 areaHeatEnabled = areaHeatEnabled && !(tripModeEnabled && mapFullscreen),
+                weatherRainEnabled = weatherOverlayArmed && weatherMapEnabled &&
+                    !(tripModeEnabled && mapFullscreen),
+                weatherRainGrid = weatherRainGrid.takeIf {
+                    weatherOverlayArmed && weatherMapEnabled && !(tripModeEnabled && mapFullscreen)
+                },
+                weatherBriefing = weatherBriefing.takeIf {
+                    weatherOverlayArmed && weatherMapEnabled && !(tripModeEnabled && mapFullscreen)
+                },
                 // Home map is reports-only; trip overlays only on the fullscreen trip surface.
                 tripModeEnabled = tripModeEnabled && mapFullscreen,
                 tripNavActive = tripNavActive && mapFullscreen,
                 tripStreetFollow = tripStreetFollow,
+                tripCameraMode = tripCameraMode,
                 tripDeviceHeadingDeg = tripDeviceHeadingDeg,
                 tripVehicle = tripVehicle,
                 mapCursorStyle = mapCursorStyle,
@@ -2326,8 +4203,11 @@ private fun ReportAndTrackSection(
                     0.0
                 },
                 tripRouteOptions = tripRouteOptions.map { it.points },
-                tripRouteEtas = tripRouteOptions.map {
-                    "${formatTripEta(it.durationSeconds)}\n${formatTripDistance(it.distanceMeters)}"
+                tripRouteEtas = tripRouteOptions.mapIndexed { index, option ->
+                    val base =
+                        "${formatTripEta(option.durationSeconds)}\n${formatTripDistance(option.distanceMeters)}"
+                    val hint = tripRouteSaferHints.getOrNull(index)
+                    if (hint.isNullOrBlank()) base else "$base\n$hint"
                 },
                 tripSelectedRouteIndex = tripSelectedRouteIndex,
                 onSelectTripRouteIndex = { selectTripRouteOption(it) },
@@ -2337,6 +4217,7 @@ private fun ReportAndTrackSection(
                     .orEmpty(),
                 onConfirmOfferedAlternate = { confirmOfferedKnownAlternate() },
                 tripAlerts = tripAlerts,
+                arrivalPlaces = tripArrivalPlaces,
                 // Start/end dots follow the road-snapped route when available (not off-road GPS).
                 tripStartLat = tripRoutePoints.firstOrNull()?.first
                     ?: tripStartLat
@@ -2346,54 +4227,177 @@ private fun ReportAndTrackSection(
                     ?: gpsPinLocation?.longitude,
                 tripDestinationLat = tripRoutePoints.lastOrNull()?.first ?: tripDestLat,
                 tripDestinationLon = tripRoutePoints.lastOrNull()?.second ?: tripDestLon,
+                tripStopPoints = tripStops.map { it.latitude to it.longitude },
                 recentReportsEpoch = recentReportsEpoch,
                 mapConnectivityEpoch = mapConnectivityEpoch,
                 mapFullscreen = mapFullscreen,
                 onExitFullscreen = { exitMapFullscreen() },
                 onReportPothole = onRequestReportFromFullscreenMap,
+                tripRoadVideoEnabled = tripRoadVideoEnabled,
+                onToggleTripRoadVideo = {
+                    applyRoadVideoFromSettings(!tripRoadVideoEnabled)
+                },
+                onMapPickDestination = { lat, lon ->
+            if (tripModeEnabled && !tripNavActive) {
+                        tripDestLat = lat
+                        tripDestLon = lon
+                        tripDestLabel = "Dropped pin"
+                        tripNavActive = false
+                        tripRouteUserPicked = false
+                        tripDirectionsRevealed = false
+                        tripPendingRouteOverview = false
+                        mapDestPickEpoch++
+                        tripDestFocusEpoch++
+                        tripScope.launch {
+                            val label = withContext(Dispatchers.IO) {
+                                reverseGeocodeTripPlace(context, lat, lon).ifBlank {
+                                    String.format(Locale.US, "%.5f, %.5f", lat, lon)
+                                }
+                            }
+                            if (tripDestLat == lat && tripDestLon == lon) {
+                                tripDestLabel = label
+                                TripRecentPlacesRepository.rememberDestination(
+                                    context,
+                                    label,
+                                    lat,
+                                    lon,
+                                )
+                            }
+                        }
+                    }
+                },
                 mapCoveredByOverlay = mapCoveredByOverlay,
+                compassTopInset = if (
+                    neighbourhoodChrome && neighbourhoodMapActive && !mapFullscreen
+                ) {
+                    36.dp
+                } else {
+                    0.dp
+                },
+                bottomChromeInset = filterChromeInset,
+                heatFabVisible = mapHeatFabVisible,
+                heatEnabled = areaHeatEnabled,
+                onToggleHeat = if (mapHeatFabVisible) {
+                    { setAreaHeatEnabled(!areaHeatEnabled) }
+                } else {
+                    null
+                },
                 modifier = mapModifier,
             )
+            }
+        }
+
+        fun startTripNavigation() {
+            // Stay fullscreen when leaving the planner for turn-by-turn / overview.
+            onMapFullscreenChange(true)
+            tripScope.launch {
+                tripNavigatePreparing = true
+                try {
+                    if (tripStartUsesMyLocation) {
+                        // Refresh GPS for the pin; OSRM nearest-snaps onto Car/Bike/Walk network.
+                        val gps = onEnsureFreshGpsForTrip() ?: gpsPinLocation
+                        tripNavOriginLat = gps?.latitude
+                        tripNavOriginLon = gps?.longitude
+                        rerouteOriginLat = null
+                        rerouteOriginLon = null
+                        tripStartCorrectionDone = false
+                    } else {
+                        tripNavOriginLat = tripStartLat
+                        tripNavOriginLon = tripStartLon
+                    }
+                    tripNavActive = true
+                    tripArrived = false
+                    showTripArrivalCard = false
+                    tripArrivalPlaces = emptyList()
+                } finally {
+                    tripNavigatePreparing = false
+                }
+            }
         }
 
         @Composable
         fun TripPlanner(plannerModifier: Modifier) {
-            TripPlannerPanel(
+            val hasTripEndpoints = tripDestLat != null && tripDestLon != null &&
+                (tripStartLat != null || gpsPinLocation != null)
+            val directionsVisible = tripDirectionsRevealed || tripNavActive
+                TripPlannerPanel(
                 modifier = plannerModifier,
-                selectedCity = selectedCity,
-                startText = if (tripStartUsesMyLocation) tripMyLocationLabel else tripStartLabel,
-                destText = tripDestLabel,
-                vehicle = tripVehicle,
-                startUsesMyLocation = tripStartUsesMyLocation,
-                canNavigate = tripDestLat != null && tripDestLon != null &&
-                    (tripStartLat != null || gpsPinLocation != null) &&
-                    tripRoutePoints.size >= 2 &&
-                    !tripNavigatePreparing,
+                    selectedCity = selectedCity,
+                    startText = if (tripStartUsesMyLocation) tripMyLocationLabel else tripStartLabel,
+                    destText = tripDestLabel,
+                selectedStartLat = tripStartLat,
+                selectedStartLon = tripStartLon,
+                selectedDestLat = tripDestLat,
+                selectedDestLon = tripDestLon,
+                destExternalPickEpoch = mapDestPickEpoch,
+                    vehicle = tripVehicle,
+                    startUsesMyLocation = tripStartUsesMyLocation,
+                showOriginFields = tripDirectionsRevealed,
+                stops = tripStops,
+                // Either action is available once endpoints exist — Direction previews,
+                // Navigation starts turn-by-turn (and fetches the route if needed).
+                canNavigate = hasTripEndpoints && !tripNavigatePreparing,
+                canShowDirections = hasTripEndpoints && !tripNavigatePreparing,
                 navigatePreparing = tripNavigatePreparing,
-                routeStatus = tripRouteStatus,
+                routeStatus = if (directionsVisible) tripRouteStatus else TripRouteStatus.IDLE,
+                routeDurationSeconds = if (directionsVisible) {
+                    tripRouteOptions.getOrNull(tripSelectedRouteIndex)?.durationSeconds
+                } else {
+                    null
+                },
+                routeDistanceMeters = if (directionsVisible) {
+                    tripRouteOptions.getOrNull(tripSelectedRouteIndex)?.distanceMeters
+                } else {
+                    null
+                },
+                routeOptionLabels = if (directionsVisible) {
+                    tripRouteOptions.mapIndexed { index, option ->
+                        val journey = JourneyStartEta.estimate(
+                            option.durationSeconds,
+                            cityKey = selectedCity,
+                        )
+                        val etaPart = if (journey != null && journey.congested) {
+                            JourneyStartEta.formatShortLeaveNow(journey)
+                        } else {
+                            formatTripEta(option.durationSeconds)
+                        }
+                        val base =
+                            "$etaPart · ${formatTripDistance(option.distanceMeters)}"
+                        val hint = tripRouteSaferHints.getOrNull(index)
+                        if (hint.isNullOrBlank()) base else "$base · $hint"
+                    }
+                } else {
+                    emptyList()
+                },
+                selectedRouteIndex = tripSelectedRouteIndex,
+                onSelectRouteIndex = { selectTripRouteOption(it) },
                 onVehicleChange = {
                     tripVehicleName = it.name
                     tripRouteUserPicked = false
                 },
-                onStartSelected = { label, lat, lon ->
-                    tripStartLat = lat
-                    tripStartLon = lon
-                    tripStartLabel = label
-                    tripNavActive = false
+                    onStartSelected = { label, lat, lon ->
+                        tripStartLat = lat
+                        tripStartLon = lon
+                        tripStartLabel = label
+                        tripNavActive = false
                     tripRouteUserPicked = false
-                },
-                onDestSelected = { label, lat, lon ->
-                    tripDestLat = lat
-                    tripDestLon = lon
-                    tripDestLabel = label
-                    tripNavActive = false
+                    TripRecentPlacesRepository.rememberStart(context, label, lat, lon)
+                    },
+                    onDestSelected = { label, lat, lon ->
+                        tripDestLat = lat
+                        tripDestLon = lon
+                        tripDestLabel = label
+                        tripNavActive = false
                     tripRouteUserPicked = false
-                },
-                onUseMyLocation = {
-                    tripStartLat = null
-                    tripStartLon = null
-                    tripStartLabel = ""
-                    tripNavActive = false
+                    tripDirectionsRevealed = false
+                    tripPendingRouteOverview = false
+                    tripDestFocusEpoch++
+                    },
+                    onUseMyLocation = {
+                        tripStartLat = null
+                        tripStartLon = null
+                        tripStartLabel = ""
+                        tripNavActive = false
                     tripNavOriginLat = null
                     tripNavOriginLon = null
                     tripRouteUserPicked = false
@@ -2407,50 +4411,118 @@ private fun ReportAndTrackSection(
                     tripNavOriginLat = null
                     tripNavOriginLon = null
                     tripRouteUserPicked = false
-                },
-                onClearDestination = {
-                    tripDestLat = null
-                    tripDestLon = null
-                    tripDestLabel = ""
-                    tripNavActive = false
+                    },
+                    onClearDestination = {
+                        tripDestLat = null
+                        tripDestLon = null
+                        tripDestLabel = ""
+                        tripNavActive = false
                     tripRouteUserPicked = false
+                    tripDirectionsRevealed = false
+                    tripPendingRouteOverview = false
+                    tripStops = emptyList()
                     // No destination → no “live trip” chip state after leaving fullscreen.
                     if (!mapFullscreen) {
                         tripModeEnabled = false
                     }
                 },
-                onNavigate = {
-                    // Stay fullscreen when leaving the planner for turn-by-turn.
-                    onMapFullscreenChange(true)
+                onStopsChanged = { tripStops = it },
+                onSwapStartDestination = {
+                    val gps = gpsPinLocation
+                    val sLat = tripStartLat ?: gps?.latitude ?: return@TripPlannerPanel
+                    val sLon = tripStartLon ?: gps?.longitude ?: return@TripPlannerPanel
+                    val sLabel = if (tripStartUsesMyLocation) {
+                        tripMyLocationLabel.ifBlank { "My location" }
+                    } else {
+                        tripStartLabel.ifBlank { "Start" }
+                    }
+                    val dLat = tripDestLat ?: return@TripPlannerPanel
+                    val dLon = tripDestLon ?: return@TripPlannerPanel
+                    val dLabel = tripDestLabel.ifBlank { "Destination" }
+                    tripStartLat = dLat
+                    tripStartLon = dLon
+                    tripStartLabel = dLabel
+                    tripDestLat = sLat
+                    tripDestLon = sLon
+                    tripDestLabel = sLabel
+                    tripStops = tripStops.asReversed()
+                    tripNavActive = false
+                    tripRouteUserPicked = false
+                    tripDirectionsRevealed = true
+                    tripPendingRouteOverview = true
+                },
+                onWaypointsReordered = { newStops, newDest ->
+                    tripStops = newStops
+                    tripDestLat = newDest.latitude
+                    tripDestLon = newDest.longitude
+                    tripDestLabel = newDest.label
+                    tripNavActive = false
+                    tripRouteUserPicked = false
+                    tripPendingRouteOverview = true
+                },
+                onDirections = {
+                    // Quick GPS refine when the pin is stale/coarse, then reveal route.
                     tripScope.launch {
-                        tripNavigatePreparing = true
-                        try {
-                            if (tripStartUsesMyLocation) {
-                                // Refresh GPS for the pin; OSRM nearest-snaps onto Car/Bike/Walk network.
-                                val gps = onEnsureFreshGpsForTrip() ?: gpsPinLocation
-                                tripNavOriginLat = gps?.latitude
-                                tripNavOriginLon = gps?.longitude
-                                rerouteOriginLat = null
-                                rerouteOriginLon = null
-                                tripStartCorrectionDone = false
-                            } else {
-                                tripNavOriginLat = tripStartLat
-                                tripNavOriginLon = tripStartLon
+                        if (tripStartUsesMyLocation) {
+                            val live = gpsPinLocation
+                            if (!CitizenGps.isUsable(live, maxAgeMs = 5_000L, maxAccuracyM = 25f)) {
+                                onEnsureFreshGpsForTrip()
                             }
-                            tripNavActive = true
-                        } finally {
-                            tripNavigatePreparing = false
+                        }
+                        // Paint warm prefetch / offline cache immediately so Direction feels instant.
+                        val origin = currentPlannerOriginLatLon()
+                        val dLat = tripDestLat
+                        val dLon = tripDestLon
+                        if (origin != null && dLat != null && dLon != null) {
+                            val online = NetworkReachability.hasInternet(context)
+                            tryApplyAnyCachedRoute(
+                                originLat = origin.first,
+                                originLon = origin.second,
+                                destLat = dLat,
+                                destLon = dLon,
+                                viaPoints = tripStops.map { it.latitude to it.longitude },
+                                offlineLooseOrigin = !online,
+                            )
+                        }
+                        if (!tripDirectionsRevealed) {
+                            tripDirectionsRevealed = true
+                            tripPendingRouteOverview = true
+                        } else if (tripRoutePoints.size >= 2) {
+                            tripRouteOverviewEpoch++
+                        } else {
+                            tripPendingRouteOverview = true
                         }
                     }
+                },
+                onNavigate = {
+                    // Turn-by-turn; may start without a prior Direction press.
+                    val origin = currentPlannerOriginLatLon()
+                    val dLat = tripDestLat
+                    val dLon = tripDestLon
+                    if (origin != null && dLat != null && dLon != null) {
+                        val online = NetworkReachability.hasInternet(context)
+                        tryApplyAnyCachedRoute(
+                            originLat = origin.first,
+                            originLon = origin.second,
+                            destLat = dLat,
+                            destLon = dLon,
+                            viaPoints = tripStops.map { it.latitude to it.longitude },
+                            offlineLooseOrigin = !online,
+                        )
+                    }
+                    tripDirectionsRevealed = true
+                    tripCameraModeName = TripCameraMode.STREET.name
+                    startTripNavigation()
                 },
             )
         }
 
         @Composable
         fun BoxScope.TripNavChrome(topPadding: Dp) {
-            val railBtn = 36.dp
-            val stopBtn = 40.dp
-            val railIcon = 18.dp
+            val uiScale = rememberMapUiScale()
+            val railBtn = uiScale.dp(44f)
+            val railIcon = uiScale.dp(20f)
+            val turnIcon = uiScale.dp(22f)
             val speedKmh = remember(gpsPinLocation?.speed, gpsPinLocation?.hasSpeed()) {
                 val gps = gpsPinLocation
                 if (gps != null && gps.hasSpeed() && gps.speed.isFinite() && gps.speed >= 0f) {
@@ -2465,159 +4537,225 @@ private fun ReportAndTrackSection(
             }
             val potholeAlert = nextTripAlert
             val potholeSideLetter = remember(potholeAlert?.sideLabel) {
-                tripPotholeSideLetter(potholeAlert?.sideLabel)
+                formatTripPotholeSideLetter(potholeAlert?.sideLabel)
             }
-            // Top capsule: speed | next turn | next pothole (full width at top)
-            Surface(
+            val selectedRoute = tripRouteOptions.getOrNull(tripSelectedRouteIndex)
+            val etaSeconds = remember(selectedRoute?.durationSeconds, tripRouteProgress?.completionFraction) {
+                remainingTripSeconds(selectedRoute?.durationSeconds, tripRouteProgress)
+            }
+            val remainingMeters = tripRouteProgress?.remainingMeters
+            val progressLabel = when {
+                tripArrived -> "Arrived"
+                tripRerouting -> "Route lost. Finding a new path…"
+                etaSeconds != null -> formatTripEta(etaSeconds)
+                remainingMeters != null -> formatTripDistance(remainingMeters)
+                else -> null
+            }
+            // Top capsule: speed | turn | pothole, then ETA / progress.
+            Column(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(horizontal = 10.dp)
+                    .padding(horizontal = CitizenSpace.Sm)
                     .padding(top = topPadding)
                     .fillMaxWidth(),
-                shape = RoundedCornerShape(50),
-                color = Color.White.copy(alpha = 0.94f),
-                shadowElevation = 3.dp,
-                border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                verticalArrangement = Arrangement.spacedBy(CitizenSpace.Xs),
             ) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = CitizenRadius.Capsule,
+                    color = CitizenMapChrome.Panel,
+                    shadowElevation = 3.dp,
+                    border = BorderStroke(CitizenBorder.Thin, CitizenMapChrome.PanelBorder),
+                ) {
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = CitizenSpace.Md, vertical = CitizenSpace.Sm),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Sm),
                     ) {
-                        Text(
-                            text = speedKmh?.toString() ?: "—",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            color = DarkBlue,
-                        )
-                        Text(
-                            text = "km/h",
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 11.sp,
-                            color = Color(0xFF6B7280),
-                        )
-                    }
-                    TripNavCapsuleDivider()
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(
-                            imageVector = turnKind.icon,
-                            contentDescription = turnKind.label,
-                            tint = DarkBlue,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        if (turn != null) {
-                            Text(
-                                text = formatNavDistanceMeters(turn.distanceMeters),
-                                fontWeight = if (turnKind == TripNavTurnKind.ARRIVE) {
-                                    FontWeight.Medium
-                                } else {
-                                    FontWeight.Bold
-                                },
-                                fontSize = if (turnKind == TripNavTurnKind.ARRIVE) 12.sp else 13.sp,
-                                color = if (turnKind == TripNavTurnKind.ARRIVE) {
-                                    Color(0xFF6B7280)
-                                } else {
-                                    Color(0xFF111827)
-                                },
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                    TripNavCapsuleDivider()
-                    if (potholeAlert != null) {
-                        val severity = potholeAlert.report.severity
-                        val accent = Color(tripPotholeAlertAccentArgb(severity))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Xs),
                         ) {
-                            Text(
-                                text = "Pothole",
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 11.sp,
-                                color = Color(0xFF6B7280),
-                                maxLines = 1,
+                            Icon(
+                                imageVector = turnKind.icon,
+                                contentDescription = turnKind.label,
+                                tint = DarkBlue,
+                                modifier = Modifier.size(turnIcon),
                             )
-                            Text(
-                                text = formatNavDistanceMeters(potholeAlert.distanceMeters),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = Color(0xFF111827),
-                                maxLines = 1,
-                            )
-                            if (potholeSideLetter != null) {
+                            if (turn != null) {
                                 Text(
-                                    text = potholeSideLetter,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 14.sp,
+                                    text = formatNavDistanceMeters(turn.distanceMeters),
+                                    style = if (turnKind == TripNavTurnKind.ARRIVE) {
+                                        CitizenType.Label
+                                    } else {
+                                        CitizenType.ScreenTitle
+                                    },
+                                    color = if (turnKind == TripNavTurnKind.ARRIVE) {
+                                        CitizenInk.Helper
+                                    } else {
+                                        Color(0xFF111827)
+                                    },
+                                    maxLines = 1,
+                                )
+                            } else {
+                                Text(
+                                    text = "—",
+                                    style = CitizenType.ScreenTitle,
                                     color = DarkBlue,
                                     maxLines = 1,
                                 )
                             }
+                        }
+                        TripNavCapsuleDivider()
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
                             Text(
-                                text = severity.title,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                color = accent,
+                                text = speedKmh?.toString() ?: "—",
+                                style = CitizenType.Label,
+                                color = DarkBlue,
+                            )
+                            Text(
+                                text = "km/h",
+                                style = CitizenType.ChipCompact,
+                                color = CitizenInk.Helper,
+                            )
+                        }
+                        TripNavCapsuleDivider()
+                        if (potholeAlert != null) {
+                            val severity = potholeAlert.report.severity
+                            val ink = Color(tripPotholeAlertInkArgb(severity))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Xs),
+                            ) {
+                                Text(
+                                    text = "Pothole",
+                                    style = CitizenType.ChipCompact,
+                                    color = CitizenInk.Helper,
+                                    maxLines = 1,
+                                )
+                                Text(
+                                    text = formatNavDistanceMeters(potholeAlert.distanceMeters),
+                                    style = CitizenType.Label,
+                                    color = Color(0xFF111827),
+                                    maxLines = 1,
+                                )
+                                if (potholeSideLetter != null) {
+                                    Text(
+                                        text = potholeSideLetter,
+                                        style = CitizenType.Label,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = ink,
+                                        maxLines = 1,
+                                    )
+                                }
+                                Text(
+                                    text = severity.driverShort,
+                                    style = CitizenType.ChipCompact,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ink,
+                                    maxLines = 1,
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = "No pothole ahead",
+                                style = CitizenType.Chip,
+                                color = CitizenInk.Helper,
                                 maxLines = 1,
                             )
                         }
-                    } else {
+                    }
+                }
+                if (progressLabel != null) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = CitizenRadius.Capsule,
+                        color = CitizenMapChrome.PanelSoft,
+                        shadowElevation = 2.dp,
+                        border = BorderStroke(CitizenBorder.Thin, CitizenMapChrome.PanelBorder),
+                    ) {
                         Text(
-                            text = "No pothole ahead",
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 11.sp,
-                            color = Color(0xFF9CA3AF),
+                            text = progressLabel,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = CitizenSpace.Md, vertical = CitizenSpace.Xs),
+                            style = CitizenType.Chip,
+                            fontWeight = FontWeight.SemiBold,
+                            color = when {
+                                tripArrived -> CitizenInk.Success
+                                tripRerouting -> CitizenInk.Warning
+                                else -> DarkBlue
+                            },
+                            textAlign = TextAlign.Center,
                             maxLines = 1,
                         )
                     }
                 }
+                if (!tripNavOnline && !tripArrived) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = CitizenRadius.Capsule,
+                        color = Color(0xFFFFF7ED),
+                        shadowElevation = 1.dp,
+                        border = BorderStroke(CitizenBorder.Thin, Color(0xFFFDBA74)),
+                    ) {
+                        Text(
+                            text = "Offline — GPS continues · map updates when online",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = CitizenSpace.Md, vertical = CitizenSpace.Xs),
+                            style = CitizenType.ChipCompact,
+                            fontWeight = FontWeight.SemiBold,
+                            color = CitizenInk.Warning,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
-            // Left rail sits below the capsule so speed/turn/pothole text stays fully visible.
+            // Left rail — same FAB size language as locate / zoom / exit.
             Column(
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(start = 6.dp, top = topPadding + 48.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(start = CitizenSpace.Sm, top = topPadding + uiScale.dp(72f)),
+                verticalArrangement = Arrangement.spacedBy(CitizenSpace.Sm),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                IconButton(
+                SmallFloatingActionButton(
                     onClick = {
                         tripNavActive = false
                         tripNavOriginLat = null
                         tripNavOriginLon = null
                     },
-                    modifier = Modifier
-                        .background(Color(0xFFB91C1C), CircleShape)
-                        .size(stopBtn),
-                ) {
-                    Icon(
+                    modifier = Modifier.size(railBtn),
+                    containerColor = CitizenSelection.Active,
+                    contentColor = Color.White,
+                    shape = CircleShape,
+                        ) {
+                            Icon(
                         Icons.Outlined.Close,
                         contentDescription = "Stop navigation",
-                        tint = Color.White,
                         modifier = Modifier.size(railIcon),
                     )
                 }
-                IconButton(
+                SmallFloatingActionButton(
                     onClick = {
                         val next = !tripVoiceMuted
                         tripVoiceMuted = next
                         TripVoiceGuidance.setMuted(context, next)
                         if (next) tripVoice.stop()
                     },
-                    modifier = Modifier
-                        .background(Color.White.copy(alpha = 0.92f), CircleShape)
-                        .size(railBtn),
+                    modifier = Modifier.size(railBtn),
+                    containerColor = Color.White,
+                    contentColor = DarkBlue,
+                    shape = CircleShape,
                 ) {
                     Icon(
                         imageVector = if (tripVoiceMuted) {
@@ -2630,76 +4768,430 @@ private fun ReportAndTrackSection(
                         } else {
                             "Mute voice guidance"
                         },
-                        tint = DarkBlue,
                         modifier = Modifier.size(railIcon),
                     )
                 }
-                IconButton(
-                    onClick = { tripStreetFollow = !tripStreetFollow },
+                SmallFloatingActionButton(
+                    onClick = {
+                        tripCameraModeName = tripCameraMode.next().name
+                    },
                     modifier = Modifier
-                        .background(
-                            if (tripStreetFollow) {
-                                DarkBlue.copy(alpha = 0.92f)
-                            } else {
-                                Color.White.copy(alpha = 0.92f)
-                            },
-                            CircleShape,
-                        )
                         .size(railBtn)
                         .semantics {
-                            contentDescription = if (tripStreetFollow) {
-                                "Switch to map overview"
-                            } else {
-                                "Switch to street follow"
+                            contentDescription = when (tripCameraMode) {
+                                TripCameraMode.STREET -> "Street view. Tap for map overview"
+                                TripCameraMode.MAP -> "Map overview. Tap for play mode"
+                                TripCameraMode.PLAY -> "Play mode. Tap for street view"
                             }
                         },
+                    containerColor = if (tripCameraMode != TripCameraMode.MAP) DarkBlue else Color.White,
+                    contentColor = if (tripCameraMode != TripCameraMode.MAP) Color.White else DarkBlue,
+                    shape = CircleShape,
                 ) {
                     Icon(
-                        imageVector = if (tripStreetFollow) {
-                            Icons.Filled.Navigation
-                        } else {
-                            Icons.Outlined.Map
+                        imageVector = when (tripCameraMode) {
+                            TripCameraMode.STREET -> Icons.Filled.Navigation
+                            TripCameraMode.MAP -> Icons.Outlined.Map
+                            TripCameraMode.PLAY -> Icons.Filled.SportsEsports
                         },
                         contentDescription = null,
-                        tint = if (tripStreetFollow) Color.White else DarkBlue,
                         modifier = Modifier.size(railIcon),
+                    )
+                }
+                // #32 Phase 2a: Switch camera ↔ map (only while road-video toggle is ON).
+                if (tripRoadVideoEnabled && tripCaptureSwitchEnabled) {
+                    SmallFloatingActionButton(
+                        onClick = { tripCaptureShowCamera = !tripCaptureShowCamera },
+                    modifier = Modifier
+                            .size(railBtn)
+                            .semantics {
+                                contentDescription = if (tripCaptureShowCamera) {
+                                    "Show map"
+                                } else {
+                                    "Show road camera"
+                                }
+                            },
+                        containerColor = if (tripCaptureShowCamera) {
+                            Color(0xFFB74233)
+                        } else {
+                            Color.White
+                        },
+                        contentColor = if (tripCaptureShowCamera) Color.White else DarkBlue,
+                        shape = CircleShape,
+                    ) {
+                        Icon(
+                            imageVector = if (tripCaptureShowCamera) {
+                                Icons.Outlined.Map
+                            } else {
+                                Icons.Filled.Videocam
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(railIcon),
+                        )
+                    }
+                }
+            }
+            // When full road camera covers the map, keep Report reachable.
+            if (
+                tripRoadVideoEnabled &&
+                tripCaptureShowCamera &&
+                tripCaptureSwitchEnabled
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 72.dp)
+                        .systemGestureExclusion()
+                        .height(CitizenIcon.Fab)
+                        .width(110.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFB74233))
+                        .border(1.dp, Color(0xFF8B2F24), CircleShape)
+                        .clickable(onClick = onRequestReportFromFullscreenMap)
+                        .semantics { contentDescription = "Report a pothole" },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.CameraAlt,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(CitizenIcon.FabGlyph),
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                            "Report",
+                        color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            maxLines = 1,
                     )
                 }
             }
         }
+    }
 
         // One layout tree for map so expand/collapse never remounts MapView (that was
         // backgrounding / "minimizing" the activity when leaving fullscreen).
         Column(
-            modifier = modifier.background(Color(0xFFFDFCF9)),
+            modifier = if (neighbourhoodChrome) modifier else modifier.background(Color(0xFFFDFCF9)),
         ) {
-            if (mapFullscreen && tripModeEnabled && !tripNavActive) {
-                TripPlanner(
-                    plannerModifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 8.dp, top = 6.dp, end = 8.dp, bottom = 6.dp),
-                )
-            }
-            Box(
-                modifier = Modifier
+    Box(
+        modifier = Modifier
                     .weight(1f, fill = true)
                     .fillMaxWidth(),
             ) {
-                DensityMap(mapModifier = Modifier.fillMaxSize())
+                val config = LocalConfiguration.current
+                val splitLandscape =
+                    tripRoadVideoEnabled &&
+                        tripCaptureSplitActive &&
+                        mapFullscreen &&
+                        tripModeEnabled &&
+                        tripNavActive &&
+                        config.screenWidthDp >= config.screenHeightDp
+                val splitPortrait =
+                    tripRoadVideoEnabled &&
+                        tripCaptureSplitActive &&
+                        mapFullscreen &&
+                        tripModeEnabled &&
+                        tripNavActive &&
+                        !splitLandscape &&
+                        config.screenWidthDp < config.screenHeightDp
+                val splitNow = splitLandscape || splitPortrait
+
+                // #32 Phase 2b: camera pane (map stays a single DensityMap call below).
+                if (splitNow) {
+                    Box(
+                        modifier = if (splitLandscape) {
+                            Modifier
+                                .align(Alignment.CenterStart)
+                                .fillMaxHeight()
+                                .fillMaxWidth(0.5f)
+                        } else {
+                            Modifier
+                                .align(Alignment.TopCenter)
+            .fillMaxWidth()
+                                .fillMaxHeight(0.5f)
+                        },
+                    ) {
+                        TripRoadCameraPreview(
+                            roadSource = tripCaptureRoad,
+                            cabinSource = tripCaptureCabin,
+                            companionPairingCode = tripCompanionPairingCode,
+                            showDetectionOverlay = true,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    // Hairline between panes.
+                    Box(
+                        modifier = if (splitLandscape) {
+                            Modifier
+                                .align(Alignment.Center)
+                                .fillMaxHeight()
+                                .width(1.dp)
+                                .background(Color(0xFF111827).copy(alpha = 0.35f))
+                        } else {
+                            Modifier
+                                .align(Alignment.Center)
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(Color(0xFF111827).copy(alpha = 0.35f))
+                        },
+                    )
+                }
+
+                Box(
+                    modifier = when {
+                        splitLandscape -> Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .fillMaxWidth(0.5f)
+                        splitPortrait -> Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .fillMaxHeight(0.5f)
+                        else -> Modifier.fillMaxSize()
+                    },
+                ) {
+                    DensityMap(mapModifier = Modifier.fillMaxSize())
+                }
+
+                // #32 Phase 1–2a: full-bleed road camera (Switch / Camera modes).
+                if (!splitNow &&
+                    mapFullscreen &&
+                    tripModeEnabled &&
+                    tripNavActive &&
+                    tripRoadVideoEnabled &&
+                    tripCaptureSwitchEnabled &&
+                    tripCaptureShowCamera
+                ) {
+                    TripRoadCameraPreview(
+                        roadSource = tripCaptureRoad,
+                        cabinSource = tripCaptureCabin,
+                        companionPairingCode = tripCompanionPairingCode,
+                        showDetectionOverlay = true,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                // Settings = Map only, but video toggle ON → headless capture for bump analysis.
+                if (!splitNow &&
+                    mapFullscreen &&
+                    tripModeEnabled &&
+                    tripNavActive &&
+                    tripRoadVideoEnabled &&
+                    tripCaptureDisplay == TripCaptureDisplayMode.MAP_ONLY
+                ) {
+                    TripRoadCameraPreview(
+                        roadSource = tripCaptureRoad,
+                        cabinSource = tripCaptureCabin,
+                        companionPairingCode = tripCompanionPairingCode,
+                        showDetectionOverlay = false,
+                modifier = Modifier
+                            .size(1.dp)
+                            .alpha(0f),
+                    )
+                }
+                // Planner search sits on the full map (do not steal Column space above it).
+                if (mapFullscreen && tripModeEnabled && !tripNavActive) {
+                    TripPlanner(
+                        plannerModifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .wrapContentHeight()
+                            .zIndex(5f)
+                            .padding(start = 8.dp, top = 6.dp, end = 8.dp, bottom = 6.dp),
+                    )
+                }
                 // Trip planner / nav chrome live only on the fullscreen trip map.
                 if (mapFullscreen && tripModeEnabled && tripNavActive) {
-                    TripNavChrome(topPadding = 8.dp)
+                    val dangerSpeedMps = remember(
+                        gpsPinLocation?.speed,
+                        gpsPinLocation?.hasSpeed(),
+                    ) {
+                        val gps = gpsPinLocation
+                        gps?.speed?.takeIf { gps.hasSpeed() && it.isFinite() && it >= 0f }
+                    }
+                    val dangerBlink = remember(
+                        tripAlerts,
+                        tripRouteProgress?.traveledMeters,
+                        dangerSpeedMps,
+                        tripArrived,
+                    ) {
+                        if (tripArrived) {
+                            null
+                        } else {
+                            TripDangerBlink.activeBlink(
+                                zones = TripDangerBlink.buildZones(tripAlerts),
+                                traveledMeters = tripRouteProgress?.traveledMeters ?: 0.0,
+                                speedMps = dangerSpeedMps,
+                            )
+                        }
+                    }
+                    TripDangerEdgeBlink(
+                        state = dangerBlink,
+                        speedMps = dangerSpeedMps,
+                        daytime = TripDangerBlink.isDaytime(),
+                    )
+                    TripNavChrome(topPadding = CitizenSpace.Sm)
+                }
+                if (showTripArrivalCard && mapFullscreen) {
+                    TripArrivalPlacesCard(
+                        destinationLabel = tripDestLabel,
+                        places = tripArrivalPlaces,
+                        loading = !tripArrivalLookupDone,
+                        onDismiss = {
+                            showTripArrivalCard = false
+                            tripArrivalPlaces = emptyList()
+                            tripArrivalLookupDone = false
+                            tripArrived = false
+                            tripModeEnabled = false
+                            exitMapFullscreen()
+                        },
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
+                } else {
+                    val bump = pendingBumpEvent
+                    if (
+                        bump != null &&
+                        mapFullscreen &&
+                        tripModeEnabled &&
+                        tripNavActive
+                    ) {
+                        TripBumpConfirmCard(
+                            peakLabel = String.format(java.util.Locale.US, "%.1f m/s²", bump.peakMps2),
+                            analyzing = bumpAnalyzing,
+                            resultSummary = bumpVisionSummary,
+                            resultTier = bumpVisionTier,
+                            reportCreated = bumpReportCreated,
+                            locationOnly = bumpLocationOnly,
+                            unconfirmedSaved = bumpUnconfirmedSaved,
+                            onYes = {
+                                TripImuBumpLog.updateResponse(
+                                    bump.id,
+                                    TripImuBumpUserResponse.YES,
+                                )
+                            },
+                            onNo = {
+                                TripImuBumpLog.updateResponse(
+                                    bump.id,
+                                    TripImuBumpUserResponse.NO,
+                                )
+                                pendingBumpEvent = null
+                            },
+                            onHazardKind = { kind ->
+                                val id = bumpUnconfirmedId
+                                val item = id?.let { TripUnconfirmedDetectionStore.get(it) }
+                                if (item != null) {
+                                    val result = TripBumpVisionPipeline.confirmUnconfirmed(
+                                        context = context,
+                                        item = item,
+                                        cityKey = selectedCity,
+                                        reporterUserId = reporterUserId.takeIf { it.isNotBlank() },
+                                        signedIn = isSignedIn,
+                                        hazardKind = kind,
+                                    )
+                                    if (result.created || result.crowdRecorded) {
+                                        onReportsMutated()
+                                        CitizenNotificationsRepository.notifyVisionCapture(
+                                            title = if (result.crowdRecorded) {
+                                                "Saved to Unregistered"
+                                            } else {
+                                                "Report filed from Unconfirmed"
+                                            },
+                                            body = result.reason
+                                                ?: if (result.crowdRecorded) {
+                                                    "Check Unregistered — on your map."
+                                                } else {
+                                                    "Check My Reports — uploading to cloud."
+                                                },
+                                            reportId = result.reportId,
+                                        )
+                                        onNotificationsMutated()
+                                    }
+                                    onFeedbackMessage(
+                                        result.reason
+                                            ?: if (result.crowdRecorded) {
+                                                "Saved to Unregistered"
+                                            } else if (result.created) {
+                                                "Report filed — check My Reports"
+                                            } else {
+                                                "Could not confirm"
+                                            },
+                                    )
+                                }
+                                TripImuBumpLog.updateResponse(
+                                    bump.id,
+                                    TripImuBumpUserResponse.YES,
+                                )
+                                pendingBumpEvent = null
+                            },
+                            onDismiss = {
+                                TripImuBumpLog.updateResponse(
+                                    bump.id,
+                                    TripImuBumpUserResponse.DISMISSED,
+                                )
+                                pendingBumpEvent = null
+                            },
+                            modifier = Modifier.align(Alignment.BottomCenter),
+                        )
+                    } else if (
+                        pendingAvoidPrompt &&
+                        mapFullscreen &&
+                        tripModeEnabled &&
+                        tripNavActive &&
+                        swerveDetectionEnabled
+                    ) {
+                        TripAvoidConfirmCard(
+                            onHazardKind = { kind ->
+                                if (kind.mapsAsCrowdHazard) {
+                                    val crowd = TripCrowdHazardStore.recordConfirm(
+                                        context = context,
+                                        cityKey = selectedCity,
+                                        lat = avoidPromptLat,
+                                        lon = avoidPromptLon,
+                                        kind = kind,
+                                        confirmerUserId = reporterUserId.ifBlank { "local" },
+                                    )
+                                    onReportsMutated()
+                                    val msg = when {
+                                        crowd == null -> "${kind.label} saved"
+                                        crowd.isPublic && kind.mapsAsPothole ->
+                                            "Open pothole report filed for everyone"
+                                        kind.mapsAsPothole ->
+                                            "Pothole counted on your map · ${crowd.confirmCount} of ${TripCrowdHazardStore.PUBLIC_CONFIRM_THRESHOLD} until public"
+                                        else -> "${kind.label} saved to your map"
+                                    }
+                                    onFeedbackMessage(msg)
+                                } else {
+                                    onFeedbackMessage("OK — ignored as ${kind.label.lowercase()}")
+                                }
+                                pendingAvoidPrompt = false
+                            },
+                            onDismiss = { pendingAvoidPrompt = false },
+                            modifier = Modifier.align(Alignment.BottomCenter),
+                        )
+                    }
                 }
                 if (showExpand) {
-                    IconButton(
+                    SmallFloatingActionButton(
                         onClick = { onMapFullscreenChange(true) },
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(top = 44.dp, end = 6.dp)
-                            .background(Color.White.copy(alpha = 0.92f), CircleShape)
-                            .size(36.dp),
+                            .padding(top = 44.dp, end = CitizenSpace.Sm)
+                            .size(CitizenIcon.Fab),
+                        containerColor = CitizenMapChrome.Panel,
+                        contentColor = DarkBlue,
+                        shape = CircleShape,
                     ) {
-                        Icon(Icons.Filled.Fullscreen, contentDescription = "Expand map", tint = DarkBlue)
+                        Icon(
+                            Icons.Filled.Fullscreen,
+                            contentDescription = "Expand map",
+                            modifier = Modifier.size(CitizenIcon.FabGlyph),
+                        )
                     }
                 }
             }
@@ -2708,64 +5200,154 @@ private fun ReportAndTrackSection(
 
     // Single MapView — expand is an in-composition fill (no Dialog window).
     Box(
-        modifier = if (mapFullscreen) {
-            Modifier
-                .fillMaxSize()
-                .background(Color(0xFFFDFCF9))
+        modifier = if (mapFullscreen || neighbourhoodChrome) {
+            Modifier.fillMaxSize()
         } else {
             Modifier
                 .fillMaxWidth()
                 .height(375.dp)
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = CitizenSpace.Lg)
         },
-    ) {
-        MapSection(
-            modifier = Modifier.fillMaxSize(),
-            showExpand = !mapFullscreen,
+            ) {
+                MapSection(
+                    modifier = Modifier.fillMaxSize(),
+            showExpand = !mapFullscreen && !neighbourhoodChrome && !CitizenMapTiler.isConfigured,
         )
+        if (neighbourhoodChrome && neighbourhoodMapActive && !mapFullscreen) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .fillMaxWidth()
+                    .zIndex(3f)
+                    .padding(start = 20.dp, top = 8.dp)
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(WindowInsetsSides.End),
+                    ),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Map",
+                        style = CitizenType.ScreenTitle,
+                        color = NeighbourhoodPalette.Ink,
+                    )
+                    if (weatherMapEnabled) {
+                        WeatherMapTicker(
+                            line = weatherBriefing?.tickerLine ?: "Updating weather…",
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = 12.dp),
+                        )
+                    }
+                }
+            }
+        }
+        if (neighbourhoodChrome && !tripModeEnabled && (mapFullscreen || neighbourhoodMapActive)) {
+            NeighbourhoodSeverityHeatRow(
+                severityKey = mapSeverityFilterKey,
+                onSeverityKeyChange = ::setSeverityFilterKey,
+                issueTypeKey = mapIssueTypeFilterKey,
+                onIssueTypeKeyChange = ::setIssueTypeFilterKey,
+                heatEnabled = areaHeatEnabled,
+                onHeatEnabledChange = ::setAreaHeatEnabled,
+                heatAvailable = heatAvailable,
+                overlayOnMap = true,
+                weatherEnabled = weatherMapEnabled,
+                onWeatherEnabledChange = if (weatherAvailable) {
+                    { setWeatherMapEnabled(it) }
+                } else {
+                    null
+                },
+                weatherAvailable = weatherAvailable,
+                weatherCadence = weatherCadence,
+                onWeatherCadenceChange = { next ->
+                    weatherCadenceName = next.name
+                    CitizenUiSettingsRepository.setWeatherMapCadence(context, next)
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .zIndex(2f)
+                    .navigationBarsPadding()
+                    .windowInsetsPadding(
+                        WindowInsets.systemGestures.only(WindowInsetsSides.Start),
+                    )
+                    .padding(start = 12.dp, end = 16.dp, bottom = 12.dp),
+            )
+        }
     }
 
-    if (!mapFullscreen) {
-        RecentReportsStrip(
-            selectedCity = selectedCity,
-            recentReportsEpoch = recentReportsEpoch,
-            onReportsMutated = onReportsMutated,
-        )
+    if (!mapFullscreen && !neighbourhoodChrome) {
+    RecentReportsStrip(
+        selectedCity = selectedCity,
+        recentReportsEpoch = recentReportsEpoch,
+        onReportsMutated = onReportsMutated,
+    )
     }
 }
 
 /**
- * On-map trip planner: start + destination search, Car / Bike / Walk, and Navigate.
- * Start defaults to the device GPS location when left blank.
- * A road route preview appears once start + destination are set; [onNavigate] enters street follow.
+ * On-map trip planner: destination search, Car / Bike / Walk, Direction, and Navigation.
+ * Start defaults to the device GPS location.
+ * After Direction, start + optional stops appear with a vertical + / swap capsule.
  */
+private data class TripStopPlace(
+    val label: String,
+    val latitude: Double,
+    val longitude: Double,
+)
+
+private const val MAX_TRIP_STOPS = 3
+
 @Composable
 private fun TripPlannerPanel(
     modifier: Modifier = Modifier,
     selectedCity: String,
     startText: String,
     destText: String,
+    selectedStartLat: Double? = null,
+    selectedStartLon: Double? = null,
+    selectedDestLat: Double? = null,
+    selectedDestLon: Double? = null,
+    /** Bumped when destination is set from the map so the search field clears. */
+    destExternalPickEpoch: Int = 0,
     vehicle: TripVehicle,
     startUsesMyLocation: Boolean,
+    /** After Direction — show start field, stops, and +/swap capsule. */
+    showOriginFields: Boolean = false,
+    stops: List<TripStopPlace> = emptyList(),
     canNavigate: Boolean,
+    canShowDirections: Boolean = false,
     navigatePreparing: Boolean = false,
     routeStatus: TripRouteStatus = TripRouteStatus.IDLE,
+    routeDurationSeconds: Double? = null,
+    routeDistanceMeters: Double? = null,
+    routeOptionLabels: List<String> = emptyList(),
+    selectedRouteIndex: Int = 0,
+    onSelectRouteIndex: (Int) -> Unit = {},
     onVehicleChange: (TripVehicle) -> Unit,
     onStartSelected: (label: String, lat: Double, lon: Double) -> Unit,
     onDestSelected: (label: String, lat: Double, lon: Double) -> Unit,
     onUseMyLocation: () -> Unit,
     onClearStart: () -> Unit,
     onClearDestination: () -> Unit,
+    onStopsChanged: (List<TripStopPlace>) -> Unit = {},
+    onSwapStartDestination: () -> Unit = {},
+    /** Reorder stops + destination: [newStops] then [newDestination] as final leg. */
+    onWaypointsReordered: (newStops: List<TripStopPlace>, newDestination: TripStopPlace) -> Unit = { _, _ -> },
+    onDirections: () -> Unit,
     onNavigate: () -> Unit,
 ) {
     val context = LocalContext.current
-    // Responsive chrome polish is parked — keep planner fields at fixed readable sizes.
-    val fieldFont = 12.sp
-    val fieldIcon = 18.dp
+    val uiScale = rememberMapUiScale()
+    val fieldFont = uiScale.sp(12f)
+    val fieldIcon = uiScale.dp(18f)
     var startQuery by remember { mutableStateOf("") }
     var destQuery by remember { mutableStateOf("") }
-    var startResults by remember { mutableStateOf<List<Pair<String, GeoPoint>>>(emptyList()) }
-    var destResults by remember { mutableStateOf<List<Pair<String, GeoPoint>>>(emptyList()) }
+    var startResults by remember { mutableStateOf<List<TripPlaceSuggestion>>(emptyList()) }
+    var destResults by remember { mutableStateOf<List<TripPlaceSuggestion>>(emptyList()) }
     var recentDestinations by remember {
         mutableStateOf(TripRecentPlacesRepository.destinations(context))
     }
@@ -2776,15 +5358,46 @@ private fun TripPlannerPanel(
     var destSearching by remember { mutableStateOf(false) }
     var startSearchAttempted by remember { mutableStateOf(false) }
     var destSearchAttempted by remember { mutableStateOf(false) }
-    /** 0 = none, 1 = start, 2 = destination. */
+    /** 0 = none, 1 = start, 2 = destination, 10+i = stop i. */
     var activeField by remember { mutableIntStateOf(0) }
+    var placePendingSave by remember { mutableStateOf<TripRecentPlace?>(null) }
+    /** Local queries while typing over an existing stop label. */
+    var stopEditQueries by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    /** Empty slot awaiting a place pick after tapping +. */
+    var addingStop by remember { mutableStateOf(false) }
+    var newStopQuery by remember { mutableStateOf("") }
+    var stopResults by remember { mutableStateOf<List<TripPlaceSuggestion>>(emptyList()) }
+    var stopSearching by remember { mutableStateOf(false) }
+    var stopSearchAttempted by remember { mutableStateOf(false) }
+
+    fun requestSavePlace(place: TripRecentPlace) {
+        placePendingSave = place
+    }
+
+    fun stopFieldId(index: Int) = 10 + index
+    val newStopFieldId = 9
+
+    LaunchedEffect(destExternalPickEpoch) {
+        if (destExternalPickEpoch <= 0) return@LaunchedEffect
+        destQuery = ""
+        destResults = emptyList()
+        destSearchAttempted = false
+        activeField = 0
+        recentDestinations = TripRecentPlacesRepository.destinations(context)
+    }
 
     LaunchedEffect(startUsesMyLocation) {
         if (startUsesMyLocation) {
             startQuery = ""
             startResults = emptyList()
-            activeField = 0
+            if (activeField == 1) activeField = 0
         }
+    }
+
+    LaunchedEffect(stops) {
+        // Drop edit buffers for removed indices after swap/clear.
+        stopEditQueries = stopEditQueries.filterKeys { it in stops.indices }
+        if (stops.size >= MAX_TRIP_STOPS) addingStop = false
     }
 
     LaunchedEffect(startQuery, activeField, selectedCity) {
@@ -2796,11 +5409,15 @@ private fun TripPlannerPanel(
             startSearchAttempted = false
             return@LaunchedEffect
         }
-        delay(280)
+        delay(220)
         startSearching = true
-        startResults = withContext(Dispatchers.IO) {
-            searchTripPlaces(context, q, selectedCity, limit = 18)
-        }
+        startResults = searchTripPlaces(
+            context = context,
+            query = q,
+            selectedCity = selectedCity,
+            recentPlaces = recentStarts + recentDestinations,
+            limit = 20,
+        )
         startSearching = false
         startSearchAttempted = true
     }
@@ -2813,17 +5430,45 @@ private fun TripPlannerPanel(
             destSearchAttempted = false
             return@LaunchedEffect
         }
-        delay(280)
+        delay(220)
         destSearching = true
-        destResults = withContext(Dispatchers.IO) {
-            searchTripPlaces(context, q, selectedCity, limit = 18)
-        }
+        destResults = searchTripPlaces(
+            context = context,
+            query = q,
+            selectedCity = selectedCity,
+            recentPlaces = recentDestinations + recentStarts,
+            limit = 20,
+        )
         destSearching = false
         destSearchAttempted = true
     }
+    LaunchedEffect(newStopQuery, stopEditQueries, activeField, selectedCity, addingStop) {
+        val q = when {
+            activeField == newStopFieldId -> newStopQuery.trim()
+            activeField >= 10 -> stopEditQueries[activeField - 10]?.trim().orEmpty()
+            else -> return@LaunchedEffect
+        }
+        if (q.length < 2) {
+            stopResults = emptyList()
+            stopSearching = false
+            stopSearchAttempted = false
+            return@LaunchedEffect
+        }
+        delay(220)
+        stopSearching = true
+        stopResults = searchTripPlaces(
+            context = context,
+            query = q,
+            selectedCity = selectedCity,
+            recentPlaces = recentDestinations + recentStarts,
+            limit = 20,
+        )
+        stopSearching = false
+        stopSearchAttempted = true
+    }
 
     val fieldText = DarkBlue
-    val placeholderColor = Color(0xFF6B7280)
+    val placeholderColor = CitizenInk.Helper
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = fieldText,
         unfocusedTextColor = fieldText,
@@ -2841,6 +5486,191 @@ private fun TripPlannerPanel(
         unfocusedTrailingIconColor = Color(0xFF4B5563),
     )
 
+    fun sameTripPlace(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Boolean {
+        val dLat = (lat1 - lat2) * 111_320.0
+        val dLon = (lon1 - lon2) * 111_320.0 *
+            kotlin.math.cos(Math.toRadians((lat1 + lat2) / 2.0))
+        return kotlin.math.sqrt(dLat * dLat + dLon * dLon) < 45.0
+    }
+
+    fun refreshStopSuggestionPools() {
+        recentStarts = TripRecentPlacesRepository.starts(context)
+        recentDestinations = TripRecentPlacesRepository.destinations(context)
+    }
+
+    /** Recent starts + destinations (and saved places) for stop fields. */
+    fun stopSuggestionPlaces(excludeStopIndex: Int?): List<TripRecentPlace> {
+        fun occupied(lat: Double, lon: Double): Boolean {
+            val sLat = selectedStartLat
+            val sLon = selectedStartLon
+            if (sLat != null && sLon != null && sameTripPlace(lat, lon, sLat, sLon)) return true
+            val dLat = selectedDestLat
+            val dLon = selectedDestLon
+            if (dLat != null && dLon != null && sameTripPlace(lat, lon, dLat, dLon)) return true
+            stops.forEachIndexed { i, stop ->
+                if (excludeStopIndex != null && i == excludeStopIndex) return@forEachIndexed
+                if (sameTripPlace(lat, lon, stop.latitude, stop.longitude)) return true
+            }
+            return false
+        }
+        val seen = LinkedHashSet<String>()
+        val out = ArrayList<TripRecentPlace>()
+        fun addAll(places: List<TripRecentPlace>) {
+            for (place in places) {
+                if (occupied(place.latitude, place.longitude)) continue
+                val key = "${(place.latitude * 1e4).toInt()}_${(place.longitude * 1e4).toInt()}"
+                if (!seen.add(key)) continue
+                out += place
+            }
+        }
+        // Saved first, then recent destinations, then starts — same pool user already searched.
+        addAll(recentDestinations.filter { it.isFavorite })
+        addAll(recentDestinations.filterNot { it.isFavorite })
+        addAll(recentStarts)
+        return out
+    }
+
+    fun applyStopPick(index: Int?, label: String, lat: Double, lon: Double) {
+        val place = TripStopPlace(label = label, latitude = lat, longitude = lon)
+        if (index == null) {
+            onStopsChanged(stops + place)
+            addingStop = false
+            newStopQuery = ""
+        } else {
+            onStopsChanged(stops.toMutableList().also { it[index] = place })
+            stopEditQueries = stopEditQueries - index
+        }
+        stopResults = emptyList()
+        activeField = 0
+        recentDestinations = TripRecentPlacesRepository.rememberDestination(context, label, lat, lon)
+    }
+
+    val density = LocalDensity.current
+    val waypointRowHeightPx = with(density) { 56.dp.toPx() }
+    var draggingWaypointIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    val destWaypoint = remember(destText, selectedDestLat, selectedDestLon) {
+        val lat = selectedDestLat
+        val lon = selectedDestLon
+        if (
+            lat != null && lon != null &&
+            lat.isFinite() && lon.isFinite() &&
+            destText.isNotBlank()
+        ) {
+            TripStopPlace(label = destText, latitude = lat, longitude = lon)
+        } else {
+            null
+        }
+    }
+    val orderedWaypoints = remember(stops, destWaypoint) {
+        buildList {
+            addAll(stops)
+            destWaypoint?.let { add(it) }
+        }
+    }
+    val canReorderWaypoints = showOriginFields && orderedWaypoints.size >= 2
+
+    fun commitWaypointOrder(ordered: List<TripStopPlace>) {
+        if (ordered.isEmpty()) return
+        val newDest = ordered.last()
+        val newStops = ordered.dropLast(1).take(MAX_TRIP_STOPS)
+        destQuery = ""
+        stopEditQueries = emptyMap()
+        activeField = 0
+        addingStop = false
+        newStopQuery = ""
+        stopResults = emptyList()
+        onWaypointsReordered(newStops, newDest)
+    }
+
+    fun moveWaypoint(from: Int, to: Int) {
+        if (!canReorderWaypoints) return
+        if (from == to || from !in orderedWaypoints.indices) return
+        val list = orderedWaypoints.toMutableList()
+        val item = list.removeAt(from)
+        list.add(to.coerceIn(0, list.size), item)
+        commitWaypointOrder(list)
+    }
+
+    @Composable
+    fun WaypointReorderChrome(index: Int, content: @Composable () -> Unit) {
+        val total = orderedWaypoints.size
+        val isDragging = draggingWaypointIndex == index
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .zIndex(if (isDragging) 2f else 0f)
+                .offset {
+                    IntOffset(0, if (isDragging) dragOffsetY.roundToInt() else 0)
+                },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(
+                    onClick = { moveWaypoint(index, index - 1) },
+                    enabled = index > 0,
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowUp,
+                        contentDescription = "Move up",
+                        tint = if (index > 0) DarkBlue else Color(0xFFD1D5DB),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                Icon(
+                    Icons.Filled.DragHandle,
+                    contentDescription = "Long-press and drag to reorder",
+                    tint = Color(0xFF6B7280),
+                    modifier = Modifier
+                        .size(22.dp)
+                        .pointerInput(index, total, canReorderWaypoints) {
+                            if (!canReorderWaypoints) return@pointerInput
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    draggingWaypointIndex = index
+                                    dragOffsetY = 0f
+                                },
+                                onDrag = { change, amount ->
+                                    change.consume()
+                                    dragOffsetY += amount.y
+                                },
+                                onDragEnd = {
+                                    val from = draggingWaypointIndex
+                                    if (from != null) {
+                                        val shift = (dragOffsetY / waypointRowHeightPx).roundToInt()
+                                        val target = (from + shift).coerceIn(0, total - 1)
+                                        if (target != from) moveWaypoint(from, target)
+                                    }
+                                    draggingWaypointIndex = null
+                                    dragOffsetY = 0f
+                                },
+                                onDragCancel = {
+                                    draggingWaypointIndex = null
+                                    dragOffsetY = 0f
+                                },
+                            )
+                        },
+                )
+                IconButton(
+                    onClick = { moveWaypoint(index, index + 1) },
+                    enabled = index < total - 1,
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown,
+                        contentDescription = "Move down",
+                        tint = if (index < total - 1) DarkBlue else Color(0xFFD1D5DB),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            Box(modifier = Modifier.weight(1f)) {
+                content()
+            }
+        }
+    }
+
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(10.dp),
@@ -2849,276 +5679,623 @@ private fun TripPlannerPanel(
         contentColor = DarkBlue,
     ) {
         Column(Modifier.padding(8.dp)) {
+            // Default origin is current GPS until the user picks another start.
+            LaunchedEffect(Unit) { onUseMyLocation() }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    if (showOriginFields) {
             OutlinedTextField(
-                value = when {
-                    startQuery.isNotBlank() -> startQuery
-                    startUsesMyLocation && startText.isNotBlank() -> startText
-                    else -> ""
-                },
+                            value = startQuery,
                 onValueChange = {
                     startQuery = it
                     activeField = 1
-                    startSearchAttempted = false
+                                startSearchAttempted = false
                 },
                 singleLine = true,
                 placeholder = {
                     Text(
-                        when {
-                            startUsesMyLocation -> "My location"
-                            startText.isNotBlank() -> startText
-                            else -> "Choose start"
-                        },
-                        fontSize = fieldFont,
+                                    startText.ifBlank {
+                                        if (startUsesMyLocation) "My location" else "Starting point"
+                                    },
+                                    fontSize = fieldFont,
                         color = placeholderColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 },
-                textStyle = MaterialTheme.typography.bodySmall.copy(
-                    color = fieldText,
-                    fontSize = fieldFont,
-                ),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(
+                                color = fieldText,
+                                fontSize = fieldFont,
+                            ),
                 leadingIcon = {
                     Icon(
                         Icons.Filled.MyLocation,
-                        contentDescription = if (startUsesMyLocation) {
-                            "My location active"
-                        } else {
-                            "Custom start location"
-                        },
-                        tint = if (startUsesMyLocation) Color(0xFF15803D) else Color(0xFF2563EB),
-                        modifier = Modifier.size(fieldIcon),
+                                    contentDescription = "Start",
+                                    tint = DarkBlue,
+                                    modifier = Modifier.size(fieldIcon),
                     )
                 },
                 trailingIcon = {
-                    val canClearStart =
-                        startQuery.isNotBlank() ||
-                            !startUsesMyLocation ||
-                            (startUsesMyLocation && startText.isNotBlank())
-                    if (canClearStart) {
-                        IconButton(
-                            onClick = {
-                                startQuery = ""
-                                startResults = emptyList()
-                                startSearchAttempted = false
-                                activeField = 0
-                                onClearStart()
-                            },
-                            modifier = Modifier.size(40.dp),
-                        ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (!startUsesMyLocation || startQuery.isNotBlank() || startText.isNotBlank()) {
+                                        IconButton(
+                                            onClick = {
+                            startQuery = ""
+                            startResults = emptyList()
+                                                startSearchAttempted = false
+                                                activeField = 1
+                            onUseMyLocation()
+                                            },
+                                            modifier = Modifier.size(36.dp),
+                                        ) {
                             Icon(
-                                Icons.Outlined.Close,
-                                contentDescription = "Clear start",
-                                tint = Color(0xFF4B5563),
+                                                Icons.Outlined.Close,
+                                contentDescription = "Use my location",
+                                                tint = Color(0xFF4B5563),
                                 modifier = Modifier.size(16.dp),
                             )
+                                        }
                         }
                     }
                 },
                 colors = fieldColors,
                 shape = RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onFocusChanged {
-                        if (it.isFocused) activeField = 1
-                    },
-            )
-            if (activeField == 1 && startSearching) {
-                TripSearchStatus("Searching places…")
-            } else if (activeField == 1 && startResults.isNotEmpty()) {
-                TripSuggestionList(startResults) { label, gp ->
-                    startQuery = label
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged {
+                                    if (it.isFocused) activeField = 1
+                                },
+                        )
+                        if (activeField == 1 && startSearching) {
+                            TripSearchStatus("Searching places…")
+                        } else if (activeField == 1 && startResults.isNotEmpty()) {
+                            TripSuggestionList(startResults) { suggestion ->
+                                startQuery = suggestion.label
                     startResults = emptyList()
                     activeField = 0
-                    recentStarts = TripRecentPlacesRepository.rememberStart(
-                        context,
-                        label,
-                        gp.latitude,
-                        gp.longitude,
-                    )
-                    onStartSelected(label, gp.latitude, gp.longitude)
-                }
-            } else if (activeField == 1 && startSearchAttempted) {
-                TripSearchStatus("No matching places found. Try a landmark, area, or postcode.")
-            } else if (
-                activeField == 1 &&
-                startQuery.isBlank() &&
-                recentStarts.isNotEmpty()
-            ) {
-                TripRecentPlacesPanel(
-                    title = "Recent starts",
-                    places = recentStarts,
-                    showFavorite = false,
-                    onPick = { place ->
-                        startQuery = place.label
-                        activeField = 0
-                        recentStarts = TripRecentPlacesRepository.rememberStart(
-                            context,
-                            place.label,
-                            place.latitude,
-                            place.longitude,
-                        )
-                        onStartSelected(place.label, place.latitude, place.longitude)
-                    },
-                    onToggleFavorite = null,
-                    onRemove = null,
-                )
-            }
+                                recentStarts = TripRecentPlacesRepository.rememberStart(
+                                    context,
+                                    suggestion.label,
+                                    suggestion.latitude,
+                                    suggestion.longitude,
+                                )
+                                onStartSelected(
+                                    suggestion.label,
+                                    suggestion.latitude,
+                                    suggestion.longitude,
+                                )
+                            }
+                        } else if (activeField == 1 && startSearchAttempted) {
+                            TripSearchStatus("No matching places found. Try a landmark, area, or postcode.")
+                        } else if (activeField == 1 && startQuery.isBlank() && recentStarts.isNotEmpty()) {
+                            TripRecentPlacesPanel(
+                                title = "Recent starts",
+                                places = recentStarts,
+                                showFavorite = false,
+                                onPick = { place ->
+                                    startQuery = place.displayName
+                                    activeField = 0
+                                    recentStarts = TripRecentPlacesRepository.rememberStart(
+                                        context, place.label, place.latitude, place.longitude,
+                                    )
+                                    onStartSelected(place.displayName, place.latitude, place.longitude)
+                                },
+                                onToggleFavorite = null,
+                                onRemove = { place ->
+                                    recentStarts = TripRecentPlacesRepository.removeStart(
+                                        context, place.latitude, place.longitude,
+                                    )
+                                },
+                            )
+                        }
 
-            Spacer(Modifier.height(4.dp))
+                        stops.forEachIndexed { index, stop ->
+                            Spacer(modifier = Modifier.height(4.dp))
+                            val stopValue = stopEditQueries[index] ?: stop.label
+                            val stopField = @Composable {
+                                OutlinedTextField(
+                                    value = stopValue,
+                                    onValueChange = {
+                                        stopEditQueries = stopEditQueries + (index to it)
+                                        activeField = stopFieldId(index)
+                                        stopSearchAttempted = false
+                                    },
+                                    singleLine = true,
+                                    placeholder = {
+                                        Text(
+                                            "Stop ${index + 1}",
+                                            fontSize = fieldFont,
+                                            color = placeholderColor,
+                                        )
+                                    },
+                                    textStyle = MaterialTheme.typography.bodySmall.copy(
+                                        color = fieldText,
+                                        fontSize = fieldFont,
+                                    ),
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Filled.RadioButtonUnchecked,
+                                            contentDescription = "Stop",
+                                            tint = Color(0xFFEA580C),
+                                            modifier = Modifier.size(fieldIcon),
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        IconButton(
+                                            onClick = {
+                                                onStopsChanged(stops.filterIndexed { i, _ -> i != index })
+                                                stopEditQueries = stopEditQueries
+                                                    .filterKeys { it != index }
+                                                    .mapKeys { (k, _) -> if (k > index) k - 1 else k }
+                                                activeField = 0
+                                            },
+                                            modifier = Modifier.size(36.dp),
+                                        ) {
+                                            Icon(
+                                                Icons.Outlined.Close,
+                                                contentDescription = "Remove stop",
+                                                tint = Color(0xFF4B5563),
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    },
+                                    colors = fieldColors,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged {
+                                            if (it.isFocused) {
+                                                activeField = stopFieldId(index)
+                                                refreshStopSuggestionPools()
+                                            }
+                                        },
+                                )
+                            }
+                            if (canReorderWaypoints) {
+                                WaypointReorderChrome(index = index, content = stopField)
+                            } else {
+                                stopField()
+                            }
+                        }
+                        if (addingStop) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            OutlinedTextField(
+                                value = newStopQuery,
+                                onValueChange = {
+                                    newStopQuery = it
+                                    activeField = newStopFieldId
+                                    stopSearchAttempted = false
+                                },
+                                singleLine = true,
+                                placeholder = {
+                                    Text(
+                                        "Search or pick a stop",
+                                        fontSize = fieldFont,
+                                        color = placeholderColor,
+                                    )
+                                },
+                                textStyle = MaterialTheme.typography.bodySmall.copy(
+                                    color = fieldText,
+                                    fontSize = fieldFont,
+                                ),
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Filled.Add,
+                                        contentDescription = null,
+                                        tint = Color(0xFFEA580C),
+                                        modifier = Modifier.size(fieldIcon),
+                                    )
+                                },
+                                trailingIcon = {
+                                    IconButton(
+                                        onClick = {
+                                            addingStop = false
+                                            newStopQuery = ""
+                                            stopResults = emptyList()
+                                            activeField = 0
+                                        },
+                                        modifier = Modifier.size(36.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.Close,
+                                            contentDescription = "Cancel stop",
+                                            tint = Color(0xFF4B5563),
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                },
+                                colors = fieldColors,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged {
+                                        if (it.isFocused) {
+                                            activeField = newStopFieldId
+                                            refreshStopSuggestionPools()
+                                        }
+                                    },
+                            )
+                        }
+                        if (activeField == newStopFieldId || activeField >= 10) {
+                            val editingIdx = if (activeField >= 10) activeField - 10 else null
+                            val stopQueryLen = when {
+                                activeField == newStopFieldId -> newStopQuery.trim().length
+                                editingIdx != null ->
+                                    stopEditQueries[editingIdx]?.trim()?.length
+                                        ?: 0 // focused existing stop → show recents until typing
+                                else -> 0
+                            }
+                            val showStopRecents = stopQueryLen < 2
+                            val stopRecents = if (showStopRecents) {
+                                stopSuggestionPlaces(excludeStopIndex = editingIdx)
+                            } else {
+                                emptyList()
+                            }
+                            if (stopSearching) {
+                                TripSearchStatus("Searching places…")
+                            } else if (stopResults.isNotEmpty()) {
+                                TripSuggestionList(stopResults) { suggestion ->
+                                    applyStopPick(
+                                        editingIdx,
+                                        suggestion.label,
+                                        suggestion.latitude,
+                                        suggestion.longitude,
+                                    )
+                                }
+                            } else if (stopSearchAttempted) {
+                                TripSearchStatus("No matching places found. Try a landmark, area, or postcode.")
+                            } else if (stopRecents.isNotEmpty()) {
+                                val favorites = stopRecents.filter { it.isFavorite }
+                                val recentOnly = stopRecents.filterNot { it.isFavorite }
+                                if (favorites.isNotEmpty()) {
+                                    TripRecentPlacesPanel(
+                                        title = "Saved places",
+                                        places = favorites,
+                                        showFavorite = true,
+                                        onPick = { place ->
+                                            applyStopPick(
+                                                editingIdx,
+                                                place.displayName,
+                                                place.latitude,
+                                                place.longitude,
+                                            )
+                                        },
+                                        onToggleFavorite = { place -> requestSavePlace(place) },
+                                        onRemove = { place ->
+                                            recentDestinations =
+                                                TripRecentPlacesRepository.removeDestination(
+                                                    context,
+                                                    place.latitude,
+                                                    place.longitude,
+                                                )
+                                        },
+                                    )
+                                }
+                                if (recentOnly.isNotEmpty()) {
+                                    TripRecentPlacesPanel(
+                                        title = "Recent places",
+                                        places = recentOnly,
+                                        showFavorite = true,
+                                        onPick = { place ->
+                                            applyStopPick(
+                                                editingIdx,
+                                                place.displayName,
+                                                place.latitude,
+                                                place.longitude,
+                                            )
+                                        },
+                                        onToggleFavorite = { place -> requestSavePlace(place) },
+                                        onRemove = { place ->
+                                            recentDestinations =
+                                                TripRecentPlacesRepository.removeDestination(
+                                                    context,
+                                                    place.latitude,
+                                                    place.longitude,
+                                                )
+                                            recentStarts =
+                                                TripRecentPlacesRepository.removeStart(
+                                                    context,
+                                                    place.latitude,
+                                                    place.longitude,
+                                                )
+                                        },
+                                    )
+                                }
+                            }
+                        }
 
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+
+                    val destField = @Composable {
             OutlinedTextField(
                 value = destQuery,
                 onValueChange = {
                     destQuery = it
                     activeField = 2
-                    destSearchAttempted = false
+                            destSearchAttempted = false
                 },
                 singleLine = true,
                 placeholder = {
                     Text(
-                        destText.ifBlank { "Choose destination" },
-                        fontSize = fieldFont,
+                                destText.ifBlank { "Search or tap map" },
+                                fontSize = fieldFont,
                         color = placeholderColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 },
-                textStyle = MaterialTheme.typography.bodySmall.copy(
-                    color = fieldText,
-                    fontSize = fieldFont,
-                ),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(
+                            color = fieldText,
+                            fontSize = fieldFont,
+                        ),
                 leadingIcon = {
-                    Icon(
-                        Icons.Filled.Navigation,
-                        contentDescription = "Destination",
-                        tint = Color(0xFFB91C1C),
-                        modifier = Modifier.size(fieldIcon),
-                    )
+                            Icon(
+                                Icons.Filled.Navigation,
+                                contentDescription = "Destination",
+                                tint = Color(0xFFB91C1C),
+                                modifier = Modifier.size(fieldIcon),
+                            )
                 },
                 trailingIcon = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val destLat = selectedDestLat
+                                val destLon = selectedDestLon
+                                if (
+                                    destText.isNotBlank() &&
+                                    destLat != null &&
+                                    destLon != null &&
+                                    destLat.isFinite() &&
+                                    destLon.isFinite()
+                                ) {
+                                    val alreadySaved = recentDestinations.any {
+                                        it.isFavorite &&
+                                            kotlin.math.abs(it.latitude - destLat) < 0.0001 &&
+                                            kotlin.math.abs(it.longitude - destLon) < 0.0001
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            val match = recentDestinations.firstOrNull {
+                                                kotlin.math.abs(it.latitude - destLat) < 0.0001 &&
+                                                    kotlin.math.abs(it.longitude - destLon) < 0.0001
+                                            }
+                                            requestSavePlace(
+                                                match?.copy(label = destText.ifBlank { match.label })
+                                                    ?: TripRecentPlace(
+                                                        label = destText,
+                                                        latitude = destLat,
+                                                        longitude = destLon,
+                                                    ),
+                                            )
+                                        },
+                                        modifier = Modifier.size(36.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = if (alreadySaved) {
+                                                Icons.Filled.Star
+                                            } else {
+                                                Icons.Outlined.StarBorder
+                                            },
+                                            contentDescription = if (alreadySaved) {
+                                                "Edit saved place"
+                                            } else {
+                                                "Save destination as…"
+                                            },
+                                            tint = if (alreadySaved) Color(0xFFCA8A04) else CitizenInk.Helper,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
                     if (destQuery.isNotBlank() || destText.isNotBlank()) {
-                        IconButton(
-                            onClick = {
-                                destQuery = ""
-                                destResults = emptyList()
-                                destSearchAttempted = false
-                                recentDestinations = TripRecentPlacesRepository.destinations(context)
-                                activeField = 0
-                                onClearDestination()
-                            },
-                            modifier = Modifier.size(40.dp),
-                        ) {
-                            Icon(
-                                Icons.Outlined.Close,
-                                contentDescription = "Clear destination",
-                                tint = Color(0xFF4B5563),
-                                modifier = Modifier.size(16.dp),
-                            )
+                                    IconButton(
+                                        onClick = {
+                            destQuery = ""
+                            destResults = emptyList()
+                                            destSearchAttempted = false
+                                            recentDestinations = TripRecentPlacesRepository.destinations(context)
+                                            activeField = 2
+                            onClearDestination()
+                                        },
+                                        modifier = Modifier.size(36.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.Close,
+                                            contentDescription = "Clear destination",
+                                            tint = Color(0xFF4B5563),
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
                         }
                     }
                 },
                 colors = fieldColors,
                 shape = RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onFocusChanged {
-                        if (it.isFocused) activeField = 2
-                    },
-            )
-            if (activeField == 2 && destSearching) {
-                TripSearchStatus("Searching places…")
-            } else if (activeField == 2 && destResults.isNotEmpty()) {
-                TripSuggestionList(destResults) { label, gp ->
-                    destQuery = label
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged {
+                                if (it.isFocused) activeField = 2
+                            },
+                        )
+                    }
+                    if (canReorderWaypoints) {
+                        WaypointReorderChrome(index = stops.size, content = destField)
+                        Text(
+                            "↑↓ or long-press ☰ to reorder stops & destination",
+                            fontSize = 9.sp,
+                            color = CitizenInk.Helper,
+                            modifier = Modifier.padding(start = 28.dp, top = 2.dp),
+                        )
+                    } else {
+                        destField()
+                    }
+                    if (destText.isBlank() && destQuery.isBlank()) {
+                        Text(
+                            "Or tap a place on the map below",
+                            fontSize = 10.sp,
+                            color = CitizenInk.Helper,
+                            modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 2.dp),
+                        )
+                    }
+                    if (activeField == 2 && destSearching) {
+                        TripSearchStatus("Searching places…")
+                    } else if (activeField == 2 && destResults.isNotEmpty()) {
+                        TripSuggestionList(destResults) { suggestion ->
+                            destQuery = suggestion.label
                     destResults = emptyList()
                     activeField = 0
-                    recentDestinations = TripRecentPlacesRepository.rememberDestination(
-                        context,
-                        label,
-                        gp.latitude,
-                        gp.longitude,
-                    )
-                    onDestSelected(label, gp.latitude, gp.longitude)
-                }
-            } else if (activeField == 2 && destSearchAttempted) {
-                TripSearchStatus("No matching places found. Try a landmark, area, or postcode.")
-            } else if (
-                activeField == 2 &&
-                destQuery.isBlank() &&
-                recentDestinations.isNotEmpty()
-            ) {
-                val favorites = recentDestinations.filter { it.isFavorite }
-                val recentOnly = recentDestinations.filterNot { it.isFavorite }
-                if (favorites.isNotEmpty()) {
-                    TripRecentPlacesPanel(
-                        title = "Saved destinations",
-                        places = favorites,
-                        showFavorite = true,
-                        onPick = { place ->
-                            destQuery = place.label
-                            activeField = 0
                             recentDestinations = TripRecentPlacesRepository.rememberDestination(
                                 context,
-                                place.label,
-                                place.latitude,
-                                place.longitude,
+                                suggestion.label,
+                                suggestion.latitude,
+                                suggestion.longitude,
                             )
-                            onDestSelected(place.label, place.latitude, place.longitude)
-                        },
-                        onToggleFavorite = { place ->
-                            recentDestinations = TripRecentPlacesRepository.toggleFavoriteDestination(
-                                context,
-                                place.label,
-                                place.latitude,
-                                place.longitude,
+                            onDestSelected(
+                                suggestion.label,
+                                suggestion.latitude,
+                                suggestion.longitude,
                             )
-                        },
-                        onRemove = { place ->
-                            recentDestinations = TripRecentPlacesRepository.removeDestination(
-                                context,
-                                place.latitude,
-                                place.longitude,
+                        }
+                    } else if (activeField == 2 && destSearchAttempted) {
+                        TripSearchStatus("No matching places found. Try a landmark, area, or postcode.")
+                    } else if (
+                        activeField == 2 &&
+                        destQuery.isBlank() &&
+                        recentDestinations.isNotEmpty()
+                    ) {
+                        val favorites = recentDestinations.filter { it.isFavorite }
+                        val recentOnly = recentDestinations.filterNot { it.isFavorite }
+                        if (favorites.isNotEmpty()) {
+                            TripRecentPlacesPanel(
+                                title = "Saved places",
+                                places = favorites,
+                                showFavorite = true,
+                                onPick = { place ->
+                                    destQuery = place.displayName
+                                    activeField = 0
+                                    recentDestinations = TripRecentPlacesRepository.rememberDestination(
+                                        context,
+                                        place.label,
+                                        place.latitude,
+                                        place.longitude,
+                                    )
+                                    onDestSelected(place.displayName, place.latitude, place.longitude)
+                                },
+                                onToggleFavorite = { place -> requestSavePlace(place) },
+                                onRemove = { place ->
+                                    recentDestinations = TripRecentPlacesRepository.removeDestination(
+                                        context,
+                                        place.latitude,
+                                        place.longitude,
+                                    )
+                                },
                             )
-                        },
-                    )
+                        }
+                        if (recentOnly.isNotEmpty()) {
+                            TripRecentPlacesPanel(
+                                title = "Recent destinations",
+                                places = recentOnly,
+                                showFavorite = true,
+                                onPick = { place ->
+                                    destQuery = place.displayName
+                                    activeField = 0
+                                    recentDestinations = TripRecentPlacesRepository.rememberDestination(
+                                        context,
+                                        place.label,
+                                        place.latitude,
+                                        place.longitude,
+                                    )
+                                    onDestSelected(place.displayName, place.latitude, place.longitude)
+                                },
+                                onToggleFavorite = { place -> requestSavePlace(place) },
+                                onRemove = { place ->
+                                    recentDestinations = TripRecentPlacesRepository.removeDestination(
+                                        context,
+                                        place.latitude,
+                                        place.longitude,
+                                    )
+                                },
+                            )
+                        }
+                    }
                 }
-                if (recentOnly.isNotEmpty()) {
-                    TripRecentPlacesPanel(
-                        title = "Recent destinations",
-                        places = recentOnly,
-                        showFavorite = true,
-                        onPick = { place ->
-                            destQuery = place.label
-                            activeField = 0
-                            recentDestinations = TripRecentPlacesRepository.rememberDestination(
-                                context,
-                                place.label,
-                                place.latitude,
-                                place.longitude,
+
+                if (showOriginFields) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = CitizenRadius.Capsule,
+                        color = Color(0xFFF3F4F6),
+                        border = BorderStroke(1.dp, Color(0xFFD1D5DB)),
+                        modifier = Modifier.padding(top = 2.dp),
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(vertical = 4.dp, horizontal = 2.dp),
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    if (stops.size >= MAX_TRIP_STOPS) return@IconButton
+                                    addingStop = true
+                                    newStopQuery = ""
+                                    stopResults = emptyList()
+                                    stopSearchAttempted = false
+                                    refreshStopSuggestionPools()
+                                    activeField = newStopFieldId
+                                },
+                                enabled = stops.size < MAX_TRIP_STOPS && !addingStop,
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Add,
+                                    contentDescription = "Add a stop",
+                                    tint = if (stops.size < MAX_TRIP_STOPS && !addingStop) {
+                                        DarkBlue
+                                    } else {
+                                        Color(0xFF9CA3AF)
+                                    },
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            HorizontalDivider(
+                                modifier = Modifier
+                                    .width(18.dp)
+                                    .padding(vertical = 2.dp),
+                                color = Color(0xFFD1D5DB),
                             )
-                            onDestSelected(place.label, place.latitude, place.longitude)
-                        },
-                        onToggleFavorite = { place ->
-                            recentDestinations = TripRecentPlacesRepository.toggleFavoriteDestination(
-                                context,
-                                place.label,
-                                place.latitude,
-                                place.longitude,
-                            )
-                        },
-                        onRemove = { place ->
-                            recentDestinations = TripRecentPlacesRepository.removeDestination(
-                                context,
-                                place.latitude,
-                                place.longitude,
-                            )
-                        },
-                    )
+                            IconButton(
+                                onClick = {
+                                    // TextFields bind to local queries (not startText/destText).
+                                    // Mirror the swap into those queries so names update immediately.
+                                    val nextStartQuery = destText
+                                    val nextDestQuery = startText
+                                    startQuery = nextStartQuery
+                                    destQuery = nextDestQuery
+                                    startResults = emptyList()
+                                    destResults = emptyList()
+                                    startSearchAttempted = false
+                                    destSearchAttempted = false
+                                    activeField = 0
+                                    onSwapStartDestination()
+                                },
+                                enabled = selectedDestLat != null && selectedDestLon != null,
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.SwapVert,
+                                    contentDescription = "Swap start and destination",
+                                    tint = if (selectedDestLat != null) DarkBlue else Color(0xFF9CA3AF),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
-            Spacer(Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -3151,32 +6328,69 @@ private fun TripPlannerPanel(
                                 modifier = Modifier.size(16.dp),
                             )
                         },
-                        shape = RoundedCornerShape(50),
+                        shape = CitizenRadius.Capsule,
                         border = BorderStroke(1.dp, if (selected) DarkBlue else Color(0xFF9CA3AF)),
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = Color.Transparent,
                             labelColor = DarkBlue,
                             iconColor = DarkBlue,
                             selectedContainerColor = DarkBlue,
-                            selectedLabelColor = Color.White,
-                            selectedLeadingIconColor = Color.White,
+                            selectedLabelColor = CitizenSelection.ActiveContent,
+                            selectedLeadingIconColor = CitizenSelection.ActiveContent,
                         ),
                     )
                 }
             }
-            Spacer(Modifier.height(6.dp))
+            val eta = routeDurationSeconds?.takeIf { it.isFinite() && it > 0.0 }
+            val dist = routeDistanceMeters?.takeIf { it.isFinite() && it > 0.0 }
+            val journeyEta = remember(eta, selectedCity) {
+                eta?.let { JourneyStartEta.estimate(it, cityKey = selectedCity) }
+            }
+            if (eta != null || dist != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    buildString {
+                        if (eta != null) append(formatTripEta(eta))
+                        if (eta != null && dist != null) append("  ·  ")
+                        if (dist != null) append(formatTripDistance(dist))
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 2.dp),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = DarkBlue,
+                    textAlign = TextAlign.Center,
+                )
+                // #31 Phase A — journey-start ETA (no live traffic overlay).
+                if (journeyEta != null) {
+                    Text(
+                        JourneyStartEta.formatComparison(journeyEta),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 2.dp, vertical = 2.dp),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (journeyEta.congested) Color(0xFFB45309) else CitizenInk.Helper,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
             when (routeStatus) {
                 TripRouteStatus.FINDING -> {
                     Text(
-                        "Finding routes…",
+                        "Looking for routes. Wait a moment…",
                         fontSize = 11.sp,
-                        color = Color(0xFF6B7280),
+                        color = CitizenInk.Helper,
                         modifier = Modifier.padding(bottom = 4.dp),
                     )
                 }
                 TripRouteStatus.NO_ROUTE -> {
                     Text(
-                        "No route found. Try another start or destination.",
+                        "No route between these points. Change start or destination, then try again.",
                         fontSize = 11.sp,
                         color = Color(0xFFB91C1C),
                         modifier = Modifier.padding(bottom = 4.dp),
@@ -3184,35 +6398,212 @@ private fun TripPlannerPanel(
                 }
                 else -> Unit
             }
-            Button(
-                onClick = onNavigate,
-                enabled = canNavigate,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFB91C1C),
-                    contentColor = Color.White,
-                    disabledContainerColor = Color(0xFFD1D5DB),
-                    disabledContentColor = Color(0xFF6B7280),
-                ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(
-                    Icons.Filled.Navigation,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                )
-                Spacer(Modifier.width(4.dp))
+            if (routeOptionLabels.size > 1) {
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    if (navigatePreparing) "Getting GPS…" else "Navigate",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    "Alternate routes",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = CitizenInk.Helper,
+                    modifier = Modifier.padding(bottom = 4.dp),
                 )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    routeOptionLabels.forEachIndexed { index, label ->
+                        val selected = index == selectedRouteIndex
+                        FilterChip(
+                            selected = selected,
+                            onClick = { onSelectRouteIndex(index) },
+                            label = {
+                                Text(
+                                    label,
+                                    fontSize = uiScale.sp(11f),
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            shape = CitizenRadius.Capsule,
+                            border = BorderStroke(
+                                1.dp,
+                                if (selected) Color(0xFFEA580C) else Color(0xFFD1D5DB),
+                            ),
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = Color.White,
+                                labelColor = DarkBlue,
+                                selectedContainerColor = Color(0xFFFFEDD5),
+                                selectedLabelColor = Color(0xFF9A3412),
+                            ),
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = onDirections,
+                    enabled = canShowDirections,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
+                    shape = CitizenRadius.Capsule,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFB91C1C),
+                        contentColor = Color.White,
+                        disabledContainerColor = Color(0xFFB91C1C).copy(alpha = 0.35f),
+                        disabledContentColor = Color.White.copy(alpha = 0.55f),
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                ) {
+                    Text(
+                        "Direction",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Button(
+                    onClick = onNavigate,
+                    enabled = canNavigate,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
+                    shape = CitizenRadius.Capsule,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = DarkBlue,
+                        contentColor = Color.White,
+                        disabledContainerColor = DarkBlue.copy(alpha = 0.35f),
+                        disabledContentColor = Color.White.copy(alpha = 0.55f),
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                ) {
+                    Text(
+                        if (navigatePreparing) "GPS…" else "Navigation",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
+
+    val pending = placePendingSave
+    if (pending != null) {
+        TripSavePlaceDialog(
+            place = pending,
+            onDismiss = { placePendingSave = null },
+            onSave = { name ->
+                recentDestinations = TripRecentPlacesRepository.saveNamedDestination(
+                    context,
+                    pending.label,
+                    pending.latitude,
+                    pending.longitude,
+                    name,
+                )
+                placePendingSave = null
+            },
+            onRemove = {
+                recentDestinations = TripRecentPlacesRepository.toggleFavoriteDestination(
+                    context,
+                    pending.label,
+                    pending.latitude,
+                    pending.longitude,
+                )
+                placePendingSave = null
+            },
+        )
+    }
+}
+
+@Composable
+private fun TripSavePlaceDialog(
+    place: TripRecentPlace,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+    onRemove: () -> Unit,
+) {
+    var nameText by remember(place.latitude, place.longitude, place.savedName) {
+        mutableStateOf(place.savedName.orEmpty().ifBlank { "Home" })
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                if (place.isFavorite) "Rename saved place" else "Save place as",
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(CitizenSpace.Sm)) {
+                Text(
+                    place.label,
+                    fontSize = 12.sp,
+                    color = CitizenInk.Helper,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Xs),
+                ) {
+                    TripRecentPlacesRepository.SAVE_NAME_PRESETS.forEach { preset ->
+                        FilterChip(
+                            selected = nameText.equals(preset, ignoreCase = true),
+                            onClick = { nameText = preset },
+                            label = {
+                                Text(preset, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            },
+                            shape = CitizenRadius.Capsule,
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = DarkBlue,
+                                selectedLabelColor = CitizenSelection.ActiveContent,
+                            ),
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = nameText,
+                    onValueChange = { nameText = it.take(24) },
+                    singleLine = true,
+                    label = { Text("Name") },
+                    placeholder = { Text("e.g. Home") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(nameText.trim()) },
+                enabled = nameText.trim().isNotEmpty(),
+            ) {
+                Text(if (place.isFavorite) "Update" else "Save")
+            }
+        },
+        dismissButton = {
+            Row {
+                if (place.isFavorite) {
+                    TextButton(onClick = onRemove) {
+                        Text("Remove", color = Color(0xFFB91C1C))
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -3251,14 +6642,14 @@ private fun TripRecentPlacesPanel(
     Row(
         modifier = Modifier.padding(start = 4.dp, top = 7.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
+                ) {
+                    Icon(
             if (title.startsWith("Saved")) Icons.Filled.Star else Icons.Outlined.History,
-            contentDescription = null,
-            tint = Color(0xFF6B7280),
-            modifier = Modifier.size(14.dp),
-        )
-        Spacer(Modifier.width(5.dp))
+                        contentDescription = null,
+            tint = CitizenInk.Helper,
+                        modifier = Modifier.size(14.dp),
+                    )
+        Spacer(modifier = Modifier.width(5.dp))
         Text(
             title,
             color = Color(0xFF4B5563),
@@ -3282,19 +6673,25 @@ private fun TripRecentPlacesPanel(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = place.label,
+                        text = place.displayName,
                         fontSize = 12.sp,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = DarkBlue,
                         fontWeight = FontWeight.Medium,
                     )
-                    val age = formatTripPlaceAge(place.usedAtMs)
-                    if (age.isNotBlank()) {
+                    val subtitle = when {
+                        !place.savedName.isNullOrBlank() &&
+                            !place.savedName.equals(place.label, ignoreCase = true) -> place.label
+                        else -> formatTripPlaceAge(place.usedAtMs)
+                    }
+                    if (subtitle.isNotBlank()) {
                         Text(
-                            age,
+                            subtitle,
                             fontSize = 10.sp,
-                            color = Color(0xFF6B7280),
+                            color = CitizenInk.Helper,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -3310,11 +6707,11 @@ private fun TripRecentPlacesPanel(
                                 Icons.Outlined.StarBorder
                             },
                             contentDescription = if (place.isFavorite) {
-                                "Remove from saved"
+                                "Edit or remove saved place"
                             } else {
-                                "Save destination"
+                                "Save place as…"
                             },
-                            tint = if (place.isFavorite) Color(0xFFCA8A04) else Color(0xFF6B7280),
+                            tint = if (place.isFavorite) Color(0xFFCA8A04) else CitizenInk.Helper,
                             modifier = Modifier.size(16.dp),
                         )
                     }
@@ -3340,8 +6737,8 @@ private fun TripRecentPlacesPanel(
 
 @Composable
 private fun TripSuggestionList(
-    results: List<Pair<String, GeoPoint>>,
-    onPick: (String, GeoPoint) -> Unit,
+    results: List<TripPlaceSuggestion>,
+    onPick: (TripPlaceSuggestion) -> Unit,
 ) {
     Column(
         Modifier
@@ -3349,21 +6746,26 @@ private fun TripSuggestionList(
             .padding(top = 2.dp)
             .background(Color(0xFFF8F9FA), RoundedCornerShape(6.dp)),
     ) {
-        results.take(8).forEach { (label, gp) ->
-            val title = label.substringBefore(" · ").ifBlank { label }
-            val subtitle = label.substringAfter(" · ", missingDelimiterValue = "").trim()
+        results.take(14).forEach { suggestion ->
+            val title = suggestion.title.ifBlank { suggestion.label }
+            val subtitle = buildList {
+                suggestion.kindLabel?.takeIf { it.isNotBlank() }?.let { add(it) }
+                suggestion.subtitle
+                    .takeIf { it.isNotBlank() && it != suggestion.kindLabel }
+                    ?.let { add(it) }
+            }.distinct().joinToString(" · ")
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onPick(label, gp) }
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                    .clickable { onPick(suggestion) }
+                    .padding(horizontal = CitizenSpace.Sm, vertical = CitizenSpace.Sm),
             ) {
                 Text(
                     text = title,
-                    fontSize = 12.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    color = DarkBlue,
+                fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = DarkBlue,
                     fontWeight = FontWeight.SemiBold,
                 )
                 if (subtitle.isNotBlank()) {
@@ -3372,7 +6774,7 @@ private fun TripSuggestionList(
                         fontSize = 10.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        color = Color(0xFF6B7280),
+                        color = CitizenInk.Helper,
                     )
                 }
             }
@@ -3388,6 +6790,10 @@ private fun RecentReportsStrip(
     onReportsMutated: () -> Unit = {},
 ) {
     var detailReport by remember { mutableStateOf<PersistedPotholeReport?>(null) }
+    var sortMenuExpanded by remember { mutableStateOf(false) }
+    var stripSortName by rememberSaveable { mutableStateOf(ReportsStripSort.RECENT.name) }
+    val stripSort = ReportsStripSort.entries.find { it.name == stripSortName }
+        ?: ReportsStripSort.RECENT
     val bbox = metroBboxForCity(selectedCity)
     LaunchedEffect(selectedCity, recentReportsEpoch) {
         val changed = withContext(Dispatchers.IO) {
@@ -3395,56 +6801,142 @@ private fun RecentReportsStrip(
         }
         if (changed) onReportsMutated()
     }
-    val reports = remember(selectedCity, recentReportsEpoch) {
-        RecentReportsRepository.recentForCityInMetro(selectedCity, bbox, 5)
+    val reports = remember(selectedCity, recentReportsEpoch, stripSort) {
+        RecentReportsRepository.recentForCityInMetro(selectedCity, bbox, limit = 5, sort = stripSort)
     }
     detailReport?.let { report ->
         ReportDetailDialog(report = report, onDismiss = { detailReport = null })
     }
-    Spacer(Modifier.height(20.dp))
+    Spacer(modifier = Modifier.height(CitizenSpace.Xl))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = CitizenHeader.Horizontal),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
     Text(
-        "RECENT REPORTS - ${formatCityDisplayName(selectedCity)}",
-        modifier = Modifier.padding(horizontal = 16.dp),
-        fontWeight = FontWeight.Black,
-        fontSize = 13.sp,
+                "REPORTS",
+                style = CitizenType.Section,
         color = MaterialTheme.colorScheme.onBackground,
-        maxLines = 2,
-    )
-    Spacer(Modifier.height(10.dp))
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                " - ",
+                style = CitizenType.Section,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                formatCityDisplayName(selectedCity),
+                style = CitizenType.SectionTrailing,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+        Spacer(modifier = Modifier.width(CitizenSpace.Sm))
+        Box {
+            AssistChip(
+                onClick = { sortMenuExpanded = true },
+                modifier = Modifier.height(CitizenIcon.CapsuleCompact),
+                label = {
+                    Text(
+                        "Sort: ${stripSort.chipLabel}",
+                        style = CitizenType.ChipCompact,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                trailingIcon = {
+                    Icon(
+                        Icons.Filled.ArrowDropDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(CitizenIcon.Chip),
+                    )
+                },
+                shape = CitizenRadius.Capsule,
+                border = BorderStroke(CitizenBorder.Thin, CitizenSelection.InactiveBorder),
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = Color.Transparent,
+                    labelColor = MaterialTheme.colorScheme.onBackground,
+                    trailingIconContentColor = MaterialTheme.colorScheme.onBackground,
+                ),
+            )
+            DropdownMenu(
+                expanded = sortMenuExpanded,
+                onDismissRequest = { sortMenuExpanded = false },
+            ) {
+                ReportsStripSort.entries.forEach { option ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (option.enabled) {
+                                    option.menuLabel
+                                } else {
+                                    "${option.menuLabel} · Coming soon"
+                                },
+                                color = if (option.enabled) {
+                                    MaterialTheme.colorScheme.onSurface
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                },
+                            )
+                        },
+                        enabled = option.enabled,
+                        onClick = {
+                            stripSortName = option.name
+                            sortMenuExpanded = false
+                        },
+                    )
+                }
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(CitizenSpace.Md))
     if (reports.isEmpty()) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            shape = RoundedCornerShape(0.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                .padding(horizontal = CitizenSpace.Lg),
+            shape = CitizenRadius.Card,
+            border = BorderStroke(CitizenBorder.Thin, MaterialTheme.colorScheme.outlineVariant),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
             ),
         ) {
             Row(
-                Modifier.padding(14.dp),
+                Modifier.padding(CitizenSpace.Md),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
                     Icons.Outlined.Image,
                     contentDescription = null,
-                    tint = Color.Gray,
+                    tint = CitizenInk.Disabled,
                     modifier = Modifier.size(28.dp),
                 )
-                Spacer(Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(CitizenSpace.Md))
                 Text(
-                    "No reports in this city yet. Submit one with the button above.",
-                    fontSize = 12.sp,
-                    color = Color(0xFF5A5A5A),
+                    when (stripSort) {
+                        ReportsStripSort.LONGEST_PENDING ->
+                            "No pending reports in this city."
+                        else ->
+                            "No reports in this city yet. Submit one with the button above."
+                    },
+                    style = CitizenType.Tagline,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
     } else {
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Md),
+            contentPadding = PaddingValues(horizontal = CitizenSpace.Lg),
         ) {
             items(reports, key = { it.id }) {
                 RecentReportThumbnail(
@@ -3501,8 +6993,8 @@ private fun RecentReportThumbnail(
             .width(width)
             .height(height)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(0.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = CitizenRadius.Card,
+        border = BorderStroke(CitizenBorder.Thin, CitizenBorder.Secondary),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
     ) {
         Box(Modifier.fillMaxSize()) {
@@ -3527,18 +7019,30 @@ private fun RecentReportThumbnail(
                     contentScale = ContentScale.Crop,
                 )
             }
+            val statusColor = citizenReportStatusColor(report.status)
+            Text(
+                report.status.displayLabelCaps,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(CitizenSpace.Xs)
+                    .background(Color.White, CitizenRadius.Capsule)
+                    .border(CitizenBorder.Thin, statusColor, CitizenRadius.Capsule)
+                    .padding(horizontal = CitizenSpace.Xs, vertical = 2.dp),
+                style = CitizenType.ChipCompact,
+                color = statusColor,
+                maxLines = 1,
+            )
             Text(
                 caption,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .background(Color.Black.copy(alpha = 0.58f))
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                    .padding(horizontal = CitizenSpace.Xs, vertical = CitizenSpace.Xs),
+                style = CitizenType.Caption,
                 color = Color.White,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
-                lineHeight = 11.sp,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -3569,17 +7073,6 @@ private fun cityCenterForKey(cityKey: String): GeoPoint =
 private fun normalizePlaceKey(raw: String): String =
     raw.trim().replace(Regex("\\s+"), " ").uppercase(Locale.US)
 
-private fun resolvePlaceLabelFromAddress(address: android.location.Address): String {
-    val preferred = listOf(
-        address.locality,
-        address.subAdminArea,
-        address.adminArea,
-        address.subLocality,
-        address.featureName,
-    ).firstOrNull { !it.isNullOrBlank() } ?: "UNKNOWN"
-    return preferred.trim()
-}
-
 /** Richer place label for trip search: name/institution first, then area context. */
 private fun resolveTripPlaceLabel(address: android.location.Address, queryHint: String = ""): String =
     TripPlaceLabels.formatSearchResult(address, queryHint)
@@ -3592,10 +7085,12 @@ private fun searchIndianPlaces(context: Context, query: String, limit: Int = 40)
         val addresses = geocoder.getFromLocationName("${query.trim()}, India", limit) ?: emptyList()
         val out = linkedMapOf<String, GeoPoint>()
         for (address in addresses) {
-            val label = normalizePlaceKey(resolvePlaceLabelFromAddress(address))
+            val label = TripPlaceLabels.formatCitySearchLabel(address)
+            if (label.length < 2 || TripPlaceLabels.isAdministrativeUnitName(label)) continue
             val lat = address.latitude
             val lon = address.longitude
-            if (label.length < 2) continue
+            if (!address.hasLatitude() || !address.hasLongitude()) continue
+            // Keep display casing; city key is canonicalized on select.
             out.putIfAbsent(label, GeoPoint(lat, lon))
         }
         out.entries.map { it.key to it.value }
@@ -3621,6 +7116,60 @@ private enum class TripRouteStatus {
     REROUTING,
     NO_ROUTE,
     ARRIVED,
+}
+
+/**
+ * Silent OSRM result computed while the user is still picking Destination /
+ * waiting to tap Direction or Navigation.
+ */
+private data class TripRoutePrefetchCache(
+    val originLat: Double,
+    val originLon: Double,
+    val destLat: Double,
+    val destLon: Double,
+    val vehicle: TripVehicle,
+    val viaPoints: List<Pair<Double, Double>>,
+    val routes: List<OsrmRouteResult>,
+    val hints: List<String?>,
+)
+
+/** Allow small GPS drift between prefetch and Direction/Navigate. */
+private const val TRIP_PREFETCH_ORIGIN_MATCH_M = 80.0
+private const val TRIP_PREFETCH_DEST_MATCH_M = 25.0
+
+private fun tripRoutePrefetchMatches(
+    cache: TripRoutePrefetchCache,
+    originLat: Double,
+    originLon: Double,
+    destLat: Double,
+    destLon: Double,
+    vehicle: TripVehicle,
+    viaPoints: List<Pair<Double, Double>>,
+): Boolean {
+    if (cache.vehicle != vehicle) return false
+    if (cache.viaPoints.size != viaPoints.size) return false
+    for (i in viaPoints.indices) {
+        val a = cache.viaPoints[i]
+        val b = viaPoints[i]
+        if (TripNavigationMatcher.haversineM(a.first, a.second, b.first, b.second) > 20.0) {
+            return false
+        }
+    }
+    if (
+        TripNavigationMatcher.haversineM(
+            cache.destLat, cache.destLon, destLat, destLon,
+        ) > TRIP_PREFETCH_DEST_MATCH_M
+    ) {
+        return false
+    }
+    if (
+        TripNavigationMatcher.haversineM(
+            cache.originLat, cache.originLon, originLat, originLon,
+        ) > TRIP_PREFETCH_ORIGIN_MATCH_M
+    ) {
+        return false
+    }
+    return cache.routes.isNotEmpty()
 }
 
 private fun formatTripDistance(meters: Double): String =
@@ -3663,6 +7212,23 @@ private fun osrmRoutesLookAlike(a: OsrmRouteResult, b: OsrmRouteResult): Boolean
     val bm = b.points.getOrNull(b.points.size / 2) ?: return false
     return kotlin.math.abs(am.first - bm.first) < 0.002 &&
         kotlin.math.abs(am.second - bm.second) < 0.002
+}
+
+/** #23.2 — reorder ETA-close corridors by severity-weighted pothole risk. */
+private fun rankTripRoutesByPotholeRisk(
+    cityKey: String,
+    routes: List<OsrmRouteResult>,
+): TripRoutePotholeRanking.Result {
+    if (routes.size < 2) {
+        return TripRoutePotholeRanking.Result(routes, List(routes.size) { null })
+    }
+    val bbox = metroBboxForCity(cityKey)
+    val reports = if (bbox != null) {
+        RecentReportsRepository.reportsForMapInMetro(cityKey, bbox)
+    } else {
+        emptyList()
+    }
+    return TripRoutePotholeRanking.rank(routes, reports)
 }
 
 /**
@@ -3727,75 +7293,46 @@ private fun formatNavDistanceMeters(meters: Double): String {
     }
 }
 
-/** Compact L / M / R / F for the nav capsule. */
-private fun tripPotholeSideLetter(sideLabel: String?): String? =
-    when (TripNavigationMatcher.normalizeSideKey(sideLabel)) {
-        "left" -> "L"
-        "right" -> "R"
-        "middle" -> "M"
-        "full" -> "F"
-        else -> null
-    }
 
 @Composable
 private fun TripNavCapsuleDivider() {
     Text(
         text = "|",
+        style = CitizenType.Label,
         fontWeight = FontWeight.Light,
-        fontSize = 16.sp,
-        color = Color(0xFFD1D5DB),
+        color = CitizenInk.Disabled,
     )
 }
 
 /**
- * Trip start/destination search: city-biased, keeps distinct street/landmark results.
- * Tries city-scoped query first, then India-wide to fill gaps.
+ * Trip start/destination/stop autocomplete: city metro bias + partial typing
+ * + clickable landmarks (petrol, hospital, locality, PG, …) from live OSM / Photon.
  */
-private fun searchTripPlaces(
+private suspend fun searchTripPlaces(
     context: Context,
     query: String,
     selectedCity: String,
-    limit: Int = 18,
-): List<Pair<String, GeoPoint>> {
-    val q = query.trim()
-    if (q.length < 2) return emptyList()
-    parseTripCoordinates(q)?.let { return listOf("Dropped pin (${it.latitude}, ${it.longitude})" to it) }
-    if (!Geocoder.isPresent()) return emptyList()
-
-    val geocoder = Geocoder(context, Locale.Builder().setLanguage("en").setRegion("IN").build())
-    val cityLabel = formatCityDisplayName(selectedCity)
-    val cityAliases = when (CityMetroKeys.canonical(selectedCity)) {
-        "BENGALURU" -> listOf(cityLabel, "Bangalore")
-        else -> listOf(cityLabel)
+    recentPlaces: List<TripRecentPlace> = emptyList(),
+    limit: Int = 20,
+): List<TripPlaceSuggestion> {
+    val bbox = metroBboxForCity(selectedCity)
+    val bounds = bbox?.let {
+        TripPlaceSearchBounds(
+            latNorth = it.latNorth,
+            lonEast = it.lonEast,
+            latSouth = it.latSouth,
+            lonWest = it.lonWest,
+        )
     }
-    val queries = buildList {
-        cityAliases.forEach { city -> add("$q, $city, India") }
-        add("$q, $selectedCity, India")
-        add("$q, India")
-        add(q)
-    }.distinct()
-    val out = linkedMapOf<String, GeoPoint>()
-    val seenCoords = mutableSetOf<String>()
-    for (search in queries) {
-        if (out.size >= limit) break
-        val addresses = runCatching {
-            @Suppress("DEPRECATION")
-            geocoder.getFromLocationName(search, limit)
-        }.getOrNull().orEmpty()
-        for (address in addresses) {
-            if (!address.hasLatitude() || !address.hasLongitude()) continue
-            val lat = address.latitude
-            val lon = address.longitude
-            val coordKey = String.format(Locale.US, "%.4f,%.4f", lat, lon)
-            if (!seenCoords.add(coordKey)) continue
-            val label = resolveTripPlaceLabel(address, q)
-            if (label.length < 3) continue
-            // Prefer first (usually city-biased) hit for a given display label.
-            out.putIfAbsent(label, GeoPoint(lat, lon))
-            if (out.size >= limit) break
-        }
-    }
-    return out.entries.map { it.key to it.value }
+    return TripPlaceSearch.search(
+        context = context,
+        query = query,
+        selectedCity = selectedCity,
+        cityLabel = formatCityDisplayName(selectedCity),
+        bounds = bounds,
+        recentPlaces = recentPlaces,
+        limit = limit,
+    )
 }
 
 /** Accepts pasted "latitude, longitude" as a deterministic search fallback. */
@@ -4131,8 +7668,9 @@ private class ReportClusterMarkersOverlay(
 private fun reportsForMapSeverityFilter(
     reports: List<PersistedPotholeReport>,
     severityFilter: PotholeSeverity?,
+    issueTypeFilter: CivicIssueType? = null,
 ): List<PersistedPotholeReport> =
-    if (severityFilter == null) reports else reports.filter { it.severity == severityFilter }
+    reports.filter { it.matchesCivicFilters(severityFilter, issueTypeFilter) }
 
 private fun attachReportClusterOverlay(
     map: MapView,
@@ -4140,15 +7678,44 @@ private fun attachReportClusterOverlay(
     decor: CityOutlineDecor,
     mapSeverityFilter: PotholeSeverity?,
     heatEnabled: Boolean = false,
+    /** Trip map uses black-spot alert markers instead of numbered density disks. */
+    suppressForTripMap: Boolean = false,
+    issueTypeFilter: CivicIssueType? = null,
+    viewerUserId: String = "local",
 ) {
     decor.clusters?.let { map.overlays.remove(it) }
     decor.clusters = null
+    if (suppressForTripMap) return
     val bbox = metroBboxForCity(selectedCity) ?: return
+    val civic = RecentReportsRepository.reportsForMapInMetro(selectedCity, bbox)
     val reports = reportsForMapSeverityFilter(
-        RecentReportsRepository.reportsForMapInMetro(selectedCity, bbox),
+        TripCrowdHazardStore.mergeCivicWithPublicPotholes(
+            civic,
+            map.context,
+            selectedCity,
+            viewerUserId,
+        ),
         mapSeverityFilter,
+        issueTypeFilter,
     )
     if (reports.isEmpty()) return
+    if (map.width <= 0 || map.height <= 0) {
+        map.post {
+            if (map.width > 0 && map.height > 0) {
+                attachReportClusterOverlay(
+                    map = map,
+                    selectedCity = selectedCity,
+                    decor = decor,
+                    mapSeverityFilter = mapSeverityFilter,
+                    heatEnabled = heatEnabled,
+                    suppressForTripMap = suppressForTripMap,
+                    issueTypeFilter = issueTypeFilter,
+                    viewerUserId = viewerUserId,
+                )
+            }
+        }
+        return
+    }
     val clusters = buildReportScreenOverlapClusters(map, reports)
     if (clusters.isEmpty()) return
     val overlay = ReportClusterMarkersOverlay(
@@ -4165,6 +7732,7 @@ private class CityOutlineDecor(
     var dim: Polygon? = null,
     var edge: Polyline? = null,
     var areaHeat: AreaDensityHeatOverlay? = null,
+    var weatherRain: CityWeatherRainOverlay? = null,
     var cityName: CityNameOverlay? = null,
     var clusters: ReportClusterMarkersOverlay? = null,
     var tripNav: TripNavigationOverlay? = null,
@@ -4173,6 +7741,51 @@ private class CityOutlineDecor(
 private fun removeAreaHeatOverlay(map: MapView, decor: CityOutlineDecor) {
     decor.areaHeat?.let { map.overlays.remove(it) }
     decor.areaHeat = null
+}
+
+private fun removeWeatherRainOverlay(map: MapView, decor: CityOutlineDecor) {
+    decor.weatherRain?.let { map.overlays.remove(it) }
+    decor.weatherRain = null
+}
+
+/**
+ * Cloudy wash under clusters. Hidden when Heat is on (parent exclusivity).
+ */
+private fun refreshWeatherRainOverlay(
+    map: MapView,
+    decor: CityOutlineDecor,
+    enabled: Boolean,
+    grid: CityWeatherRainGrid?,
+    briefing: CityWeatherAlertBriefing? = null,
+) {
+    if (!enabled) {
+        removeWeatherRainOverlay(map, decor)
+        return
+    }
+    try {
+        val existing = decor.weatherRain
+        if (existing != null) {
+            existing.applyCloudWash(grid, briefing)
+            map.invalidate()
+            return
+        }
+        val overlay = CityWeatherRainOverlay(mapView = map)
+        overlay.applyCloudWash(grid, briefing)
+        decor.weatherRain = overlay
+        val heatIdx = decor.areaHeat?.let { map.overlays.indexOf(it) } ?: -1
+        val dimIdx = decor.dim?.let { map.overlays.indexOf(it) } ?: -1
+        when {
+            heatIdx >= 0 -> map.overlays.add(heatIdx + 1, overlay)
+            dimIdx >= 0 -> map.overlays.add(dimIdx + 1, overlay)
+            else -> map.overlays.add(0, overlay)
+        }
+        decor.clusters?.let { clusters ->
+            map.overlays.remove(clusters)
+            map.overlays.add(clusters)
+        }
+    } catch (_: Exception) {
+        removeWeatherRainOverlay(map, decor)
+    }
 }
 
 /**
@@ -4184,6 +7797,8 @@ private fun refreshAreaHeatOverlay(
     decor: CityOutlineDecor,
     mapSeverityFilter: PotholeSeverity?,
     heatEnabled: Boolean,
+    issueTypeFilter: CivicIssueType? = null,
+    viewerUserId: String = "local",
 ) {
     if (!heatEnabled || CityMetroKeys.canonical(selectedCity) != "BENGALURU" ||
         !BengaluruGbaWards.isInitialized()
@@ -4195,9 +7810,16 @@ private fun refreshAreaHeatOverlay(
         removeAreaHeatOverlay(map, decor)
         return
     }
+    val civic = RecentReportsRepository.reportsForMapInMetro(selectedCity, bbox)
     val reports = reportsForAreaHeat(
-        RecentReportsRepository.reportsForMapInMetro(selectedCity, bbox),
+        TripCrowdHazardStore.mergeCivicWithPublicPotholes(
+            civic,
+            map.context,
+            selectedCity,
+            viewerUserId,
+        ),
         mapSeverityFilter,
+        issueTypeFilter,
     )
     val counts = countReportsByWardKey(reports) { lat, lon ->
         BengaluruGbaWards.findWard(lat, lon)?.wardKey
@@ -4227,6 +7849,9 @@ private fun refreshReportClusterOverlayOnly(
     decor: CityOutlineDecor,
     mapSeverityFilter: PotholeSeverity?,
     heatEnabled: Boolean = false,
+    suppressForTripMap: Boolean = false,
+    issueTypeFilter: CivicIssueType? = null,
+    viewerUserId: String = "local",
 ) {
     attachReportClusterOverlay(
         map = map,
@@ -4234,6 +7859,9 @@ private fun refreshReportClusterOverlayOnly(
         decor = decor,
         mapSeverityFilter = mapSeverityFilter,
         heatEnabled = heatEnabled,
+        suppressForTripMap = suppressForTripMap,
+        issueTypeFilter = issueTypeFilter,
+        viewerUserId = viewerUserId,
     )
     refreshAreaHeatOverlay(
         map = map,
@@ -4241,6 +7869,8 @@ private fun refreshReportClusterOverlayOnly(
         decor = decor,
         mapSeverityFilter = mapSeverityFilter,
         heatEnabled = heatEnabled,
+        issueTypeFilter = issueTypeFilter,
+        viewerUserId = viewerUserId,
     )
     // Keep clusters above heat after re-attach.
     decor.clusters?.let { clusters ->
@@ -4281,7 +7911,7 @@ private fun refreshTripNavigationOverlay(
     overlay.attachTo(map)
     overlay.onAlternateRouteClick = onSelectRouteIndex
     overlay.onOfferedAlternateClick = onConfirmOfferedAlternate
-    overlay.showSidePlacement = streetFollow
+    overlay.showSidePlacement = true
     if (previewSelecting && alternateRouteOptions.isNotEmpty()) {
         overlay.completedRoutePoints = emptyList()
         overlay.remainingRoutePoints = routePoints.map { (lat, lon) -> GeoPoint(lat, lon) }
@@ -4303,12 +7933,13 @@ private fun refreshTripNavigationOverlay(
         overlay.clearOfferedAlternate(map)
     } else {
         overlay.setPreviewAlternates(map, emptyList(), 0)
-        val (completed, remaining) = TripNavigationMatcher.splitRouteByTraveled(
+        val (_, remaining) = TripNavigationMatcher.splitRouteByTraveled(
             routePoints,
             traveledMeters,
         )
         overlay.routeLatLons = routePoints
-        overlay.completedRoutePoints = completed.map { (lat, lon) -> GeoPoint(lat, lon) }
+        // Hide covered distance — only remaining ahead is drawn on the map.
+        overlay.completedRoutePoints = emptyList()
         overlay.remainingRoutePoints = remaining.map { (lat, lon) -> GeoPoint(lat, lon) }
         overlay.alerts = TripNavigationMatcher.alertsForMapDisplay(alerts, streetFollow)
         // Thick ribbon only after Navigate; preview stays thin for clear curves.
@@ -4377,8 +8008,8 @@ private fun syncTripEndpointDots(
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                     setIcon(buildGoogleDestBalloonDrawable(map.context))
                 } else {
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                    setIcon(buildTripDotDrawable(map.context, colorHex))
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                setIcon(buildTripDotDrawable(map.context, colorHex))
                 }
             }
             slot[0] = marker
@@ -4403,6 +8034,116 @@ private fun syncTripEndpointDots(
         "#EF4444",
         destinationBalloon = true,
     )
+}
+
+/** Intermediate stop markers (numbered orange discs). */
+private fun syncTripStopMarkers(
+    map: MapView,
+    slots: MutableList<Marker>,
+    show: Boolean,
+    stops: List<Pair<Double, Double>>,
+) {
+    val usable = if (show) {
+        stops.filter { it.first.isFinite() && it.second.isFinite() }
+    } else {
+        emptyList()
+    }
+    while (slots.size > usable.size) {
+        val removed = slots.removeAt(slots.lastIndex)
+        map.overlays.remove(removed)
+    }
+    usable.forEachIndexed { index, (lat, lon) ->
+        val point = GeoPoint(lat, lon)
+        val title = "Stop ${index + 1}"
+        if (index < slots.size) {
+            val existing = slots[index]
+            existing.position = point
+            existing.title = title
+            existing.setIcon(TripMapMarkerIcons.stopDotDrawable(map.context, index + 1))
+        } else {
+            val marker = Marker(map).apply {
+                position = point
+                this.title = title
+                setInfoWindow(null)
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                setIcon(TripMapMarkerIcons.stopDotDrawable(map.context, index + 1))
+            }
+            slots += marker
+            map.overlays.add(marker)
+        }
+    }
+}
+
+/** Arrival neighborhood POI labels (non-overlapping Overpass set). */
+private fun syncArrivalPlaceMarkers(
+    map: MapView,
+    slots: MutableList<Marker>,
+    places: List<com.example.potholereport.data.remote.NearbyOsmPoi>,
+) {
+    val usable = places.filter {
+        it.latitude.isFinite() && it.longitude.isFinite() && it.name.isNotBlank()
+    }
+    while (slots.size > usable.size) {
+        val removed = slots.removeAt(slots.lastIndex)
+        map.overlays.remove(removed)
+    }
+    usable.forEachIndexed { index, poi ->
+        val point = GeoPoint(poi.latitude, poi.longitude)
+        val label = poi.name.take(28)
+        if (index < slots.size) {
+            val existing = slots[index]
+            existing.position = point
+            existing.title = label
+            existing.setIcon(TripMapMarkerIcons.arrivalPlaceDrawable(map.context, label))
+            existing.setAnchor(Marker.ANCHOR_LEFT, Marker.ANCHOR_CENTER)
+        } else {
+            val marker = Marker(map).apply {
+                position = point
+                title = label
+                setInfoWindow(null)
+                setAnchor(Marker.ANCHOR_LEFT, Marker.ANCHOR_CENTER)
+                setIcon(TripMapMarkerIcons.arrivalPlaceDrawable(map.context, label))
+            }
+            slots += marker
+            map.overlays.add(marker)
+        }
+    }
+}
+
+/** #25.2 street / place name labels at high zoom. */
+private fun syncStreetNameMarkers(
+    map: MapView,
+    slots: MutableList<Marker>,
+    labels: List<com.example.potholereport.data.remote.StreetNameOverlayClient.StreetLabel>,
+) {
+    val usable = labels.filter {
+        it.latitude.isFinite() && it.longitude.isFinite() && it.name.isNotBlank()
+    }
+    while (slots.size > usable.size) {
+        val removed = slots.removeAt(slots.lastIndex)
+        map.overlays.remove(removed)
+    }
+    usable.forEachIndexed { index, label ->
+        val point = GeoPoint(label.latitude, label.longitude)
+        val title = label.name.take(28)
+        if (index < slots.size) {
+            val existing = slots[index]
+            existing.position = point
+            existing.title = title
+            existing.setIcon(TripMapMarkerIcons.arrivalPlaceDrawable(map.context, title))
+            existing.setAnchor(Marker.ANCHOR_LEFT, Marker.ANCHOR_CENTER)
+        } else {
+            val marker = Marker(map).apply {
+                position = point
+                this.title = title
+                setInfoWindow(null)
+                setAnchor(Marker.ANCHOR_LEFT, Marker.ANCHOR_CENTER)
+                setIcon(TripMapMarkerIcons.arrivalPlaceDrawable(map.context, title))
+            }
+            slots += marker
+            map.overlays.add(marker)
+        }
+    }
 }
 
 /**
@@ -4451,6 +8192,8 @@ private fun syncCityOutlineDecorations(
     decor: CityOutlineDecor,
     mapSeverityFilter: PotholeSeverity?,
     heatEnabled: Boolean = false,
+    issueTypeFilter: CivicIssueType? = null,
+    viewerUserId: String = "local",
 ) {
     decor.cityName?.let { map.overlays.remove(it) }
     decor.cityName = null
@@ -4509,6 +8252,8 @@ private fun syncCityOutlineDecorations(
         decor = decor,
         mapSeverityFilter = mapSeverityFilter,
         heatEnabled = heatEnabled,
+        issueTypeFilter = issueTypeFilter,
+        viewerUserId = viewerUserId,
     )
     applyCityMapChromeVisibility(decor, visible = false)
     map.invalidate()
@@ -4576,21 +8321,42 @@ private fun MapView.applyMetroPanBounds(selectedCity: String, freePan: Boolean =
         return
     }
     maxZoomLevel = CartoBasemapUsefulMaxZoom
-    val metro = metroBboxForCity(selectedCity)
-    if (metro != null) {
-        setScrollableAreaLimitDouble(metro)
-    } else {
-        resetScrollableAreaLimitLatitude()
-        resetScrollableAreaLimitLongitude()
-        setScrollableAreaLimitDouble(null)
+    // No hard scrollable limit for home pan: allow brief overshoot past the city
+    // border, then release animates the viewport back to the border edge.
+    resetScrollableAreaLimitLatitude()
+    resetScrollableAreaLimitLongitude()
+    setScrollableAreaLimitDouble(null)
+}
+
+/** Bounding box used to keep the home Report & Track map inside the city. */
+private fun homePanBoundingBox(selectedCity: String): BoundingBox? =
+    cityOverviewBoundingBox(selectedCity) ?: metroBboxForCity(selectedCity)
+
+/** Visible rubber-band duration when snapping back to the city border after release. */
+private const val CITY_BORDER_SNAP_BACK_MS = 320L
+
+/**
+ * Home map (card + fullscreen): one-/multi-finger pan is always allowed while not in
+ * trip free-pan. Drag may overshoot the city box; on release the map eases back so the
+ * viewport sits flush against the border (never settles outside).
+ */
+private fun MapView.applyHomePanPolicy(
+    selectedCity: String,
+    freePan: Boolean,
+    animateClamp: Boolean = false,
+) {
+    applyMetroPanBounds(selectedCity, freePan = freePan)
+    if (!freePan) {
+        clampViewportToMetroBounds(selectedCity, freePan = false, animate = animateClamp)
     }
 }
 
-/** Keeps the visible viewport inside the selected city's metro bounding box at any zoom. */
-private fun MapView.clampViewportToMetroBounds(selectedCity: String, freePan: Boolean = false) {
-    if (freePan) return
-    val metro = metroBboxForCity(selectedCity) ?: return
-    val visible = boundingBox ?: return
+/**
+ * Center that keeps the full viewport inside [homePanBoundingBox], or null if already inside.
+ */
+private fun MapView.cityBorderClampCenter(selectedCity: String): GeoPoint? {
+    val metro = homePanBoundingBox(selectedCity) ?: return null
+    val visible = boundingBox ?: return null
     val center = mapCenter
 
     val visLatSpan = visible.latNorth - visible.latSouth
@@ -4601,22 +8367,52 @@ private fun MapView.clampViewportToMetroBounds(selectedCity: String, freePan: Bo
     var newLat = center.latitude
     var newLon = center.longitude
 
-    if (visLatSpan >= metroLatSpan) {
+    if (visLatSpan >= metroLatSpan - 1e-9) {
         newLat = (metro.latNorth + metro.latSouth) / 2.0
     } else {
         val halfLat = visLatSpan / 2.0
         newLat = center.latitude.coerceIn(metro.latSouth + halfLat, metro.latNorth - halfLat)
     }
 
-    if (visLonSpan >= metroLonSpan) {
+    if (visLonSpan >= metroLonSpan - 1e-9) {
         newLon = (metro.lonEast + metro.lonWest) / 2.0
     } else {
         val halfLon = visLonSpan / 2.0
         newLon = center.longitude.coerceIn(metro.lonWest + halfLon, metro.lonEast - halfLon)
     }
 
-    if (abs(newLat - center.latitude) > 1e-7 || abs(newLon - center.longitude) > 1e-7) {
-        controller.setCenter(GeoPoint(newLat, newLon))
+    if (abs(newLat - center.latitude) <= 1e-7 && abs(newLon - center.longitude) <= 1e-7) {
+        return null
+    }
+    return GeoPoint(newLat, newLon)
+}
+
+/**
+ * Stop any fling and ease the viewport back flush to the city border.
+ * No-op when already inside so normal in-city flings stay smooth.
+ */
+private fun MapView.snapBackToCityBorder(selectedCity: String, freePan: Boolean) {
+    if (freePan) return
+    val point = cityBorderClampCenter(selectedCity) ?: return
+    controller.stopAnimation(/* jumpToTarget = */ false)
+    controller.animateTo(point, zoomLevelDouble, CITY_BORDER_SNAP_BACK_MS)
+}
+
+/**
+ * Keeps the entire visible viewport inside the city pan box (not only the center).
+ * At city overview (viewport ≥ city) the center is locked — map stays framed.
+ */
+private fun MapView.clampViewportToMetroBounds(
+    selectedCity: String,
+    freePan: Boolean = false,
+    animate: Boolean = false,
+) {
+    if (freePan) return
+    val point = cityBorderClampCenter(selectedCity) ?: return
+    if (animate) {
+        controller.animateTo(point, zoomLevelDouble, CITY_BORDER_SNAP_BACK_MS)
+    } else {
+        controller.setCenter(point)
     }
 }
 
@@ -4688,11 +8484,13 @@ private fun MapView.fitMetroBoundingBoxOverview(selectedCity: String, restoreSlo
         val restore = Runnable {
             // "-" zoom cannot go wider than this city overview level.
             minZoomLevel = cityViewZoom
+            applyHomePanPolicy(selectedCity, freePan = false)
             invalidate()
             restoreSlot[0] = null
         }
         restoreSlot[0] = restore
         postDelayed(restore, 120)
+        applyHomePanPolicy(selectedCity, freePan = false)
     }
 }
 
@@ -4710,6 +8508,18 @@ private const val TRIP_NAV_OVERVIEW_ZOOM = 15.5
 
 /** Closest allowed zoom on the fullscreen trip map (used while moving). */
 private const val TRIP_MAP_MAX_ZOOM = TripStreetCamera.ZOOM_FAST
+
+/** OSM follow zoom for the active camera mode. */
+private fun tripFollowZoomForMode(
+    mode: TripCameraMode,
+    speedMps: Float?,
+    playIntensity: Float = 0f,
+    playMoving: Boolean = playIntensity > 0.001f,
+): Double = when (mode) {
+    TripCameraMode.STREET -> TripStreetCamera.zoomForSpeedMps(speedMps)
+    TripCameraMode.PLAY -> TripStreetCamera.playZoomForIntensity(playIntensity, playMoving)
+    TripCameraMode.MAP -> TRIP_NAV_OVERVIEW_ZOOM
+}
 
 
 /** One ZoomOutMap tap = this many "-" zoom-outs (max zoom-out for the button). */
@@ -4853,9 +8663,11 @@ private suspend fun MapView.animateStreetViewZoomIn(
     }
     val endZoom = targetZoom.coerceIn(minZoomLevel, maxZoomLevel)
     applyStreetFollowVehicleBottomOffset(enabled = headingUp)
+    val speedMpsOrNull = location.speed.takeIf { location.hasSpeed() && it.isFinite() }
+    val lookAhead = TripStreetCamera.lookAheadMetersForSpeed(speedMpsOrNull)
     val center = if (
         headingUp &&
-        TripStreetCamera.LOOKAHEAD_M > 0.0 &&
+        lookAhead > 0.0 &&
         location.hasBearing() &&
         location.bearing.isFinite()
     ) {
@@ -4863,13 +8675,13 @@ private suspend fun MapView.animateStreetViewZoomIn(
             location.latitude,
             location.longitude,
             location.bearing,
-            TripStreetCamera.LOOKAHEAD_M,
+            lookAhead,
         )
         GeoPoint(alat, alon)
     } else {
         GeoPoint(location.latitude, location.longitude)
     }
-    val speedMps = location.speed.takeIf { location.hasSpeed() && it.isFinite() } ?: 0f
+    val speedMps = speedMpsOrNull ?: 0f
     val orientation = if (
         headingUp &&
         location.hasBearing() &&
@@ -5004,7 +8816,8 @@ private fun MapView.applyStreetFollowVehicleBottomOffset(enabled: Boolean) {
         return
     }
     if (height <= 0) return
-    val y = (height * TripStreetCamera.VEHICLE_BOTTOM_OFFSET_FRAC).roundToInt()
+    // Slightly less than max so the cursor clears the bottom Report / Video FABs.
+    val y = (height * TripStreetCamera.VEHICLE_BOTTOM_OFFSET_FRAC_WITH_NAV_CHROME).roundToInt()
         .coerceAtLeast(0)
     if (mapCenterOffsetX != 0 || mapCenterOffsetY != y) {
         setMapCenterOffset(0, y)
@@ -5069,55 +8882,12 @@ private fun buildGpsPinDrawable(context: Context): BitmapDrawable =
     buildTripDotDrawable(context, "#4ADE80", sizeDp = 11f)
 
 /**
- * Google Maps–style destination balloon: red teardrop pin with a white center.
+ * Destination marker: glossy red pin asset ([R.drawable.ic_trip_dest_pin]).
  * Tip is at the bottom — use [Marker.ANCHOR_BOTTOM].
  */
-private fun buildGoogleDestBalloonDrawable(context: Context): BitmapDrawable {
-    val d = context.resources.displayMetrics.density
-    val w = (28f * d).toInt().coerceIn(24, 56)
-    val h = (40f * d).toInt().coerceIn(34, 72)
-    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bmp)
-    val cx = w / 2f
-    val cy = h * 0.36f
-    val radius = w * 0.36f
-    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = AndroidColor.parseColor("#EA4335")
-        style = Paint.Style.FILL
-    }
-    val softShadow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = AndroidColor.parseColor("#66000000")
-        style = Paint.Style.FILL
-    }
-    val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = AndroidColor.WHITE
-        style = Paint.Style.STROKE
-        strokeWidth = 1.2f * d
-    }
-    val whiteDot = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = AndroidColor.WHITE
-        style = Paint.Style.FILL
-    }
-    // Soft ground shadow under tip.
-    canvas.drawOval(
-        cx - radius * 0.45f,
-        h - 5.5f * d,
-        cx + radius * 0.45f,
-        h - 1.2f * d,
-        softShadow,
-    )
-    val tip = android.graphics.Path().apply {
-        moveTo(cx - radius * 0.72f, cy + radius * 0.35f)
-        quadTo(cx - radius * 0.95f, cy + radius * 0.95f, cx, h - 2.2f * d)
-        quadTo(cx + radius * 0.95f, cy + radius * 0.95f, cx + radius * 0.72f, cy + radius * 0.35f)
-        close()
-    }
-    canvas.drawPath(tip, fill)
-    canvas.drawCircle(cx, cy, radius, fill)
-    canvas.drawCircle(cx, cy, radius, stroke)
-    canvas.drawCircle(cx, cy, radius * 0.32f, whiteDot)
-    return BitmapDrawable(context.resources, bmp).apply { setBounds(0, 0, w, h) }
-}
+private fun buildGoogleDestBalloonDrawable(context: Context): BitmapDrawable =
+    TripMapMarkerIcons.destPinDrawable(context)
+
 
 /**
  * Pre-navigation “you are here”: blue disc + soft heading sector (approximate facing).
@@ -5215,8 +8985,8 @@ private fun buildTripDotDrawable(
 }
 
 /**
- * Moving-trip pointer: vehicle icon or navigation arrow, tinted by Settings → Map cursor.
- * Used with [Marker.setFlat] + GPS bearing so the icon tracks travel direction while navigating.
+ * Moving-trip pointer: Settings → Map cursor (Arrow / rear Car / rear Bike).
+ * Used with [Marker.setFlat] + GPS bearing so the icon tracks travel direction.
  */
 private fun buildTripNavPointerDrawable(
     context: Context,
@@ -5224,42 +8994,10 @@ private fun buildTripNavPointerDrawable(
     style: MapCursorStyle,
     color: MapCursorColor,
 ): BitmapDrawable {
-    val d = context.resources.displayMetrics.density
-    val size = (34f * d).toInt().coerceIn(28, 72)
-    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bmp)
-    val cx = size / 2f
-    val cy = size / 2f
-    val accent = color.argb
-    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = accent
-        this.style = Paint.Style.FILL
-    }
-    val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = AndroidColor.WHITE
-        this.style = Paint.Style.STROKE
-        strokeWidth = 1.6f * d
-        strokeJoin = Paint.Join.ROUND
-        strokeCap = Paint.Cap.ROUND
-    }
-    val soft = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = AndroidColor.WHITE
-        this.style = Paint.Style.FILL
-        alpha = 235
-    }
-    // Soft disc so the icon stays readable on dark / busy tiles.
-    canvas.drawCircle(cx, cy, size * 0.47f, soft)
-    canvas.drawCircle(cx, cy, size * 0.47f, stroke)
-
-    when (style) {
-        MapCursorStyle.ARROW -> drawNavArrowPointer(canvas, cx, cy, d, fill, stroke)
-        MapCursorStyle.VEHICLE -> when (vehicle) {
-            TripVehicle.CAR -> drawTopDownCarPointer(canvas, cx, cy, d, fill, stroke)
-            TripVehicle.BIKE -> drawTopDownBikePointer(canvas, cx, cy, d, fill, stroke)
-            TripVehicle.WALK -> drawFootstepsPointer(canvas, cx, cy, d, fill, stroke)
-        }
-    }
-    return BitmapDrawable(context.resources, bmp).apply { setBounds(0, 0, size, size) }
+    // [vehicle] kept for call-site compatibility; style now selects Arrow/Car/Bike art.
+    @Suppress("UNUSED_PARAMETER")
+    val unusedVehicle = vehicle
+    return TripNavCursorIcons.drawableForStyle(context, style, color)
 }
 
 /** Classic nav chevron; tip toward top (forward). */
@@ -5450,23 +9188,29 @@ private fun scheduleGpsPinAutoHide(
         hideRunnableSlot[0] = null
     }
     hideRunnableSlot[0] = r
-    map.postDelayed(r, 10_000L)
+    map.postDelayed(r, 5_000L)
 }
 
 @Composable
 private fun OsmDensityMap(
     selectedCity: String,
+    viewerUserId: String = "local",
     userLocation: Location?,
     gpsPinLocation: Location?,
     gpsAccuracyText: String,
     mapSeverityFilter: PotholeSeverity?,
+    mapIssueTypeFilter: CivicIssueType? = null,
     areaHeatEnabled: Boolean,
+    weatherRainEnabled: Boolean = false,
+    weatherRainGrid: CityWeatherRainGrid? = null,
+    weatherBriefing: CityWeatherAlertBriefing? = null,
     tripModeEnabled: Boolean,
     tripNavActive: Boolean,
     tripStreetFollow: Boolean = true,
+    tripCameraMode: TripCameraMode = TripCameraMode.STREET,
     tripDeviceHeadingDeg: Float? = null,
     tripVehicle: TripVehicle = TripVehicle.CAR,
-    mapCursorStyle: MapCursorStyle = MapCursorStyle.VEHICLE,
+    mapCursorStyle: MapCursorStyle = MapCursorStyle.CAR,
     mapCursorColor: MapCursorColor = MapCursorColor.BLUE,
     tripRoutePoints: List<Pair<Double, Double>>,
     tripRouteTraveledMeters: Double = 0.0,
@@ -5478,14 +9222,21 @@ private fun OsmDensityMap(
     tripOfferedAlternatePoints: List<Pair<Double, Double>> = emptyList(),
     onConfirmOfferedAlternate: () -> Unit = {},
     tripAlerts: List<TripPotholeAlert>,
+    arrivalPlaces: List<com.example.potholereport.data.remote.NearbyOsmPoi> = emptyList(),
     tripStartLat: Double?,
     tripStartLon: Double?,
     tripDestinationLat: Double?,
     tripDestinationLon: Double?,
+    /** Intermediate stops (lat, lon) shown as numbered markers. */
+    tripStopPoints: List<Pair<Double, Double>> = emptyList(),
+    tripDestFocusEpoch: Int = 0,
+    tripRouteOverviewEpoch: Int = 0,
     onLocateMe: () -> Unit,
     onMapViewControlUsed: () -> Unit,
     onMapTouchChanged: (Boolean) -> Unit,
     onMapPanEndedAtCenter: (Double, Double) -> Unit,
+    /** When trip planning (not navigating), map tap sets destination. */
+    onMapPickDestination: ((lat: Double, lon: Double) -> Unit)? = null,
     mapLocateEpoch: Int,
     lastConsumedMapLocateEpoch: Int,
     onMapLocateEpochConsumed: (Int) -> Unit,
@@ -5500,11 +9251,20 @@ private fun OsmDensityMap(
     mapFullscreen: Boolean = false,
     onExitFullscreen: (() -> Unit)? = null,
     onReportPothole: (() -> Unit)? = null,
+    tripRoadVideoEnabled: Boolean = false,
+    onToggleTripRoadVideo: (() -> Unit)? = null,
     mapCoveredByOverlay: Boolean = false,
+    compassTopInset: Dp = 0.dp,
+    /** Lift locate / zoom above the Weather · issues · Severity row. */
+    bottomChromeInset: Dp = 0.dp,
+    heatFabVisible: Boolean = false,
+    heatEnabled: Boolean = false,
+    onToggleHeat: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val mapHolder = remember { object { var map: MapView? = null } }
+    val playMotionTracker = remember { TripPlayMotionTracker() }
     val overviewRestore = remember { arrayOfNulls<Runnable>(1) }
     val mapViewRef = remember { arrayOfNulls<MapView>(1) }
     val cityOutlineDecor = remember { CityOutlineDecor() }
@@ -5515,7 +9275,11 @@ private fun OsmDensityMap(
     val lastOutlineCity = remember { mutableStateOf<String?>(null) }
     val lastSyncedReportEpoch = remember { mutableIntStateOf(-1) }
     val lastMapSeverityFilter = remember { mutableStateOf<PotholeSeverity?>(null) }
+    val lastMapIssueTypeFilter = remember { mutableStateOf<CivicIssueType?>(null) }
     val lastAreaHeatEnabled = remember { mutableStateOf(false) }
+    val lastWeatherRainEnabled = remember { mutableStateOf(false) }
+    val lastWeatherRainCellCount = remember { mutableIntStateOf(-1) }
+    val lastWeatherBriefingKey = remember { mutableStateOf("none") }
     val lastTripModeEnabled = remember { mutableStateOf(false) }
     val lastTripStreetFollow = remember { mutableStateOf(true) }
     val lastTripNavActive = remember { mutableStateOf(false) }
@@ -5528,8 +9292,18 @@ private fun OsmDensityMap(
     val lastTripOfferedAltSize = remember { mutableIntStateOf(-1) }
     val areaHeatEnabledHolder = remember { object { var enabled: Boolean = false } }
     areaHeatEnabledHolder.enabled = areaHeatEnabled
+    val weatherRainEnabledHolder = remember { object { var enabled: Boolean = false } }
+    weatherRainEnabledHolder.enabled = weatherRainEnabled
+    val weatherRainGridHolder = remember { object { var grid: CityWeatherRainGrid? = null } }
+    weatherRainGridHolder.grid = weatherRainGrid
+    val weatherBriefingHolder = remember { object { var briefing: CityWeatherAlertBriefing? = null } }
+    weatherBriefingHolder.briefing = weatherBriefing
     val tripDestMarkerRef = remember { arrayOfNulls<Marker>(1) }
     val tripStartMarkerRef = remember { arrayOfNulls<Marker>(1) }
+    val tripStopMarkersRef = remember { mutableListOf<Marker>() }
+    val tripArrivalMarkersRef = remember { mutableListOf<Marker>() }
+    val lastArrivalPlacesSize = remember { mutableIntStateOf(-1) }
+    val streetNameMarkersRef = remember { mutableListOf<Marker>() }
     val tripMovingPointerActive = remember { booleanArrayOf(false) }
     val tripPreNavLocationActive = remember { booleanArrayOf(false) }
     val tripPointerVehicleSlot = remember { arrayOfNulls<TripVehicle>(1) }
@@ -5549,8 +9323,24 @@ private fun OsmDensityMap(
     // Fullscreen trip map may pan outside the city; home map stays metro-clamped.
     val freePanHolder = remember { object { var enabled: Boolean = false } }
     freePanHolder.enabled = mapFullscreen && tripModeEnabled
+    /** Trip planning: tap map to set destination (holder updated each composition). */
+    val tripMapPickDestHolder = remember {
+        object {
+            var enabled: Boolean = false
+            var onPick: (Double, Double) -> Unit = { _, _ -> }
+        }
+    }
+    tripMapPickDestHolder.enabled =
+        mapFullscreen && tripModeEnabled && !tripNavActive && onMapPickDestination != null
+    tripMapPickDestHolder.onPick = { lat, lon ->
+        onMapPickDestination?.invoke(lat, lon)
+    }
     val mapSeverityFilterHolder = remember { object { var filter: PotholeSeverity? = mapSeverityFilter } }
     mapSeverityFilterHolder.filter = mapSeverityFilter
+    val mapIssueTypeFilterHolder = remember { object { var filter: CivicIssueType? = mapIssueTypeFilter } }
+    mapIssueTypeFilterHolder.filter = mapIssueTypeFilter
+    val viewerUserIdHolder = remember { object { var id: String = viewerUserId } }
+    viewerUserIdHolder.id = viewerUserId
     /** Bumps whenever this map composable enters the tree (e.g. returning to REPORT & TRACK). */
     var mapSessionId by remember { mutableIntStateOf(0) }
     val mapLifecycleOwner = LocalLifecycleOwner.current
@@ -5587,6 +9377,7 @@ private fun OsmDensityMap(
                 cityOutlineDecor.cityName?.let { m.overlays.remove(it) }
                 cityOutlineDecor.clusters?.let { m.overlays.remove(it) }
                 cityOutlineDecor.areaHeat?.let { m.overlays.remove(it) }
+                cityOutlineDecor.weatherRain?.let { m.overlays.remove(it) }
                 cityOutlineDecor.dim?.let { m.overlays.remove(it) }
                 cityOutlineDecor.edge?.let { m.overlays.remove(it) }
                 cityOutlineDecor.tripNav?.let { overlay ->
@@ -5597,9 +9388,12 @@ private fun OsmDensityMap(
                 tripDestMarkerRef[0] = null
                 tripStartMarkerRef[0]?.let { m.overlays.remove(it) }
                 tripStartMarkerRef[0] = null
+                tripStopMarkersRef.forEach { m.overlays.remove(it) }
+                tripStopMarkersRef.clear()
                 cityOutlineDecor.cityName = null
                 cityOutlineDecor.clusters = null
                 cityOutlineDecor.areaHeat = null
+                cityOutlineDecor.weatherRain = null
                 cityOutlineDecor.dim = null
                 cityOutlineDecor.edge = null
                 cityOutlineDecor.tripNav = null
@@ -5639,11 +9433,44 @@ private fun OsmDensityMap(
             decor = cityOutlineDecor,
             mapSeverityFilter = mapSeverityFilter,
             heatEnabled = areaHeatEnabled,
+            suppressForTripMap = tripModeEnabled,
+            issueTypeFilter = mapIssueTypeFilter,
+            viewerUserId = viewerUserId,
         )
         lastAreaHeatEnabled.value = areaHeatEnabled
         map.invalidate()
         map.postInvalidate()
     }
+
+    LaunchedEffect(weatherRainEnabled, weatherRainGrid, weatherBriefing, mapSessionId) {
+        var map = mapHolder.map
+        var tries = 0
+        while (map == null && tries < 30) {
+            delay(16)
+            map = mapHolder.map
+            tries++
+        }
+        map ?: return@LaunchedEffect
+        kotlinx.coroutines.yield()
+        runCatching {
+            cityOutlineDecor.weatherRain?.drawSuppressed = false
+            refreshWeatherRainOverlay(
+                map = map,
+                decor = cityOutlineDecor,
+                enabled = weatherRainEnabled,
+                grid = weatherRainGrid,
+                briefing = weatherBriefing,
+            )
+        }
+        lastWeatherRainEnabled.value = weatherRainEnabled
+        lastWeatherRainCellCount.intValue = weatherRainGrid?.cells?.size ?: 0
+        lastWeatherBriefingKey.value = weatherBriefing?.let {
+            "${it.hours}|${it.rainCriticality}|${(it.expectedRainMm * 10).toInt()}"
+        } ?: "none"
+        map.invalidate()
+        map.postInvalidate()
+    }
+
     LaunchedEffect(
         tripModeEnabled,
         tripNavActive,
@@ -5660,6 +9487,7 @@ private fun OsmDensityMap(
         tripStartLon,
         tripDestinationLat,
         tripDestinationLon,
+        tripStopPoints,
         mapFullscreen,
         mapSessionId,
     ) {
@@ -5672,7 +9500,10 @@ private fun OsmDensityMap(
         }
         map ?: return@LaunchedEffect
         freePanHolder.enabled = mapFullscreen && tripModeEnabled
-        map.applyMetroPanBounds(selectedCity, freePan = freePanHolder.enabled)
+        map.applyHomePanPolicy(selectedCity, freePan = freePanHolder.enabled)
+        if (!mapFullscreen) {
+            map.resetMapOrientationNorthUp()
+        }
         refreshTripNavigationOverlay(
             map = map,
             decor = cityOutlineDecor,
@@ -5698,6 +9529,17 @@ private fun OsmDensityMap(
             offeredAlternatePoints = tripOfferedAlternatePoints,
             onConfirmOfferedAlternate = onConfirmOfferedAlternate,
         )
+        // Numbered density disks look like "pothole 1/2/3" on trip map — hide them.
+        refreshReportClusterOverlayOnly(
+            map = map,
+            selectedCity = selectedCity,
+            decor = cityOutlineDecor,
+            mapSeverityFilter = mapSeverityFilter,
+            heatEnabled = areaHeatEnabled,
+            suppressForTripMap = tripModeEnabled,
+            issueTypeFilter = mapIssueTypeFilter,
+            viewerUserId = viewerUserId,
+        )
         syncTripEndpointDots(
             map = map,
             startSlot = tripStartMarkerRef,
@@ -5708,6 +9550,12 @@ private fun OsmDensityMap(
             startLon = tripStartLon,
             destLat = tripDestinationLat,
             destLon = tripDestinationLon,
+        )
+        syncTripStopMarkers(
+            map = map,
+            slots = tripStopMarkersRef,
+            show = tripModeEnabled,
+            stops = tripStopPoints,
         )
         bringMarkerToFront(map, gpsMarkerRef[0])
         lastTripModeEnabled.value = tripModeEnabled
@@ -5776,7 +9624,7 @@ private fun OsmDensityMap(
             map.animateStreetViewZoomIn(
                 selectedCity = selectedCity,
                 location = focusLoc,
-                targetZoom = TRIP_FOLLOW_ZOOM,
+                targetZoom = tripFollowZoomForMode(tripCameraMode, null),
                 headingUp = heading,
             )
             programmaticCameraMoveRef[0] = false
@@ -5796,7 +9644,7 @@ private fun OsmDensityMap(
         onMapCameraSnapshot(
             focus.latitude,
             focus.longitude,
-            if (tripStreetFollow) TRIP_FOLLOW_ZOOM else TRIP_NAV_OVERVIEW_ZOOM,
+            tripFollowZoomForMode(tripCameraMode, null),
         )
         tripStreetFocusDone = true
     }
@@ -5826,7 +9674,7 @@ private fun OsmDensityMap(
             map.animateStreetViewZoomIn(
                 selectedCity = selectedCity,
                 location = focusLoc,
-                targetZoom = TRIP_FOLLOW_ZOOM,
+                targetZoom = tripFollowZoomForMode(tripCameraMode, null),
                 headingUp = heading,
             )
             programmaticCameraMoveRef[0] = false
@@ -5846,7 +9694,7 @@ private fun OsmDensityMap(
         onMapCameraSnapshot(
             gps.latitude,
             gps.longitude,
-            if (tripStreetFollow) TRIP_FOLLOW_ZOOM else TRIP_NAV_OVERVIEW_ZOOM,
+            tripFollowZoomForMode(tripCameraMode, null),
         )
         tripStreetFocusDone = true
     }
@@ -5867,15 +9715,31 @@ private fun OsmDensityMap(
         }
         runProgrammaticCamera {
             val street = tripStreetFollow
-            val speedZoom = TripStreetCamera.zoomForSpeedMps(
-                gps.speed.takeIf { gps.hasSpeed() },
+            val speed = gps.speed.takeIf { gps.hasSpeed() }
+            val playMotion = if (tripCameraMode == TripCameraMode.PLAY) {
+                playMotionTracker.update(
+                    speedMps = speed,
+                    elapsedRealtimeMs = android.os.SystemClock.elapsedRealtime(),
+                )
+            } else {
+                null
+            }
+            val speedZoom = tripFollowZoomForMode(
+                tripCameraMode,
+                speed,
+                playIntensity = playMotion?.dive ?: 0f,
+                playMoving = playMotion?.moving == true,
             )
             it.scheduleFollowTripLocation(
                 selectedCity,
                 gps.withFusedNavHeading(tripDeviceHeadingDeg),
                 headingUp = street,
                 zoom = if (street) speedZoom else TRIP_NAV_OVERVIEW_ZOOM,
-                lookAheadMeters = if (street) TripStreetCamera.LOOKAHEAD_M else 0.0,
+                lookAheadMeters = if (street) {
+                    TripStreetCamera.lookAheadMetersForSpeed(speed)
+                } else {
+                    0.0
+                },
                 smoothZoom = street,
             )
         }
@@ -5883,7 +9747,7 @@ private fun OsmDensityMap(
             gps.latitude,
             gps.longitude,
             if (tripStreetFollow) {
-                TripStreetCamera.zoomForSpeedMps(gps.speed.takeIf { gps.hasSpeed() })
+                tripFollowZoomForMode(tripCameraMode, gps.speed.takeIf { gps.hasSpeed() })
             } else {
                 TRIP_NAV_OVERVIEW_ZOOM
             },
@@ -5955,11 +9819,13 @@ private fun OsmDensityMap(
         // Temporarily suppress heavier overlays to make map-control taps feel snappier.
         cityOutlineDecor.cityName?.drawSuppressed = true
         cityOutlineDecor.areaHeat?.drawSuppressed = true
+        cityOutlineDecor.weatherRain?.drawSuppressed = true
         action(map)
         map.invalidate()
         map.postDelayed({
             cityOutlineDecor.cityName?.drawSuppressed = false
             cityOutlineDecor.areaHeat?.drawSuppressed = false
+            cityOutlineDecor.weatherRain?.drawSuppressed = false
             map.invalidate()
         }, 72L)
     }
@@ -5976,7 +9842,11 @@ private fun OsmDensityMap(
     touchCallbacks.onMapPanEndedAtCenter = panEnd@{ lat, lng ->
         val map = mapHolder.map
         if (map != null) {
-            map.clampViewportToMetroBounds(selectedCityHolder.city, freePan = freePanHolder.enabled)
+            map.applyHomePanPolicy(
+                selectedCityHolder.city,
+                freePan = freePanHolder.enabled,
+                animateClamp = true,
+            )
             if (!programmaticCameraMoveRef[0]) {
                 if (tripNavActive) tripFollowEnabled = false
                 onMapCameraSnapshot(map.mapCenter.latitude, map.mapCenter.longitude, map.zoomLevelDouble)
@@ -5993,19 +9863,44 @@ private fun OsmDensityMap(
         onMapPanEndedAtCenter(lat, lng)
     }
     touchCallbacks.onCityMapViewIdleCheck = { map ->
-        map.clampViewportToMetroBounds(selectedCityHolder.city, freePan = freePanHolder.enabled)
-        if (!mapCameraUserPositioned &&
+        map.applyMetroPanBounds(selectedCityHolder.city, freePan = freePanHolder.enabled)
+        map.snapBackToCityBorder(selectedCityHolder.city, freePan = freePanHolder.enabled)
+        if (!programmaticCameraMoveRef[0]) {
+            onMapCameraSnapshot(
+                map.mapCenter.latitude,
+                map.mapCenter.longitude,
+                map.zoomLevelDouble,
+            )
+        }
+        // Pinch-out to city floor → snap to full city overview (same as FAB city map).
+        // Soften: only reframe when clearly off city framing, not on tiny drifts.
+        if (!freePanHolder.enabled && map.isAtCityOverviewZoom()) {
+            if (map.needsCityOverviewReframe(selectedCityHolder.city) || !mapCameraUserPositioned) {
+                runProgrammaticCamera { it.scheduleFitCityOverview(selectedCityHolder.city, overviewRestore) }
+            }
+        } else if (!mapCameraUserPositioned &&
             map.isAtCityOverviewZoom() &&
             map.needsCityOverviewReframe(selectedCityHolder.city)
         ) {
             runProgrammaticCamera { it.scheduleFitCityOverview(selectedCityHolder.city, overviewRestore) }
         }
+        refreshReportClusterOverlayOnly(
+            map = map,
+            selectedCity = selectedCityHolder.city,
+            decor = cityOutlineDecor,
+            mapSeverityFilter = mapSeverityFilterHolder.filter,
+            issueTypeFilter = mapIssueTypeFilterHolder.filter,
+            heatEnabled = areaHeatEnabledHolder.enabled,
+            suppressForTripMap = tripModeEnabled,
+            viewerUserId = viewerUserIdHolder.id,
+        )
     }
     touchCallbacks.onMapZoomChanged = { map ->
         if (!programmaticCameraMoveRef[0]) {
             if (tripNavActive && mapUserInteracting) tripFollowEnabled = false
             onMapCameraSnapshot(map.mapCenter.latitude, map.mapCenter.longitude, map.zoomLevelDouble)
         }
+        map.applyHomePanPolicy(selectedCityHolder.city, freePan = freePanHolder.enabled)
         if (map.isAtMaxZoom()) {
             zoomOutMapUsedSinceMax = false
         }
@@ -6014,8 +9909,16 @@ private fun OsmDensityMap(
             selectedCity = selectedCityHolder.city,
             decor = cityOutlineDecor,
             mapSeverityFilter = mapSeverityFilterHolder.filter,
+            issueTypeFilter = mapIssueTypeFilterHolder.filter,
             heatEnabled = areaHeatEnabledHolder.enabled,
+            suppressForTripMap = tripModeEnabled,
+            viewerUserId = viewerUserIdHolder.id,
         )
+        // Dots ↔ L/M/R placement when zoom crosses the road-detail threshold.
+        if (tripModeEnabled) {
+            cityOutlineDecor.tripNav?.syncMarkers(map)
+            map.invalidate()
+        }
     }
     touchCallbacks.onMapOrientationChanged = { mapOrientationDeg = it }
     touchCallbacks.onCityViewZoomChanged = { atCity ->
@@ -6036,11 +9939,45 @@ private fun OsmDensityMap(
         }
     }
 
+    // #25.2 — OSM street/place name markers at street zoom (hidden at city overview / heat).
+    LaunchedEffect(mapSessionId, areaHeatEnabled, atCityOverviewZoom, mapUserInteracting) {
+        if (areaHeatEnabled || atCityOverviewZoom) {
+            val map = mapHolder.map
+            if (map != null) {
+                syncStreetNameMarkers(map, streetNameMarkersRef, emptyList())
+                map.invalidate()
+            }
+            return@LaunchedEffect
+        }
+        while (true) {
+            delay(3_000)
+            if (mapUserInteracting) continue
+            val map = mapHolder.map ?: continue
+            if (map.isAtCityOverviewZoom() || map.zoomLevelDouble < 15.0) {
+                syncStreetNameMarkers(map, streetNameMarkersRef, emptyList())
+                map.invalidate()
+                continue
+            }
+            val center = map.mapCenter
+            val labels = withContext(Dispatchers.IO) {
+                com.example.potholereport.data.remote.StreetNameOverlayClient.fetchLabels(
+                    lat = center.latitude,
+                    lon = center.longitude,
+                    radiusM = if (map.zoomLevelDouble >= 16.5) 220 else 380,
+                    maxCount = if (map.zoomLevelDouble >= 16.5) 24 else 14,
+                )
+            }
+            syncStreetNameMarkers(map, streetNameMarkersRef, labels)
+            map.invalidate()
+        }
+    }
+
     /** Keep the GPS pointer centered; street-follow = 2D heading-up + speed zoom. */
     LaunchedEffect(
         tripNavActive,
         tripFollowEnabled,
         tripStreetFollow,
+        tripCameraMode,
         tripStreetZoomIntroActive,
         mapUserInteracting,
         gpsPinLocation?.latitude,
@@ -6055,7 +9992,21 @@ private fun OsmDensityMap(
         if (tripStreetFollow) {
             if (!tripFollowEnabled) return@LaunchedEffect
             val speed = gps.speed.takeIf { gps.hasSpeed() }
-            val speedZoom = TripStreetCamera.zoomForSpeedMps(speed)
+            val playMotion = if (tripCameraMode == TripCameraMode.PLAY) {
+                playMotionTracker.update(
+                    speedMps = speed,
+                    elapsedRealtimeMs = android.os.SystemClock.elapsedRealtime(),
+                )
+            } else {
+                playMotionTracker.reset()
+                null
+            }
+            val speedZoom = tripFollowZoomForMode(
+                tripCameraMode,
+                speed,
+                playIntensity = playMotion?.dive ?: 0f,
+                playMoving = playMotion?.moving == true,
+            )
             val movingFactor = TripStreetCamera.movingFactor(speed)
             cityOutlineDecor.tripNav?.applyRouteStrokeWidths(
                 movingFactor = movingFactor,
@@ -6068,10 +10019,14 @@ private fun OsmDensityMap(
                 map.scheduleFollowTripLocation(
                     selectedCity,
                     gps.withFusedNavHeading(tripDeviceHeadingDeg)
-                        .forTripMapDisplay(tripRoutePoints, enableSnap = true),
+                        .forTripMapDisplay(
+                            tripRoutePoints,
+                            enableSnap = true,
+                            preferredAlongMeters = tripRouteTraveledMeters.takeIf { it > 0.0 },
+                        ),
                     headingUp = true,
                     zoom = speedZoom,
-                    lookAheadMeters = TripStreetCamera.LOOKAHEAD_M,
+                    lookAheadMeters = TripStreetCamera.lookAheadMetersForSpeed(speed),
                     smoothZoom = true,
                 )
             }
@@ -6086,7 +10041,11 @@ private fun OsmDensityMap(
                 map.scheduleFollowTripLocation(
                     selectedCity,
                     gps.withFusedNavHeading(tripDeviceHeadingDeg)
-                        .forTripMapDisplay(tripRoutePoints, enableSnap = true),
+                        .forTripMapDisplay(
+                            tripRoutePoints,
+                            enableSnap = true,
+                            preferredAlongMeters = tripRouteTraveledMeters.takeIf { it > 0.0 },
+                        ),
                     headingUp = false,
                     zoom = TRIP_NAV_OVERVIEW_ZOOM,
                     lookAheadMeters = 0.0,
@@ -6096,10 +10055,14 @@ private fun OsmDensityMap(
         }
     }
 
-    LaunchedEffect(tripStreetFollow, tripNavActive) {
+    LaunchedEffect(tripCameraMode, tripStreetFollow, tripNavActive) {
         if (!tripNavActive) {
             tripStreetZoomIntroActive = false
+            playMotionTracker.reset()
             return@LaunchedEffect
+        }
+        if (tripCameraMode != TripCameraMode.PLAY) {
+            playMotionTracker.reset()
         }
         if (tripStreetFollow) {
             tripFollowEnabled = true
@@ -6113,7 +10076,7 @@ private fun OsmDensityMap(
             map.animateStreetViewZoomIn(
                 selectedCity = selectedCity,
                 location = gps.withFusedNavHeading(tripDeviceHeadingDeg),
-                targetZoom = TRIP_FOLLOW_ZOOM,
+                targetZoom = tripFollowZoomForMode(tripCameraMode, null),
                 headingUp = fuseNavHeadingDeg(tripDeviceHeadingDeg, gps) != null,
             )
             programmaticCameraMoveRef[0] = false
@@ -6169,6 +10132,32 @@ private fun OsmDensityMap(
         runProgrammaticCamera { it.scheduleFocusOnGps(selectedCity, loc) }
     }
 
+    /** Destination search / pick → ease map to that area. */
+    LaunchedEffect(tripDestFocusEpoch) {
+        if (tripDestFocusEpoch <= 0 || !tripModeEnabled) return@LaunchedEffect
+        val lat = tripDestinationLat ?: return@LaunchedEffect
+        val lon = tripDestinationLon ?: return@LaunchedEffect
+        if (!lat.isFinite() || !lon.isFinite()) return@LaunchedEffect
+        val map = mapHolder.map ?: return@LaunchedEffect
+        runProgrammaticCamera {
+            it.controller.animateTo(GeoPoint(lat, lon), 14.0, 750L)
+        }
+    }
+
+    /** Direction → zoom out to fit the full planned route. */
+    LaunchedEffect(tripRouteOverviewEpoch) {
+        if (tripRouteOverviewEpoch <= 0 || !tripModeEnabled) return@LaunchedEffect
+        val map = mapHolder.map ?: return@LaunchedEffect
+        if (tripRoutePoints.size < 2 && tripRouteOptions.none { it.size >= 2 }) return@LaunchedEffect
+        runProgrammaticCamera {
+            it.scheduleFitRoutePreview(
+                routePoints = tripRoutePoints,
+                selectedCity = selectedCity,
+                extraRoutePoints = tripRouteOptions,
+            )
+        }
+    }
+
     /** Map drag pick: keep zoom, only sync center/bounds. */
     LaunchedEffect(
         userLocation?.latitude,
@@ -6188,10 +10177,11 @@ private fun OsmDensityMap(
             .background(Color.White)
             .clipToBounds()
     ) {
-        val mapFabGap = 8.dp
-        val mapFabSize = 36.dp
+        val uiScale = rememberMapUiScale()
+        val mapFabGap = uiScale.dp(8f)
+        val mapFabSize = uiScale.dp(44f)
         val mapFabShape = CircleShape
-        val mapFabIcon = 18.dp
+        val mapFabIcon = uiScale.dp(20f)
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -6204,9 +10194,10 @@ private fun OsmDensityMap(
                     setHorizontalMapRepetitionEnabled(false)
                     setVerticalMapRepetitionEnabled(false)
                     maxZoomLevel = CartoBasemapUsefulMaxZoom
+                    installCartoLabelDarkeningTilesOverlay()
                     @Suppress("DEPRECATION")
                     setBuiltInZoomControls(false)
-                    applyMetroPanBounds(selectedCityHolder.city, freePan = freePanHolder.enabled)
+                    applyHomePanPolicy(selectedCityHolder.city, freePan = freePanHolder.enabled)
                     val slop = ViewConfiguration.get(ctx).scaledTouchSlop
                     val slopSq = slop * slop
                     val gpsTouchRevealHitSq = (46f * ctx.resources.displayMetrics.density).let { it * it }
@@ -6224,6 +10215,7 @@ private fun OsmDensityMap(
                         cityOutlineDecor.clusters?.isEnabled = false
                         cityOutlineDecor.cityName?.drawSuppressed = true
                         cityOutlineDecor.areaHeat?.drawSuppressed = true
+                        cityOutlineDecor.weatherRain?.drawSuppressed = true
                     }
                     val resumeHeavyOverlaysRunnable = Runnable {
                         val chrome = cityMapChromeVisibleRef[0]
@@ -6232,6 +10224,7 @@ private fun OsmDensityMap(
                         cityOutlineDecor.clusters?.isEnabled = true
                         cityOutlineDecor.cityName?.drawSuppressed = false
                         cityOutlineDecor.areaHeat?.drawSuppressed = false
+                        cityOutlineDecor.weatherRain?.drawSuppressed = false
                         invalidate()
                     }
                     val cityReframeAfterIdle = Runnable {
@@ -6242,7 +10235,8 @@ private fun OsmDensityMap(
                         scrollParentNotified = false
                         touchCallbacks.onMapTouchChanged(false)
                         removeCallbacks(cityReframeAfterIdle)
-                        postDelayed(cityReframeAfterIdle, 160L)
+                        // Longer idle before city snap — less yank after pinch/pan.
+                        postDelayed(cityReframeAfterIdle, 320L)
                     }
                     mapTouchIdleRunnables[0] = resumeHeavyOverlaysRunnable
                     mapTouchIdleRunnables[1] = endParentScrollRunnable
@@ -6292,6 +10286,18 @@ private fun OsmDensityMap(
                                     !gestureHadMultiplePointers &&
                                     event.pointerCount == 1
                                 ) {
+                                    if (!panExceededSlop && tripMapPickDestHolder.enabled) {
+                                        val geo = mapView.projection.fromPixels(
+                                            event.x.toInt(),
+                                            event.y.toInt(),
+                                        )
+                                        if (geo.latitude.isFinite() && geo.longitude.isFinite()) {
+                                            tripMapPickDestHolder.onPick(
+                                                geo.latitude,
+                                                geo.longitude,
+                                            )
+                                        }
+                                    }
                                     val gLoc = latestGpsPinForTouch[0]
                                     if (gLoc != null) {
                                         val p = Point()
@@ -6324,10 +10330,27 @@ private fun OsmDensityMap(
                             MotionEvent.ACTION_CANCEL -> {
                                 v.parent?.requestDisallowInterceptTouchEvent(false)
                                 v.removeCallbacks(resumeHeavyOverlaysRunnable)
-                                v.postDelayed(resumeHeavyOverlaysRunnable, 88L)
-                                if (scrollParentNotified) {
+                                // Resume chrome after gesture settles (smoother pan/pinch).
+                                v.postDelayed(resumeHeavyOverlaysRunnable, 220L)
+                                // Rubber-band: after MapView finishes this UP (may start a fling),
+                                // ease back to the city border if overshot. A delayed pass catches
+                                // flings that only exit the city after release.
+                                if (!freePanHolder.enabled) {
+                                    removeCallbacks(cityReframeAfterIdle)
+                                    post {
+                                        snapBackToCityBorder(
+                                            selectedCityHolder.city,
+                                            freePan = false,
+                                        )
+                                    }
+                                    postDelayed(cityReframeAfterIdle, 300L)
+                                } else if (scrollParentNotified) {
                                     v.removeCallbacks(endParentScrollRunnable)
-                                    v.postDelayed(endParentScrollRunnable, 44L)
+                                    v.postDelayed(endParentScrollRunnable, 80L)
+                                }
+                                if (scrollParentNotified && !freePanHolder.enabled) {
+                                    scrollParentNotified = false
+                                    touchCallbacks.onMapTouchChanged(false)
                                 }
                             }
                         }
@@ -6335,28 +10358,29 @@ private fun OsmDensityMap(
                     }
                     addMapListener(object : MapListener {
                         override fun onScroll(event: ScrollEvent?): Boolean {
-                            clampViewportToMetroBounds(selectedCityHolder.city, freePan = freePanHolder.enabled)
-                            if (!programmaticCameraMoveRef[0]) {
-                                onMapCameraSnapshot(
-                                    mapCenter.latitude,
-                                    mapCenter.longitude,
-                                    zoomLevelDouble,
-                                )
-                            }
-                            if (isAtCityOverviewZoom()) {
+                            // Avoid Compose snapshot writes mid-fling — they stutter pan.
+                            // While the finger is down, allow overshoot (no snap). After release /
+                            // during coasting fling, snap back if still outside the city.
+                            if (!freePanHolder.enabled) {
+                                if (!scrollParentNotified) {
+                                    removeCallbacks(cityReframeAfterIdle)
+                                    postDelayed(cityReframeAfterIdle, 280L)
+                                }
+                            } else if (isAtCityOverviewZoom()) {
                                 removeCallbacks(cityReframeAfterIdle)
-                                postDelayed(cityReframeAfterIdle, 180L)
+                                postDelayed(cityReframeAfterIdle, 320L)
                             }
                             return false
                         }
 
                         override fun onZoom(event: ZoomEvent?): Boolean {
-                            clampViewportToMetroBounds(selectedCityHolder.city, freePan = freePanHolder.enabled)
+                            // Soften: defer metro clamp / city snap to idle, not every zoom tick.
                             touchCallbacks.onMapZoomChanged(this@apply)
                             val atCity = isAtCityOverviewZoom()
                             touchCallbacks.onCityViewZoomChanged(atCity)
-                            if (atCity) {
-                                post { touchCallbacks.onCityMapViewIdleCheck(this@apply) }
+                            if ((!freePanHolder.enabled || atCity) && !scrollParentNotified) {
+                                removeCallbacks(cityReframeAfterIdle)
+                                postDelayed(cityReframeAfterIdle, 280L)
                             }
                             return false
                         }
@@ -6424,7 +10448,7 @@ private fun OsmDensityMap(
                     view.visibility = View.VISIBLE
                     runCatching { view.onResume() }
                 }
-                view.applyMetroPanBounds(selectedCityHolder.city, freePan = freePanHolder.enabled)
+                view.applyHomePanPolicy(selectedCityHolder.city, freePan = freePanHolder.enabled)
                 if (lastOutlineCity.value != selectedCity) {
                     syncCityOutlineDecorations(
                         map = view,
@@ -6432,6 +10456,8 @@ private fun OsmDensityMap(
                         decor = cityOutlineDecor,
                         mapSeverityFilter = mapSeverityFilter,
                         heatEnabled = areaHeatEnabledHolder.enabled,
+                        issueTypeFilter = mapIssueTypeFilter,
+                        viewerUserId = viewerUserId,
                     )
                     refreshAreaHeatOverlay(
                         map = view,
@@ -6439,19 +10465,37 @@ private fun OsmDensityMap(
                         decor = cityOutlineDecor,
                         mapSeverityFilter = mapSeverityFilter,
                         heatEnabled = areaHeatEnabledHolder.enabled,
+                        issueTypeFilter = mapIssueTypeFilter,
+                        viewerUserId = viewerUserId,
                     )
+                    runCatching {
+                        refreshWeatherRainOverlay(
+                            map = view,
+                            decor = cityOutlineDecor,
+                            enabled = weatherRainEnabledHolder.enabled,
+                            grid = weatherRainGridHolder.grid,
+                            briefing = weatherBriefingHolder.briefing,
+                        )
+                    }
                     cityOutlineDecor.clusters?.let { clusters ->
                         view.overlays.remove(clusters)
                         view.overlays.add(clusters)
                     }
-                    view.clampViewportToMetroBounds(selectedCity, freePan = freePanHolder.enabled)
+                    view.applyHomePanPolicy(selectedCity, freePan = freePanHolder.enabled)
                     lastOutlineCity.value = selectedCity
                     lastSyncedReportEpoch.intValue = recentReportsEpoch
                     lastMapSeverityFilter.value = mapSeverityFilter
+                    lastMapIssueTypeFilter.value = mapIssueTypeFilter
                     lastAreaHeatEnabled.value = areaHeatEnabledHolder.enabled
+                    lastWeatherRainEnabled.value = weatherRainEnabledHolder.enabled
+                    lastWeatherRainCellCount.intValue = weatherRainGridHolder.grid?.cells?.size ?: 0
+                    lastWeatherBriefingKey.value = weatherBriefingHolder.briefing?.let {
+                        "${it.hours}|${it.rainCriticality}|${(it.expectedRainMm * 10).toInt()}"
+                    } ?: "none"
                 } else if (
                     lastSyncedReportEpoch.intValue != recentReportsEpoch ||
-                    lastMapSeverityFilter.value != mapSeverityFilter
+                    lastMapSeverityFilter.value != mapSeverityFilter ||
+                    lastMapIssueTypeFilter.value != mapIssueTypeFilter
                 ) {
                     refreshReportClusterOverlayOnly(
                         map = view,
@@ -6459,9 +10503,13 @@ private fun OsmDensityMap(
                         decor = cityOutlineDecor,
                         mapSeverityFilter = mapSeverityFilter,
                         heatEnabled = areaHeatEnabledHolder.enabled,
+                        suppressForTripMap = tripModeEnabled,
+                        issueTypeFilter = mapIssueTypeFilter,
+                        viewerUserId = viewerUserId,
                     )
                     lastSyncedReportEpoch.intValue = recentReportsEpoch
                     lastMapSeverityFilter.value = mapSeverityFilter
+                    lastMapIssueTypeFilter.value = mapIssueTypeFilter
                 }
                 // Backup path if AndroidView update runs; primary apply is LaunchedEffect(areaHeatEnabled).
                 if (areaHeatEnabled != lastAreaHeatEnabled.value) {
@@ -6472,8 +10520,35 @@ private fun OsmDensityMap(
                         decor = cityOutlineDecor,
                         mapSeverityFilter = mapSeverityFilter,
                         heatEnabled = areaHeatEnabled,
+                        suppressForTripMap = tripModeEnabled,
+                        issueTypeFilter = mapIssueTypeFilter,
+                        viewerUserId = viewerUserId,
                     )
                     lastAreaHeatEnabled.value = areaHeatEnabled
+                    view.invalidate()
+                    view.postInvalidate()
+                }
+                val weatherCellCount = weatherRainGrid?.cells?.size ?: 0
+                val weatherBriefingKey = weatherBriefing?.let {
+                    "${it.hours}|${it.rainCriticality}|${(it.expectedRainMm * 10).toInt()}"
+                } ?: "none"
+                if (weatherRainEnabled != lastWeatherRainEnabled.value ||
+                    weatherCellCount != lastWeatherRainCellCount.intValue ||
+                    weatherBriefingKey != lastWeatherBriefingKey.value
+                ) {
+                    runCatching {
+                        cityOutlineDecor.weatherRain?.drawSuppressed = false
+                        refreshWeatherRainOverlay(
+                            map = view,
+                            decor = cityOutlineDecor,
+                            enabled = weatherRainEnabled,
+                            grid = weatherRainGrid,
+                            briefing = weatherBriefing,
+                        )
+                    }
+                    lastWeatherRainEnabled.value = weatherRainEnabled
+                    lastWeatherRainCellCount.intValue = weatherCellCount
+                    lastWeatherBriefingKey.value = weatherBriefingKey
                     view.invalidate()
                     view.postInvalidate()
                 }
@@ -6487,6 +10562,7 @@ private fun OsmDensityMap(
                     tripAlerts.size != lastTripAlertsSize.intValue ||
                     tripRejoinPoints.size != lastTripRejoinSize.intValue ||
                     tripOfferedAlternatePoints.size != lastTripOfferedAltSize.intValue ||
+                    arrivalPlaces.size != lastArrivalPlacesSize.intValue ||
                     kotlin.math.abs(tripRouteTraveledMeters.toFloat() - lastTripTraveledMeters.floatValue) > 2f
                 ) {
                     refreshTripNavigationOverlay(
@@ -6525,6 +10601,17 @@ private fun OsmDensityMap(
                         destLat = tripDestinationLat,
                         destLon = tripDestinationLon,
                     )
+                    syncTripStopMarkers(
+                        map = view,
+                        slots = tripStopMarkersRef,
+                        show = tripModeEnabled,
+                        stops = tripStopPoints,
+                    )
+                    syncArrivalPlaceMarkers(
+                        map = view,
+                        slots = tripArrivalMarkersRef,
+                        places = arrivalPlaces,
+                    )
                     bringMarkerToFront(view, gpsMarkerRef[0])
                     lastTripModeEnabled.value = tripModeEnabled
                     lastTripNavActive.value = tripNavActive
@@ -6536,6 +10623,7 @@ private fun OsmDensityMap(
                     lastTripTraveledMeters.floatValue = tripRouteTraveledMeters.toFloat()
                     lastTripRejoinSize.intValue = tripRejoinPoints.size
                     lastTripOfferedAltSize.intValue = tripOfferedAlternatePoints.size
+                    lastArrivalPlacesSize.intValue = arrivalPlaces.size
                     view.invalidate()
                 } else if (tripModeEnabled) {
                     syncTripEndpointDots(
@@ -6548,7 +10636,27 @@ private fun OsmDensityMap(
                         destLat = tripDestinationLat,
                         destLon = tripDestinationLon,
                     )
+                    syncTripStopMarkers(
+                        map = view,
+                        slots = tripStopMarkersRef,
+                        show = tripModeEnabled,
+                        stops = tripStopPoints,
+                    )
+                    syncArrivalPlaceMarkers(
+                        map = view,
+                        slots = tripArrivalMarkersRef,
+                        places = arrivalPlaces,
+                    )
+                    lastArrivalPlacesSize.intValue = arrivalPlaces.size
                     bringMarkerToFront(view, gpsMarkerRef[0])
+                } else if (arrivalPlaces.size != lastArrivalPlacesSize.intValue) {
+                    syncArrivalPlaceMarkers(
+                        map = view,
+                        slots = tripArrivalMarkersRef,
+                        places = arrivalPlaces,
+                    )
+                    lastArrivalPlacesSize.intValue = arrivalPlaces.size
+                    view.invalidate()
                 }
                 cityOutlineDecor.cityName?.let { cityLabel ->
                     val show = revealCityLabel && selectedCity.isNotBlank()
@@ -6561,11 +10669,14 @@ private fun OsmDensityMap(
                 val slot = gpsMarkerRef[0]
                 // Vehicle cursor for the whole navigation session (not only while speed > 0).
                 val showMovePointer = tripNavActive && gps != null
-                // Trip planner / route preview: Google-style blue dot + heading sector.
-                val showPreNavLocation = tripModeEnabled && !tripNavActive && gps != null
+                // Trip planner (before Navigate): keep green current-position pin — no blue sector.
+                // Blue Google-style pre-nav disc is reserved for after navigation starts (MapLibre).
+                val showPreNavLocation = false
+                val keepGreenVisible = tripModeEnabled && !tripNavActive && gps != null
                 val mapDisplayGps = gps?.forTripMapDisplay(
                     routePoints = tripRoutePoints,
-                    enableSnap = showMovePointer || showPreNavLocation,
+                    enableSnap = showMovePointer || keepGreenVisible,
+                    preferredAlongMeters = tripRouteTraveledMeters.takeIf { it > 0.0 },
                 )
                 val moveIconVehicle = tripVehicle
                 val fusedHeading = fuseNavHeadingDeg(tripDeviceHeadingDeg, gps)
@@ -6703,7 +10814,7 @@ private fun OsmDensityMap(
                     }
                 }
                 latestGpsPinForTouch[0] = gps?.let { Location(it) }
-                if (gps != null && !showMovePointer && !showPreNavLocation) {
+                if (gps != null && !showMovePointer && !keepGreenVisible) {
                     val marker = gpsMarkerRef[0]
                     if (marker != null) {
                         var scheduled = false
@@ -6727,79 +10838,83 @@ private fun OsmDensityMap(
                             scheduleGpsPinAutoHide(view, gpsMarkerRef, gpsPinHideRunnable)
                         }
                     }
-                } else if (showMovePointer || showPreNavLocation) {
+                } else if (showMovePointer || keepGreenVisible) {
                     lastGpsPinScheduleKey.value = null
+                    cancelGpsPinAutoHide(view, gpsPinHideRunnable)
                     gpsMarkerRef[0]?.isEnabled = true
+                    if (keepGreenVisible && slot != null && !tripMovingPointerActive[0]) {
+                        applyIdleGpsPin(slot)
+                    }
                 }
             }
         )
 
-        val mapCompassSize = if (mapFullscreen) 36.dp else 30.dp
-        val mapCompassLabelN = if (mapFullscreen) 9.sp else 8.sp
-        val mapCompassLabelOther = if (mapFullscreen) 7.sp else 6.sp
-        val gpsChipFont = if (mapFullscreen) 10.sp else 9.sp
-        val gpsChipPadH = if (mapFullscreen) 8.dp else 6.dp
-        val gpsChipPadV = if (mapFullscreen) 5.dp else 4.dp
-        val bottomChromePad = 8.dp
+        val mapCompassSize = uiScale.dp(44f)
+        val mapCompassLabelN = uiScale.sp(9f)
+        val mapCompassLabelOther = uiScale.sp(7f)
+        val gpsChipFont = if (mapFullscreen) uiScale.sp(10f) else uiScale.sp(9f)
+        val gpsChipPadH = if (mapFullscreen) uiScale.dp(8f) else uiScale.dp(6f)
+        val gpsChipPadV = if (mapFullscreen) uiScale.dp(5f) else uiScale.dp(4f)
+        val bottomChromePad = uiScale.dp(8f) + bottomChromeInset
         val bottomChromeInset = Modifier.padding(bottom = bottomChromePad)
 
         @Composable
         fun MapCompassRose(modifier: Modifier) {
-            Surface(
+        Surface(
                 modifier = modifier
-                    .size(mapCompassSize)
-                    .semantics {
-                        contentDescription =
-                            "Map compass; letters show north, east, south, and west relative to the map."
-                    },
-                shape = CircleShape,
-                color = Color.White.copy(alpha = 0.94f),
-                shadowElevation = 3.dp,
-                contentColor = MaterialTheme.colorScheme.onSurface,
+                .size(mapCompassSize)
+                .semantics {
+                    contentDescription =
+                        "Map compass; letters show north, east, south, and west relative to the map."
+                },
+            shape = CircleShape,
+                color = CitizenMapChrome.Panel,
+            shadowElevation = 3.dp,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 3.dp, vertical = 2.dp),
             ) {
                 Box(
-                    Modifier
+                    modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 3.dp, vertical = 2.dp),
+                        .graphicsLayer { rotationZ = -mapOrientationDeg },
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer { rotationZ = -mapOrientationDeg },
-                    ) {
-                        Text(
-                            "N",
-                            modifier = Modifier.align(Alignment.TopCenter),
-                            fontSize = mapCompassLabelN,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFB71C1C),
-                            lineHeight = mapCompassLabelN,
+                    Text(
+                        "N",
+                        modifier = Modifier.align(Alignment.TopCenter),
+                        fontSize = mapCompassLabelN,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFB71C1C),
+                        lineHeight = mapCompassLabelN,
                             maxLines = 1,
-                        )
-                        Text(
-                            "S",
-                            modifier = Modifier.align(Alignment.BottomCenter),
-                            fontSize = mapCompassLabelOther,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = mapCompassLabelOther,
+                    )
+                    Text(
+                        "S",
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                        fontSize = mapCompassLabelOther,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = mapCompassLabelOther,
                             maxLines = 1,
-                        )
-                        Text(
-                            "W",
-                            modifier = Modifier.align(Alignment.CenterStart),
-                            fontSize = mapCompassLabelOther,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = mapCompassLabelOther,
+                    )
+                    Text(
+                        "W",
+                        modifier = Modifier.align(Alignment.CenterStart),
+                        fontSize = mapCompassLabelOther,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = mapCompassLabelOther,
                             maxLines = 1,
-                        )
-                        Text(
-                            "E",
-                            modifier = Modifier.align(Alignment.CenterEnd),
-                            fontSize = mapCompassLabelOther,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = mapCompassLabelOther,
+                    )
+                    Text(
+                        "E",
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        fontSize = mapCompassLabelOther,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = mapCompassLabelOther,
                             maxLines = 1,
-                        )
+                    )
                     }
                 }
             }
@@ -6807,28 +10922,40 @@ private fun OsmDensityMap(
 
         @Composable
         fun GpsAccuracyChip(modifier: Modifier) {
-            Surface(
+        Surface(
                 modifier = modifier.semantics {
                     contentDescription = "GPS accuracy: $gpsAccuracyText"
                 },
-                shape = RoundedCornerShape(6.dp),
-                color = Color.White.copy(alpha = 0.94f),
-                shadowElevation = 3.dp,
-            ) {
-                Text(
-                    gpsAccuracyText,
+            shape = RoundedCornerShape(6.dp),
+                color = CitizenMapChrome.Panel,
+            shadowElevation = 3.dp,
+        ) {
+            Text(
+                gpsAccuracyText,
                     modifier = Modifier.padding(horizontal = gpsChipPadH, vertical = gpsChipPadV),
                     fontSize = gpsChipFont,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF4B5563),
-                    maxLines = 1,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF4B5563),
+                maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
 
         @Composable
+        fun HeatFab() {
+            MapHeatFab(
+                enabled = heatEnabled,
+                onClick = { onToggleHeat?.invoke() },
+                fabSize = mapFabSize,
+                iconSize = mapFabIcon,
+            )
+        }
+
+        @Composable
         fun LocateFab() {
+            val followActive = tripNavActive && tripFollowEnabled
+            val needsRecenter = tripNavActive && !tripFollowEnabled
             SmallFloatingActionButton(
                 onClick = {
                     if (tripNavActive) {
@@ -6836,16 +10963,38 @@ private fun OsmDensityMap(
                         gpsPinLocation?.let { gps ->
                             runProgrammaticCamera {
                                 val street = tripStreetFollow
-                                val speedZoom = TripStreetCamera.zoomForSpeedMps(
-                                    gps.speed.takeIf { gps.hasSpeed() },
+                                val speed = gps.speed.takeIf { gps.hasSpeed() }
+                                val playMotion = if (tripCameraMode == TripCameraMode.PLAY) {
+                                    playMotionTracker.update(
+                                        speedMps = speed,
+                                        elapsedRealtimeMs = android.os.SystemClock.elapsedRealtime(),
+                                    )
+                                } else {
+                                    null
+                                }
+                                val speedZoom = tripFollowZoomForMode(
+                                    tripCameraMode,
+                                    speed,
+                                    playIntensity = playMotion?.dive ?: 0f,
+                                    playMoving = playMotion?.moving == true,
                                 )
                                 it.scheduleFollowTripLocation(
                                     selectedCity,
                                     gps.withFusedNavHeading(tripDeviceHeadingDeg)
-                                        .forTripMapDisplay(tripRoutePoints, enableSnap = true),
+                                        .forTripMapDisplay(
+                                            tripRoutePoints,
+                                            enableSnap = true,
+                                            preferredAlongMeters = tripRouteTraveledMeters.takeIf { meters ->
+                                                meters > 0.0
+                                            },
+                                        ),
                                     headingUp = street,
                                     zoom = if (street) speedZoom else TRIP_NAV_OVERVIEW_ZOOM,
-                                    lookAheadMeters = if (street) TripStreetCamera.LOOKAHEAD_M else 0.0,
+                                    lookAheadMeters = if (street) {
+                                        TripStreetCamera.lookAheadMetersForSpeed(speed)
+                                    } else {
+                                        0.0
+                                    },
                                     smoothZoom = street,
                                 )
                             }
@@ -6855,18 +11004,22 @@ private fun OsmDensityMap(
                     }
                 },
                 modifier = Modifier.size(mapFabSize),
-                containerColor = Color.White,
-                contentColor = if (tripNavActive && tripFollowEnabled) {
-                    Color(0xFF15803D)
-                } else {
-                    MaterialTheme.colorScheme.primary
+                containerColor = if (needsRecenter) Color(0xFF1D4ED8) else Color.White,
+                contentColor = when {
+                    needsRecenter -> Color.White
+                    followActive -> Color(0xFF15803D)
+                    else -> MaterialTheme.colorScheme.primary
                 },
                 shape = mapFabShape,
             ) {
                 Icon(
-                    imageVector = Icons.Default.MyLocation,
+                    imageVector = if (needsRecenter) {
+                        Icons.Filled.Navigation
+                    } else {
+                        Icons.Default.MyLocation
+                    },
                     contentDescription = if (tripNavActive) {
-                        if (tripFollowEnabled) "Following current GPS location" else "Resume following GPS"
+                        if (followActive) "Following" else "Recenter on route"
                     } else {
                         "Trace to current GPS location"
                     },
@@ -6887,10 +11040,8 @@ private fun OsmDensityMap(
             // Zoom extras only on demand — keeps the stack short so FABs do not collide.
             AnimatedVisibility(
                 visible = showZoomControls && !tripNavActive,
-                enter = fadeIn(animationSpec = tween(180)) +
-                    scaleIn(initialScale = 0.72f, animationSpec = tween(220)),
-                exit = fadeOut(animationSpec = tween(160)) +
-                    scaleOut(targetScale = 0.72f, animationSpec = tween(180)),
+                enter = fadeIn(animationSpec = tween(180)),
+                exit = fadeOut(animationSpec = tween(160)),
             ) {
                 Column(
                     horizontalAlignment = Alignment.End,
@@ -6952,17 +11103,15 @@ private fun OsmDensityMap(
                 // Compact trip stack: zoom in/out only (no city / 4-step buttons).
                 AnimatedVisibility(
                     visible = showZoomControls,
-                    enter = fadeIn(animationSpec = tween(180)) +
-                        scaleIn(initialScale = 0.72f, animationSpec = tween(220)),
-                    exit = fadeOut(animationSpec = tween(160)) +
-                        scaleOut(targetScale = 0.72f, animationSpec = tween(180)),
+                    enter = fadeIn(animationSpec = tween(180)),
+                    exit = fadeOut(animationSpec = tween(160)),
                 ) {
                     Column(
                         horizontalAlignment = Alignment.End,
                         verticalArrangement = Arrangement.spacedBy(mapFabGap),
                     ) {
-                        SmallFloatingActionButton(
-                            onClick = {
+                    SmallFloatingActionButton(
+                        onClick = {
                                 runFastMapAction { it.controller.zoomIn() }
                                 scheduleHideZoomControls()
                             },
@@ -6980,30 +11129,30 @@ private fun OsmDensityMap(
                         SmallFloatingActionButton(
                             onClick = {
                                 runFastMapAction { it.zoomOutWithinCityView() }
-                                scheduleHideZoomControls()
-                            },
+                            scheduleHideZoomControls()
+                        },
                             modifier = Modifier.size(mapFabSize),
-                            containerColor = Color.White,
-                            contentColor = MaterialTheme.colorScheme.primary,
-                            shape = mapFabShape,
-                        ) {
-                            Icon(
+                        containerColor = Color.White,
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        shape = mapFabShape,
+                    ) {
+                        Icon(
                                 Icons.Default.Remove,
                                 contentDescription = "Zoom out",
-                                modifier = Modifier.size(mapFabIcon),
-                            )
-                        }
+                            modifier = Modifier.size(mapFabIcon),
+                        )
                     }
                 }
+            }
             }
         }
 
         // Landing map: compass top-left, GPS top-right (compact).
-        if (!mapFullscreen) {
+        if (!mapFullscreen && !mapCoveredByOverlay) {
             MapCompassRose(
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(start = 6.dp, top = 6.dp),
+                    .padding(start = 6.dp, top = 6.dp + compassTopInset),
             )
             GpsAccuracyChip(
                 modifier = Modifier
@@ -7026,7 +11175,7 @@ private fun OsmDensityMap(
                 Row(
                     modifier = Modifier.wrapContentWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Sm),
                 ) {
                     MapCompassRose(modifier = Modifier)
                     GpsAccuracyChip(modifier = Modifier)
@@ -7042,8 +11191,7 @@ private fun OsmDensityMap(
                     // Show as soon as Trip is on (planning + navigating), not only after Navigate.
                     val showNavReport = tripModeEnabled && onReportPothole != null
                     if (showNavReport) {
-                        // Same morph: pill → camera circle, start right-of-center → center
-                        // of *this* slot (slot already clears Minimize / Locate).
+                        // Pill → camera circle, kept mid; width shrinks from both ends.
                         var reportExpanded by remember(tripModeEnabled, mapFullscreen) {
                             mutableStateOf(true)
                         }
@@ -7052,21 +11200,15 @@ private fun OsmDensityMap(
                             delay(5_000)
                             reportExpanded = false
                         }
-                        val reportAnim = tween<Dp>(durationMillis = 420)
                         val reportWidth by animateDpAsState(
                             targetValue = if (reportExpanded) 110.dp else mapFabSize,
-                            animationSpec = reportAnim,
+                            animationSpec = tween(durationMillis = 200),
                             label = "reportChromeWidth",
                         )
-                        val reportBias by animateFloatAsState(
-                            targetValue = if (reportExpanded) 0.32f else 0f,
-                            animationSpec = tween(durationMillis = 420),
-                            label = "reportChromeBias",
-                        )
                         val reportClick = onReportPothole
+                        // Mid-aligned tablet: width collapses toward center from both ends.
                         Box(
                             modifier = Modifier
-                                .align(BiasAlignment(horizontalBias = reportBias, verticalBias = 0f))
                                 .systemGestureExclusion()
                                 .height(mapFabSize)
                                 .width(reportWidth)
@@ -7092,13 +11234,11 @@ private fun OsmDensityMap(
                                 )
                                 AnimatedVisibility(
                                     visible = reportExpanded,
-                                    enter = fadeIn(tween(180)) +
-                                        scaleIn(initialScale = 0.85f, animationSpec = tween(220)),
-                                    exit = fadeOut(tween(160)) +
-                                        scaleOut(targetScale = 0.85f, animationSpec = tween(200)),
+                                    enter = fadeIn(tween(160)),
+                                    exit = fadeOut(tween(140)),
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Spacer(Modifier.width(5.dp))
+                                        Spacer(modifier = Modifier.width(5.dp))
                                         Text(
                                             "Report",
                                             color = Color.White,
@@ -7120,25 +11260,65 @@ private fun OsmDensityMap(
                     horizontalArrangement = Arrangement.spacedBy(mapFabGap),
                 ) {
                     if (onExitFullscreen != null) {
-                        SmallFloatingActionButton(
+            SmallFloatingActionButton(
                             onClick = {
                                 // Collapse map only — never finish Activity / send app to background.
                                 onExitFullscreen.invoke()
                             },
                             modifier = Modifier
                                 .size(mapFabSize),
-                            containerColor = Color.White,
+                containerColor = Color.White,
                             contentColor = DarkBlue,
+                shape = mapFabShape,
+            ) {
+                Icon(
+                                Icons.Filled.FullscreenExit,
+                                contentDescription = "Exit fullscreen",
+                    modifier = Modifier.size(mapFabIcon),
+                )
+                        }
+                    }
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(mapFabGap),
+                    ) {
+                        LocateFab()
+                        if (heatFabVisible && onToggleHeat != null) {
+                            HeatFab()
+                        }
+                    }
+                    // Far-right: road-video on/off (Report stays centered).
+                    if (tripModeEnabled && tripNavActive && onToggleTripRoadVideo != null) {
+                        SmallFloatingActionButton(
+                            onClick = { onToggleTripRoadVideo.invoke() },
+                            modifier = Modifier
+                                .size(mapFabSize)
+                                .semantics {
+                                    contentDescription = if (tripRoadVideoEnabled) {
+                                        "Turn off road video"
+                                    } else {
+                                        "Turn on road video"
+                                    }
+                                },
+                            containerColor = if (tripRoadVideoEnabled) {
+                                Color(0xFFB74233)
+                            } else {
+                                Color.White
+                            },
+                            contentColor = if (tripRoadVideoEnabled) Color.White else DarkBlue,
                             shape = mapFabShape,
                         ) {
                             Icon(
-                                Icons.Filled.FullscreenExit,
-                                contentDescription = "Exit fullscreen",
+                                imageVector = if (tripRoadVideoEnabled) {
+                                    Icons.Filled.Videocam
+                                } else {
+                                    Icons.Filled.VideocamOff
+                                },
+                                contentDescription = null,
                                 modifier = Modifier.size(mapFabIcon),
                             )
                         }
                     }
-                    LocateFab()
                 }
             }
         } else {
@@ -7149,12 +11329,15 @@ private fun OsmDensityMap(
                     .then(bottomChromeInset)
                     .padding(horizontal = 10.dp),
             ) {
-                Row(
+                Column(
                     modifier = Modifier.align(Alignment.CenterEnd),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(mapFabGap),
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(mapFabGap),
                 ) {
                     LocateFab()
+                    if (heatFabVisible && onToggleHeat != null) {
+                        HeatFab()
+                    }
                 }
             }
         }
@@ -7169,6 +11352,8 @@ private enum class MyReportsStatFilter {
     COMPLETED,
     IN_PROGRESS,
     OPEN,
+    UNCONFIRMED,
+    UNREGISTERED,
 }
 
 private fun PersistedPotholeReport.matchesMyReportsFilter(filter: MyReportsStatFilter): Boolean =
@@ -7177,18 +11362,38 @@ private fun PersistedPotholeReport.matchesMyReportsFilter(filter: MyReportsStatF
         MyReportsStatFilter.COMPLETED -> status == PotholeReportStatus.COMPLETED
         MyReportsStatFilter.IN_PROGRESS -> status == PotholeReportStatus.IN_PROGRESS
         MyReportsStatFilter.OPEN -> status == PotholeReportStatus.OPEN
+        MyReportsStatFilter.UNCONFIRMED -> false
+        MyReportsStatFilter.UNREGISTERED -> false
     }
 
 @Composable
 private fun MyReportsSection(
     reporterUserId: String,
+    cityKey: String,
+    signedIn: Boolean,
     recentReportsEpoch: Int,
+    startOnUnconfirmed: Boolean = false,
+    startOnUnregistered: Boolean = false,
     onReportsMutated: () -> Unit,
+    onFeedbackMessage: (String) -> Unit = {},
+    onReviewUnconfirmed: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var deleteTarget by remember { mutableStateOf<PersistedPotholeReport?>(null) }
     var detailReport by remember { mutableStateOf<PersistedPotholeReport?>(null) }
-    var statFilter by rememberSaveable { mutableStateOf(MyReportsStatFilter.TOTAL) }
+    var statFilter by rememberSaveable(startOnUnconfirmed, startOnUnregistered) {
+        mutableStateOf(
+            when {
+                startOnUnregistered -> MyReportsStatFilter.UNREGISTERED
+                startOnUnconfirmed -> MyReportsStatFilter.UNCONFIRMED
+                else -> MyReportsStatFilter.TOTAL
+            },
+        )
+    }
+    var sortMenuExpanded by remember { mutableStateOf(false) }
+    var sortName by rememberSaveable { mutableStateOf(ReportsStripSort.RECENT.name) }
+    val listSort = ReportsStripSort.entries.find { it.name == sortName }
+        ?: ReportsStripSort.RECENT
     val titleColor = MaterialTheme.colorScheme.onBackground
     val subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
     val cardColor = MaterialTheme.colorScheme.surface
@@ -7220,8 +11425,25 @@ private fun MyReportsSection(
     val completedCount = myReports.count { it.status == PotholeReportStatus.COMPLETED }
     val inProgressCount = myReports.count { it.status == PotholeReportStatus.IN_PROGRESS }
     val openCount = myReports.count { it.status == PotholeReportStatus.OPEN }
-    val filteredReports = remember(myReports, statFilter) {
-        myReports.filter { it.matchesMyReportsFilter(statFilter) }
+    val unconfirmedCount = remember(recentReportsEpoch, TripUnconfirmedDetectionStore.revision()) {
+        TripUnconfirmedDetectionStore.count()
+    }
+    val context = LocalContext.current
+    val unregisteredCount = remember(
+        recentReportsEpoch,
+        cityKey,
+        reporterUserId,
+        TripCrowdHazardStore.revision(),
+    ) {
+        TripCrowdHazardStore.countUnregisteredForMap(
+            context,
+            cityKey,
+            reporterUserId.ifBlank { "local" },
+        )
+    }
+    val filteredReports = remember(myReports, statFilter, listSort) {
+        val filtered = myReports.filter { it.matchesMyReportsFilter(statFilter) }
+        sortReportsForStrip(filtered, listSort, limit = filtered.size.coerceAtLeast(1))
     }
     val resolutionPct = if (total == 0) 0 else (completedCount * 100) / total
 
@@ -7235,13 +11457,13 @@ private fun MyReportsSection(
     deleteTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text("Delete this report?", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            title = { Text("Delete this report?", style = CitizenType.ScreenTitle) },
             text = {
                 Text(
                     "This removes the photo and report from your device only. " +
                         "It stays in the municipality system if it was already uploaded.",
-                    fontSize = 13.sp,
-                    color = subtitleColor,
+                    style = CitizenType.Helper,
+                    color = CitizenInk.Helper,
                 )
             },
             confirmButton = {
@@ -7253,11 +11475,16 @@ private fun MyReportsSection(
                             val ok = withContext(Dispatchers.IO) {
                                 RecentReportsRepository.deleteSignedInReport(id, resolvedReporterId)
                             }
-                            if (ok) onReportsMutated()
+                            if (ok) {
+                                onReportsMutated()
+                                onFeedbackMessage("Report removed from this device")
+                            } else {
+                                onFeedbackMessage("Couldn't delete the report. Try again.")
+                            }
                         }
                     },
                 ) {
-                    Text("Delete", color = Color(0xFFB91C1C), fontWeight = FontWeight.Bold)
+                    Text("Delete", style = CitizenType.Label, color = CitizenInk.Error)
                 }
             },
             dismissButton = {
@@ -7268,114 +11495,234 @@ private fun MyReportsSection(
         )
     }
 
-    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = CitizenSpace.Lg)) {
         StatCard(
             title = "TOTAL",
             value = total.toString(),
-            color = Color(0xFF14233D),
+            color = CitizenStatTotal,
             selected = statFilter == MyReportsStatFilter.TOTAL,
             onClick = { statFilter = MyReportsStatFilter.TOTAL },
             modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(CitizenSpace.Md))
         StatCard(
-            title = "COMPLETED",
+            title = PotholeReportStatus.COMPLETED.displayLabelCaps,
             value = completedCount.toString(),
-            color = Color(0xFF0B7A42),
+            color = citizenReportStatusColor(PotholeReportStatus.COMPLETED),
             selected = statFilter == MyReportsStatFilter.COMPLETED,
             onClick = { statFilter = MyReportsStatFilter.COMPLETED },
             modifier = Modifier.weight(1f),
         )
     }
-    Spacer(Modifier.height(12.dp))
-    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+    Spacer(modifier = Modifier.height(CitizenSpace.Md))
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = CitizenSpace.Lg)) {
         StatCard(
-            title = "IN PROGRESS",
+            title = PotholeReportStatus.IN_PROGRESS.displayLabelCaps,
             value = inProgressCount.toString(),
-            color = Color(0xFFBC7A1E),
+            color = citizenReportStatusColor(PotholeReportStatus.IN_PROGRESS),
             selected = statFilter == MyReportsStatFilter.IN_PROGRESS,
             onClick = { statFilter = MyReportsStatFilter.IN_PROGRESS },
             modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(CitizenSpace.Md))
         StatCard(
-            title = "OPEN",
+            title = PotholeReportStatus.OPEN.displayLabelCaps,
             value = openCount.toString(),
-            color = Color(0xFFA12A2A),
+            color = citizenReportStatusColor(PotholeReportStatus.OPEN),
             selected = statFilter == MyReportsStatFilter.OPEN,
             onClick = { statFilter = MyReportsStatFilter.OPEN },
             modifier = Modifier.weight(1f),
         )
     }
+    Spacer(modifier = Modifier.height(CitizenSpace.Md))
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = CitizenSpace.Lg)) {
+        StatCard(
+            title = "UNCONFIRMED",
+            value = unconfirmedCount.toString(),
+            color = CitizenInk.Warning,
+            selected = statFilter == MyReportsStatFilter.UNCONFIRMED,
+            onClick = {
+                statFilter = MyReportsStatFilter.UNCONFIRMED
+                onReviewUnconfirmed()
+            },
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(modifier = Modifier.width(CitizenSpace.Md))
+        StatCard(
+            title = "UNREGISTERED",
+            value = unregisteredCount.toString(),
+            color = Color(0xFF0F766E),
+            selected = statFilter == MyReportsStatFilter.UNREGISTERED,
+            onClick = { statFilter = MyReportsStatFilter.UNREGISTERED },
+            modifier = Modifier.weight(1f),
+        )
+    }
 
-    Spacer(Modifier.height(12.dp))
+    Spacer(modifier = Modifier.height(CitizenSpace.Md))
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(0.dp),
-        border = BorderStroke(1.dp, cardBorder),
+            .padding(horizontal = CitizenSpace.Lg),
+        shape = CitizenRadius.Card,
+        border = BorderStroke(CitizenBorder.Thin, CitizenBorder.Secondary),
         colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = CitizenSpace.Md, vertical = CitizenSpace.Sm),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("RESOLUTION RATE", fontWeight = FontWeight.Medium, color = subtitleColor, fontSize = 11.sp)
-            Spacer(Modifier.width(12.dp))
+            Text("RESOLUTION RATE", style = CitizenType.Caption, color = CitizenInk.Helper)
+            Spacer(modifier = Modifier.width(CitizenSpace.Md))
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(8.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .height(CitizenSpace.Sm)
+                    .background(MaterialTheme.colorScheme.surfaceVariant, CitizenRadius.Capsule)
             )
-            Spacer(Modifier.width(10.dp))
-            Text("$resolutionPct%", fontWeight = FontWeight.Bold, color = titleColor, fontSize = 11.sp)
+            Spacer(modifier = Modifier.width(CitizenSpace.Sm))
+            Text("$resolutionPct%", style = CitizenType.Caption, fontWeight = FontWeight.Bold, color = titleColor)
         }
     }
 
-    Spacer(Modifier.height(14.dp))
+    Spacer(modifier = Modifier.height(CitizenSpace.Md))
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = CitizenSpace.Lg),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("YOUR REPORTS", fontSize = 18.sp, fontWeight = FontWeight.Black, color = titleColor)
-        Text(
-            when {
-                total == 0 -> "NONE YET"
-                statFilter == MyReportsStatFilter.TOTAL -> "$total - NEWEST FIRST"
-                else -> "${filteredReports.size} SHOWN"
+        CitizenSectionHeader(
+            title = when (statFilter) {
+                MyReportsStatFilter.UNCONFIRMED -> "UNCONFIRMED"
+                MyReportsStatFilter.UNREGISTERED -> "UNREGISTERED"
+                else -> "YOUR REPORTS"
             },
-            fontSize = 12.sp,
-            color = subtitleColor
+            trailing = when {
+                statFilter == MyReportsStatFilter.UNCONFIRMED ->
+                    if (unconfirmedCount == 0) "NONE YET" else "$unconfirmedCount pending"
+                statFilter == MyReportsStatFilter.UNREGISTERED ->
+                    if (unregisteredCount == 0) "NONE YET" else "$unregisteredCount on your map"
+                total == 0 -> "NONE YET"
+                listSort == ReportsStripSort.RECENT && statFilter == MyReportsStatFilter.TOTAL ->
+                    "$total · ${listSort.chipLabel}"
+                else -> "${filteredReports.size} · ${listSort.chipLabel}"
+            },
+            modifier = Modifier.weight(1f),
         )
+        Spacer(modifier = Modifier.width(CitizenSpace.Sm))
+        if (
+            statFilter != MyReportsStatFilter.UNCONFIRMED &&
+            statFilter != MyReportsStatFilter.UNREGISTERED
+        ) Box {
+            AssistChip(
+                onClick = { sortMenuExpanded = true },
+                modifier = Modifier.height(CitizenIcon.CapsuleCompact),
+                label = {
+                    Text(
+                        "Sort: ${listSort.chipLabel}",
+                        style = CitizenType.ChipCompact,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                trailingIcon = {
+                    Icon(
+                        Icons.Filled.ArrowDropDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(CitizenIcon.Chip),
+                    )
+                },
+                shape = CitizenRadius.Capsule,
+                border = BorderStroke(CitizenBorder.Thin, CitizenSelection.InactiveBorder),
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = Color.Transparent,
+                    labelColor = titleColor,
+                    trailingIconContentColor = titleColor,
+                ),
+            )
+            DropdownMenu(
+                expanded = sortMenuExpanded,
+                onDismissRequest = { sortMenuExpanded = false },
+            ) {
+                ReportsStripSort.entries.forEach { option ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (option.enabled) {
+                                    option.menuLabel
+                                } else {
+                                    "${option.menuLabel} · Coming soon"
+                                },
+                                color = if (option.enabled) {
+                                    MaterialTheme.colorScheme.onSurface
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                },
+                            )
+                        },
+                        enabled = option.enabled,
+                        onClick = {
+                            sortName = option.name
+                            sortMenuExpanded = false
+                        },
+                    )
+                }
+            }
+        }
     }
-    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = cardBorder)
-    Spacer(Modifier.height(12.dp))
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = CitizenSpace.Lg),
+        color = CitizenBorder.Secondary,
+    )
+    Spacer(modifier = Modifier.height(CitizenSpace.Md))
 
-    if (myReports.isEmpty()) {
+    if (statFilter == MyReportsStatFilter.UNCONFIRMED) {
+        UnconfirmedReviewPanel(
+            cityKey = cityKey,
+            reporterUserId = reporterUserId,
+            signedIn = signedIn,
+            onReportsMutated = onReportsMutated,
+            onFeedbackMessage = onFeedbackMessage,
+            modifier = Modifier.padding(horizontal = CitizenSpace.Lg),
+        )
+    } else if (statFilter == MyReportsStatFilter.UNREGISTERED) {
+        UnregisteredMarksPanel(
+            cityKey = cityKey,
+            viewerUserId = reporterUserId,
+            onMutated = onReportsMutated,
+            modifier = Modifier.padding(horizontal = CitizenSpace.Lg),
+        )
+    } else if (myReports.isEmpty()) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            shape = RoundedCornerShape(0.dp),
-            border = BorderStroke(1.dp, cardBorder),
+                .padding(horizontal = CitizenSpace.Lg),
+            shape = CitizenRadius.Card,
+            border = BorderStroke(CitizenBorder.Thin, CitizenBorder.Secondary),
             colors = CardDefaults.cardColors(containerColor = emptyCardColor)
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 28.dp),
+                modifier = Modifier.padding(horizontal = CitizenSpace.Xl, vertical = CitizenSpace.Xl),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(Icons.Outlined.Image, contentDescription = null, tint = subtitleColor, modifier = Modifier.size(34.dp))
-                Spacer(Modifier.height(12.dp))
-                Text("You haven't reported any potholes yet.", color = titleColor, fontSize = 14.sp)
+                Icon(
+                    Icons.Outlined.Image,
+                    contentDescription = null,
+                    tint = CitizenInk.Disabled,
+                    modifier = Modifier.size(CitizenIcon.Fab),
+                )
+                Spacer(modifier = Modifier.height(CitizenSpace.Md))
+                Text(
+                    "You haven't reported any potholes yet.",
+                    style = CitizenType.Label,
+                    color = titleColor,
+                )
                 Text(
                     "Reports submitted while signed in will appear here.",
-                    color = subtitleColor,
-                    fontSize = 12.sp
+                    style = CitizenType.Helper,
+                    color = CitizenInk.Helper,
                 )
             }
         }
@@ -7383,32 +11730,32 @@ private fun MyReportsSection(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            shape = RoundedCornerShape(0.dp),
-            border = BorderStroke(1.dp, cardBorder),
+                .padding(horizontal = CitizenSpace.Lg),
+            shape = CitizenRadius.Card,
+            border = BorderStroke(CitizenBorder.Thin, CitizenBorder.Secondary),
             colors = CardDefaults.cardColors(containerColor = emptyCardColor)
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
+                modifier = Modifier.padding(horizontal = CitizenSpace.Xl, vertical = CitizenSpace.Xl),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
                     "No reports in this category.",
+                    style = CitizenType.Label,
                     color = titleColor,
-                    fontSize = 14.sp,
                 )
                 Text(
                     "Tap another stat box to view other reports.",
-                    color = subtitleColor,
-                    fontSize = 12.sp,
+                    style = CitizenType.Helper,
+                    color = CitizenInk.Helper,
                 )
             }
         }
     } else {
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Md),
+            contentPadding = PaddingValues(horizontal = CitizenSpace.Lg),
         ) {
             items(filteredReports, key = { it.id }) { report ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -7421,20 +11768,19 @@ private fun MyReportsSection(
                             onClick = { deleteTarget = report },
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
-                                .padding(2.dp)
-                                .size(28.dp),
+                                .size(CitizenIcon.Tap),
                         ) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(Color(0xCC1F2937), shape = RoundedCornerShape(4.dp)),
+                                    .background(Color(0xCC1F2937), shape = CitizenRadius.Card),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
                                     Icons.Outlined.Delete,
                                     contentDescription = "Delete report",
                                     tint = Color.White,
-                                    modifier = Modifier.size(15.dp),
+                                    modifier = Modifier.size(CitizenIcon.Dense),
                                 )
                             }
                         }
@@ -7452,39 +11798,51 @@ private fun HomeTabBannerAndTabs(
     selectedTabIndex: Int,
     onTabSelected: (Int) -> Unit,
 ) {
+    val uiScale = rememberMapUiScale()
+    val compactChrome = LocalConfiguration.current.screenWidthDp < 370
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = CitizenSpace.Lg, vertical = CitizenSpace.Sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Surface(
-            tonalElevation = 2.dp,
-            shape = RoundedCornerShape(0.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-            color = MaterialTheme.colorScheme.surfaceVariant,
+            tonalElevation = 1.dp,
+            shape = CitizenRadius.Card,
+            border = BorderStroke(CitizenBorder.Thin, MaterialTheme.colorScheme.outlineVariant),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.padding(
+                    horizontal = uiScale.dp(if (compactChrome) 8f else 10f),
+                    vertical = uiScale.dp(4f),
+                ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "REPORT ANONYMOUSLY",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Bold,
+                    text = CitizenPrivacyCopy.BANNER_CAPS,
+                    style = CitizenType.ChipCompact,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
                 )
             }
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(uiScale.dp(if (compactChrome) 8f else 12f)))
         Text(
             "Spot it. Snap it. Submit it.",
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            style = CitizenType.Tagline,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
         )
     }
 
-    Row(modifier = Modifier.fillMaxWidth()) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = if (compactChrome) 4.dp else 8.dp),
+    ) {
         TopTab(
             title = "REPORT & TRACK",
             selected = selectedTabIndex == 0,
@@ -7533,9 +11891,9 @@ private fun StatCard(
     val accent = statAccentColor(color)
     Card(
         modifier = modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(0.dp),
+        shape = CitizenRadius.Card,
         border = BorderStroke(
-            width = if (selected) 2.dp else 1.dp,
+            width = CitizenBorder.Thin,
             color = if (selected) accent else MaterialTheme.colorScheme.outlineVariant,
         ),
         colors = CardDefaults.cardColors(
@@ -7547,13 +11905,12 @@ private fun StatCard(
             contentColor = MaterialTheme.colorScheme.onSurface,
         ),
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(value, fontSize = 24.sp, fontWeight = FontWeight.Black, color = accent)
+        Column(modifier = Modifier.padding(CitizenSpace.Md)) {
+            Text(value, style = CitizenType.ScreenTitle, color = accent)
             Text(
                 title, 
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), 
-                letterSpacing = 1.sp, 
-                fontSize = 10.sp
+                style = CitizenType.Caption,
+                color = CitizenInk.Helper,
             )
         }
     }
@@ -7567,51 +11924,42 @@ private fun MyReportsTabFooter() {
             .background(MaterialTheme.colorScheme.background),
     ) {
         HorizontalDivider(
-            modifier = Modifier.padding(horizontal = 16.dp),
-            color = Color(0xFFE2E2E2),
+            modifier = Modifier.padding(horizontal = CitizenSpace.Lg),
+            color = CitizenBorder.Secondary,
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(CitizenSpace.Md))
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = CitizenSpace.Lg),
         ) {
             Text(
                 "REPORTS STAY ANONYMOUS TO OTHER USERS - ONLY YOU SEE THIS VIEW",
-                fontSize = 10.sp,
-                lineHeight = 13.sp,
-                color = Color(0xFF7B7B7B),
+                style = CitizenType.Caption,
+                color = CitizenInk.Muted,
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(CitizenSpace.Sm))
             Text(
                 "CITY GRID - CIVIC REPORTING",
-                fontSize = 10.sp,
-                lineHeight = 13.sp,
-                color = Color(0xFF7B7B7B),
+                style = CitizenType.Caption,
+                color = CitizenInk.Muted,
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(CitizenSpace.Xs))
             Text(
                 "Version ${BuildConfig.VERSION_NAME}",
-                fontSize = 10.sp,
-                lineHeight = 13.sp,
-                color = Color(0xFF7B7B7B),
+                style = CitizenType.Caption,
+                color = CitizenInk.Muted,
             )
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(CitizenSpace.Md))
     }
 }
 
 private fun hasLocationPermission(context: Context): Boolean =
-    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
-        PackageManager.PERMISSION_GRANTED ||
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-        PackageManager.PERMISSION_GRANTED
+    CitizenGps.hasLocationPermission(context)
 
-private fun isDeviceLocationEnabled(context: Context): Boolean {
-    val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-    return lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
-        lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-}
+private fun isDeviceLocationEnabled(context: Context): Boolean =
+    CitizenGps.isDeviceLocationEnabled(context)
 
 private fun openLocationSettings(context: Context) {
     context.startActivity(
@@ -7627,12 +11975,16 @@ private fun openLocationSettings(context: Context) {
 private fun Location.forTripMapDisplay(
     routePoints: List<Pair<Double, Double>>,
     enableSnap: Boolean,
+    preferredAlongMeters: Double? = null,
 ): Location {
     if (!enableSnap || routePoints.size < 2) return this
+    val accuracy = if (hasAccuracy()) accuracy else null
     val snapped = TripNavigationMatcher.snapDriverToRoute(
         routePoints = routePoints,
         driverLat = latitude,
         driverLon = longitude,
+        maxSnapMeters = TripNavigationMatcher.mapSnapLimitM(accuracy),
+        preferredAlongMeters = preferredAlongMeters,
     ) ?: return this
     return Location(this).apply {
         latitude = snapped.first
@@ -7640,247 +11992,68 @@ private fun Location.forTripMapDisplay(
     }
 }
 
-/**
- * Rejects stale, very coarse, or physically implausible navigation fixes.
- * Fresh GPS fixes are strongly preferred over network fixes.
- *
- * While [navigationActive], GPS accuracy limits are relaxed so the cursor keeps
- * moving when A-GPS assist is unavailable (no internet) and reported accuracy spikes.
- */
-private fun shouldAcceptNavigationLocation(
-    current: Location?,
-    candidate: Location,
-    navigationActive: Boolean = false,
-): Boolean {
-    if (!candidate.latitude.isFinite() || !candidate.longitude.isFinite()) return false
-    val isGps = candidate.provider == LocationManager.GPS_PROVIDER
-    // Some OEM GPS streams omit accuracy; still accept GPS while navigating.
-    if (!candidate.hasAccuracy()) {
-        if (!(navigationActive && isGps)) return false
-    } else {
-        val maxGpsM = if (navigationActive) 150f else 40f
-        val maxNetworkM = if (navigationActive) 80f else 25f
-        if (candidate.accuracy > if (isGps) maxGpsM else maxNetworkM) return false
-    }
-    val now = System.currentTimeMillis()
-    val candidateAgeMs = (now - candidate.time).coerceAtLeast(0L)
-    val maxAgeMs = if (navigationActive) 15_000L else 8_000L
-    if (candidateAgeMs > maxAgeMs) return false
-    current ?: return true
 
-    val currentAgeMs = (now - current.time).coerceAtLeast(0L)
-    val currentIsGps = current.provider == LocationManager.GPS_PROVIDER
-    // Never let network/passive replace a recent GPS fix.
-    if (currentIsGps && !isGps && currentAgeMs < 12_000L) return false
-    if (candidate.time < current.time && currentAgeMs < 5_000L) return false
-
-    val elapsedSeconds = ((candidate.time - current.time).coerceAtLeast(250L) / 1_000.0)
-    val distanceMeters = current.distanceTo(candidate).toDouble()
-    val accuracyPad = (if (candidate.hasAccuracy()) candidate.accuracy else 40f) +
-        (if (current.hasAccuracy()) current.accuracy.coerceAtLeast(0f) else 0f)
-    val speedPad = if (navigationActive) 70.0 else 55.0
-    val plausibleJumpMeters = 20.0 + accuracyPad + elapsedSeconds * speedPad
-    if (distanceMeters > plausibleJumpMeters) return false
-
-    // Prefer continuous satellite updates; accept coarser fixes only if GPS went stale.
-    if (isGps) return true
-    return !candidate.hasAccuracy() ||
-        candidate.accuracy <= 25f ||
-        currentAgeMs >= 6_000L
-}
-
-private fun locationQualityScore(location: Location): Float {
-    val ageSec = ((System.currentTimeMillis() - location.time).coerceAtLeast(0L) / 1000f)
-        .coerceAtMost(240f)
-    val providerPenalty = when (location.provider) {
-        LocationManager.GPS_PROVIDER -> 0f
-        LocationManager.NETWORK_PROVIDER -> 18f
-        LocationManager.PASSIVE_PROVIDER -> 22f
-        else -> 10f
-    }
-    // Lower score is better: GPS provider first, then accuracy, then freshness.
-    return providerPenalty + location.accuracy.coerceAtLeast(1f) + ageSec * 0.45f
-}
-
-private fun shouldSeekMorePrecision(location: Location?): Boolean {
-    if (location == null) return true
-    val ageMs = (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
-    val isGps = location.provider == LocationManager.GPS_PROVIDER
-    return !isGps || location.accuracy > 12f || ageMs > 8_000L
-}
-
-private fun chooseBetterLocation(current: Location?, candidate: Location?): Location? {
-    if (candidate == null) return current
-    if (current == null) return candidate
-    val now = System.currentTimeMillis()
-    val currentAge = (now - current.time).coerceAtLeast(0L)
-    val candidateAge = (now - candidate.time).coerceAtLeast(0L)
-    val currentGps = current.provider == LocationManager.GPS_PROVIDER
-    val candidateGps = candidate.provider == LocationManager.GPS_PROVIDER
-    if (currentGps && !candidateGps && currentAge < 12_000L) return current
-    if (candidateGps && !currentGps && candidateAge < 12_000L) return candidate
-    return if (locationQualityScore(candidate) < locationQualityScore(current)) candidate else current
-}
-
-/**
- * Pick trip origin: never replace a fresh accurate live pin with a worse one-shot.
- */
-private fun pickBestTripOrigin(livePin: Location?, freshGps: Location?): Location? {
-    if (livePin == null) return freshGps
-    if (freshGps == null) return livePin
-    val now = System.currentTimeMillis()
-    val liveAge = (now - livePin.time).coerceAtLeast(0L)
-    val liveGps = livePin.provider == LocationManager.GPS_PROVIDER ||
-        livePin.provider == null ||
-        livePin.provider == "saved" ||
-        livePin.provider == "gps"
-    val liveAccurate = livePin.hasAccuracy() && livePin.accuracy <= 20f
-    // Trust the on-screen pin when it is recent and precise.
-    if (liveGps && liveAccurate && liveAge <= 10_000L) {
-        // Only take fresh if it is clearly better GPS.
-        val freshIsGps = freshGps.provider == LocationManager.GPS_PROVIDER
-        val freshBetter = freshIsGps &&
-            freshGps.hasAccuracy() &&
-            freshGps.accuracy + 3f < livePin.accuracy
-        return if (freshBetter) freshGps else livePin
-    }
-    return chooseBetterLocation(livePin, freshGps)
-}
-
-private fun Location.isUsableTripFix(maxAgeMs: Long = 10_000L, maxAccuracyM: Float = 25f): Boolean {
-    if (!latitude.isFinite() || !longitude.isFinite()) return false
-    if (!hasAccuracy() || accuracy > maxAccuracyM) return false
-    val age = (System.currentTimeMillis() - time).coerceAtLeast(0L)
-    return age <= maxAgeMs
-}
-
-@SuppressLint("MissingPermission")
-private suspend fun requestOneFreshLocation(
-    context: Context,
-    locationManager: LocationManager,
-    provider: String,
-    timeoutMs: Long,
-): Location? {
-    return withTimeoutOrNull(timeoutMs) {
-        suspendCancellableCoroutine { cont ->
-            val cancellationSignal = CancellationSignal()
-            try {
-                LocationManagerCompat.getCurrentLocation(
-                    locationManager,
-                    provider,
-                    cancellationSignal,
-                    ContextCompat.getMainExecutor(context),
-                ) { location ->
-                    if (!cont.isCompleted) cont.resume(location)
-                }
-            } catch (_: Exception) {
-                if (!cont.isCompleted) cont.resume(null)
-            }
-            cont.invokeOnCancellation {
-                runCatching { cancellationSignal.cancel() }
-            }
+@Composable
+private fun NeighbourhoodIssueMapHeader(onBack: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = CitizenSpace.Sm, vertical = CitizenSpace.Xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                tint = MaterialTheme.colorScheme.onBackground,
+            )
         }
-    }
-}
-
-/**
- * GPS-provider-only high-accuracy fix. Does not consult network location, which
- * often sits tens of meters away from the true pin in dense urban areas.
- */
-@SuppressLint("MissingPermission")
-private suspend fun fetchHighAccuracyGpsLocation(
-    context: Context,
-    timeoutMs: Long = 10_000L,
-): Location? = withContext(Dispatchers.Default) {
-    try {
-        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val hasFine = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-        ) == PackageManager.PERMISSION_GRANTED
-        val hasCoarse = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-        ) == PackageManager.PERMISSION_GRANTED
-        if (!hasFine && !hasCoarse) return@withContext null
-        if (!runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)) {
-            return@withContext null
-        }
-
-        var best = runCatching {
-            lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-        }.getOrNull()?.takeIf { it.isUsableTripFix(maxAgeMs = 15_000L, maxAccuracyM = 35f) }
-
-        val first = requestOneFreshLocation(
-            context = context,
-            locationManager = lm,
-            provider = LocationManager.GPS_PROVIDER,
-            timeoutMs = timeoutMs,
+        Text(
+            "Issue Map",
+            style = CitizenType.ScreenTitle,
+            modifier = Modifier.weight(1f),
         )
-        best = chooseBetterLocation(best, first)
-
-        if (shouldSeekMorePrecision(best)) {
-            val second = requestOneFreshLocation(
-                context = context,
-                locationManager = lm,
-                provider = LocationManager.GPS_PROVIDER,
-                timeoutMs = (timeoutMs * 0.45).toLong().coerceAtLeast(2_500L),
-            )
-            best = chooseBetterLocation(best, second)
-        }
-
-        best?.takeIf { it.provider == LocationManager.GPS_PROVIDER || it.hasAccuracy() }
-    } catch (_: Exception) {
-        null
+        Icon(
+            Icons.Outlined.Tune,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(end = CitizenSpace.Md),
+        )
     }
 }
 
-@SuppressLint("MissingPermission")
-private suspend fun fetchCalibratedLocation(context: Context): Location? = withContext(Dispatchers.Default) {
-    try {
-        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val hasPermission =
-            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!hasPermission) return@withContext null
-
-        // Prefer GPS-only first.
-        var best = fetchHighAccuracyGpsLocation(context, timeoutMs = 8_000L)
-        if (best != null && best.isUsableTripFix(maxAgeMs = 12_000L, maxAccuracyM = 25f)) {
-            return@withContext best
-        }
-
-        // Last-known GPS (may still beat network).
-        val lastGps = runCatching {
-            lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-        }.getOrNull()
-        best = chooseBetterLocation(best, lastGps)
-
-        // Network only if GPS is missing or very poor.
-        if (
-            (best == null || !best.isUsableTripFix(maxAgeMs = 20_000L, maxAccuracyM = 40f)) &&
-            runCatching { lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
-        ) {
-            val network = requestOneFreshLocation(
-                context = context,
-                locationManager = lm,
-                provider = LocationManager.NETWORK_PROVIDER,
-                timeoutMs = 2_500L,
-            )
-            // Accept network only when we have nothing usable from GPS.
-            if (best == null) {
-                best = network
-            } else if (
-                network != null &&
-                network.hasAccuracy() &&
-                network.accuracy + 15f < best.accuracy
+@Composable
+private fun NeighbourhoodLayerPills(
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    val layers = listOf("ROADS" to "Roads", "SAFETY" to "Safety", "CIVIC" to "Civic", "WEATHER" to "Weather")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = CitizenSpace.Lg),
+        horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Sm),
+    ) {
+        layers.forEach { (key, label) ->
+            val on = selected == key
+            Surface(
+                onClick = { onSelect(key) },
+                shape = CitizenRadius.Capsule,
+                color = if (on) Color(0xFF1B2A4A) else MaterialTheme.colorScheme.surface,
+                border = BorderStroke(
+                    CitizenBorder.Thin,
+                    if (on) Color(0xFF1B2A4A) else MaterialTheme.colorScheme.outlineVariant,
+                ),
             ) {
-                best = network
+                Text(
+                    label,
+                    style = CitizenType.Chip,
+                    color = if (on) Color.White else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                )
             }
         }
-        best
-    } catch (_: Exception) {
-        null
     }
 }
 
@@ -7906,4 +12079,6 @@ fun HomeScreenPreview() {
         )
     }
 }
+
+
 

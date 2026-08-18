@@ -23,26 +23,17 @@ data class PotholeRiskInsight(
 }
 
 /**
- * Hybrid heuristic risk analyzer. Finds the largest connected dark region
- * (the pothole) using the reference Pothole Watch flood-fill approach,
- * restricted to the user-selected lane (left / middle / right of the
- * close-up frame). The blob's bounding box then drives the existing
- * adaptive-baseline mask geometry analysis for shape / contrast stats.
+ * Hybrid risk analyzer. Prefers an on-device YOLO/SSD bbox (Phase A) when
+ * [PotholeDetectionCache] has a strong detection for this close-up; otherwise
+ * uses [PotholeBlobLocator] in the selected lane.
  *
  * Analysis pipeline:
  *
  *   1. If a [CloudPotholeAnalysisClient] is registered, defer to it.
- *   2. [PotholeBlobLocator] finds the darkest connected component within
- *      the user-selected lane (full frame if no lane was given).
- *   3. The blob's bounding box becomes the synthetic detection passed to
- *      [enrichWithMaskGeometry] which builds an adaptive in-box mask using
- *      a luminance ring around the box - same logic as before, but now
- *      against a real bbox instead of a constant 70% centre crop.
- *   4. Width and depth are derived directly from the blob's frame area %
- *      and asphalt-relative contrast (reference Pothole Watch formulas).
- *   5. The 4-signal weighted risk score (depth / area / contrast / user
- *      severity) maps to LOW / MODERATE / HIGH / CRITICAL severity buckets
- *      and 60 / 45 / 30 / 20 km/h speed advisories.
+ *   2. Prefer cached [PotholeDetection] (score ≥ [PotholeDetectorGate.YOLO_MIN_SCORE])
+ *      → [enrichWithMaskGeometry] for width/depth signals.
+ *   3. Else [PotholeBlobLocator] in the user-selected lane.
+ *   4. Risk score → severity + speed advisory.
  *
  * Numbers are advisory only - not engineering measurements.
  */
@@ -73,19 +64,25 @@ object PotholeRiskAnalyzer {
 
         val bitmap = decodeBitmapFromUri(context, closeUpUri, maxSide = 960) ?: return null
         return try {
+            val cached = PotholeDetectionCache.get(closeUpUri)
+            val strongDet = cached?.takeIf { it.score >= PotholeDetectorGate.YOLO_MIN_SCORE }
+            if (strongDet != null) {
+                val enriched = enrichWithMaskGeometry(bitmap, strongDet)
+                return insightFromDetection(enriched, userSeverity)
+            }
+
             val blob = PotholeBlobLocator.analyze(bitmap, position)
             if (!blob.detected || blob.areaPct < 0.5f) {
-                // No dark blob found in the selected lane: we don't fabricate
-                // an insight - the validator's pre-flight check is the right
-                // place to reject "no pothole found" photos.
+                // Optional: run detector now if cache miss but model is loaded.
+                val fresh = PotholeDetectorHolder.get(context)?.bestPotholeDetection(bitmap)
+                if (fresh != null && fresh.score >= PotholeDetectorGate.YOLO_MIN_SCORE) {
+                    PotholeDetectionCache.put(closeUpUri, fresh)
+                    val enriched = enrichWithMaskGeometry(bitmap, fresh)
+                    return insightFromDetection(enriched, userSeverity)
+                }
                 return null
             }
 
-            // Width / depth in cm follow the reference Pothole Watch web app
-            // closed-form mappings: cm^2 from frame-fraction, depth from
-            // asphalt-relative contrast. Width is sqrt(area cm^2) on the
-            // assumption that the blob's footprint is roughly isotropic;
-            // the bbox aspect ratio further refines the longest-axis size.
             val areaCm2 = ((blob.areaPct / 100f) * APPROX_FRAME_AREA_CM2)
                 .coerceAtLeast(20f)
             val baseWidthCm = sqrt(areaCm2)
@@ -96,38 +93,12 @@ object PotholeRiskAnalyzer {
                 .coerceIn(0.5f, 18f)
                 .roundToInt()
 
-            val sevForScore = when (userSeverity) {
-                PotholeSeverity.MINOR -> 1
-                PotholeSeverity.MODERATE -> 2
-                PotholeSeverity.SEVERE -> 3
-                PotholeSeverity.CRITICAL -> 4
-                null -> 2
-            }
-            val depthScore = (depthCm * 10f).coerceAtMost(100f)
-            val areaScore = (blob.areaPct * 4f).coerceAtMost(100f)
-            val contrastScore = (blob.contrast * 180f).coerceAtMost(100f)
-            val severityScore = (sevForScore * 25f)
-            val riskScore = (
-                depthScore * 0.30f +
-                    areaScore * 0.25f +
-                    contrastScore * 0.15f +
-                    severityScore * 0.30f
-                ).roundToInt()
-
-            // Reference Pothole Watch buckets (75 / 55 / 35) cleanly separate
-            // "stop and walk" / "slow well below" / "avoidable" / "minor".
-            val (severity, label, speedKmh) = when {
-                riskScore >= 75 -> Triple(PotholeSeverity.CRITICAL, "CRITICAL", 20)
-                riskScore >= 55 -> Triple(PotholeSeverity.SEVERE, "HIGH", 30)
-                riskScore >= 35 -> Triple(PotholeSeverity.MODERATE, "MODERATE", 45)
-                else -> Triple(PotholeSeverity.MINOR, "LOW", 60)
-            }
-            PotholeRiskInsight(
-                estimatedWidthCm = widthCm,
-                estimatedDepthCm = depthCm,
-                suggestedSeverity = severity,
-                suggestedSpeedLimitKmph = speedKmh,
-                criticalityLabel = label,
+            insightFromScores(
+                widthCm = widthCm,
+                depthCm = depthCm,
+                areaPct = blob.areaPct,
+                contrast = blob.contrast,
+                userSeverity = userSeverity,
             )
         } catch (_: Exception) {
             null
@@ -136,16 +107,78 @@ object PotholeRiskAnalyzer {
         }
     }
 
+    private fun insightFromDetection(
+        det: PotholeDetection,
+        userSeverity: PotholeSeverity?,
+    ): PotholeRiskInsight {
+        val areaFrac = det.maskAreaFraction?.coerceIn(0.01f, 0.85f)
+            ?: det.areaFraction.coerceIn(0.01f, 0.85f)
+        val areaPct = areaFrac * 100f
+        val areaCm2 = (areaFrac * APPROX_FRAME_AREA_CM2).coerceAtLeast(20f)
+        val boxAspect = ((det.xmax - det.xmin) / (det.ymax - det.ymin).coerceAtLeast(0.05f))
+            .coerceIn(0.4f, 4f)
+        val widthCm = (sqrt(areaCm2) * sqrt(boxAspect))
+            .coerceIn(8f, 180f)
+            .roundToInt()
+        val dark = det.maskDarkFraction ?: 0.45f
+        val contrast = (1f - (det.maskMeanLuminance ?: 90f) / 180f)
+            .coerceIn(0.15f, 0.95f)
+            .let { c -> (c * 0.6f + dark * 0.4f).coerceIn(0.15f, 0.95f) }
+        val depthCm = (contrast * 22f).coerceIn(0.5f, 18f).roundToInt()
+        return insightFromScores(
+            widthCm = widthCm,
+            depthCm = depthCm,
+            areaPct = areaPct,
+            contrast = contrast,
+            userSeverity = userSeverity,
+        )
+    }
+
+    private fun insightFromScores(
+        widthCm: Int,
+        depthCm: Int,
+        areaPct: Float,
+        contrast: Float,
+        userSeverity: PotholeSeverity?,
+    ): PotholeRiskInsight {
+        val sevForScore = when (userSeverity) {
+            PotholeSeverity.MINOR -> 1
+            PotholeSeverity.MODERATE -> 2
+            PotholeSeverity.SEVERE -> 3
+            PotholeSeverity.CRITICAL -> 4
+            null -> 2
+        }
+        val depthScore = (depthCm * 10f).coerceAtMost(100f)
+        val areaScore = (areaPct * 4f).coerceAtMost(100f)
+        val contrastScore = (contrast * 180f).coerceAtMost(100f)
+        val severityScore = (sevForScore * 25f)
+        val riskScore = (
+            depthScore * 0.30f +
+                areaScore * 0.25f +
+                contrastScore * 0.15f +
+                severityScore * 0.30f
+            ).roundToInt()
+
+        val (severity, label, speedKmh) = when {
+            riskScore >= 75 -> Triple(PotholeSeverity.CRITICAL, "CRITICAL", 20)
+            riskScore >= 55 -> Triple(PotholeSeverity.SEVERE, "HIGH", 30)
+            riskScore >= 35 -> Triple(PotholeSeverity.MODERATE, "MODERATE", 45)
+            else -> Triple(PotholeSeverity.MINOR, "LOW", 60)
+        }
+        return PotholeRiskInsight(
+            estimatedWidthCm = widthCm,
+            estimatedDepthCm = depthCm,
+            suggestedSeverity = severity,
+            suggestedSpeedLimitKmph = speedKmh,
+            criticalityLabel = label,
+        )
+    }
+
     // ------------------------------------------------------------------
-    // Adaptive-baseline mask geometry helpers - retained for the future
-    // YOLOv8-Seg / cloud-AI hand-off path. Currently unused by the
-    // heuristic-only [analyze] above (which derives width / depth from
-    // PotholeBlobLocator output directly), so they are package-private and
-    // marked @Suppress("unused"). Re-wired automatically once the on-device
-    // detector or cloud client returns mask data.
+    // Adaptive-baseline mask geometry helpers — used when YOLO/SSD
+    // supplies a detection box (Phase A) or a seg mask.
     // ------------------------------------------------------------------
 
-    @Suppress("unused")
     internal fun enrichWithMaskGeometry(bitmap: Bitmap, det: PotholeDetection): PotholeDetection {
         return if (det.mask != null) statsFromSegMask(bitmap, det)
                else statsFromAdaptiveMask(bitmap, det)

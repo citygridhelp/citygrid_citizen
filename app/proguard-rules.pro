@@ -16,6 +16,12 @@
 # debugging stack traces.
 #-keepattributes SourceFile,LineNumberTable
 
+-keep class com.herohan.uvcapp.** { *; }
+-keep class com.serenegiant.usb.** { *; }
+-keepclassmembers class * implements com.serenegiant.usb.IButtonCallback { *; }
+-keepclassmembers class * implements com.serenegiant.usb.IFrameCallback { *; }
+-keepclassmembers class * implements com.serenegiant.usb.IStatusCallback { *; }
+
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile

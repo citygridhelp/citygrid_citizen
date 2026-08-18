@@ -46,12 +46,14 @@ object PotholeDuplicateGuard {
         latitude: Double,
         longitude: Double,
         gpsAccuracyM: Float? = null,
+        issueType: CivicIssueType = CivicIssueType.POTHOLE,
     ): PersistedPotholeReport? {
         if (reporterUserId.isBlank() || latitude.isNaN() || longitude.isNaN()) return null
         val radius = effectiveRadiusMeters(gpsAccuracyM)
         return reports.firstOrNull { report ->
             report.reporterUserId == reporterUserId &&
                 report.cityKey == cityKey &&
+                report.issueType == issueType &&
                 report.hasCoordinates() &&
                 report.status.blocksNewReportAtSamePlace() &&
                 distanceMeters(latitude, longitude, report.latitude, report.longitude) <= radius

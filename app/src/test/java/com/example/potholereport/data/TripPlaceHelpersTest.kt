@@ -27,4 +27,18 @@ class TripPlaceHelpersTest {
         assertEquals("B", sorted.first().label)
         assertTrue(sorted.first().isFavorite)
     }
+
+    @Test
+    fun displayName_prefersSavedNickname() {
+        val named = TripRecentPlace(
+            label = "Indiranagar 100 Feet Rd",
+            latitude = 12.97,
+            longitude = 77.64,
+            isFavorite = true,
+            savedName = "Home",
+        )
+        assertEquals("Home", named.displayName)
+        val plain = TripRecentPlace("Koramangala", 12.93, 77.62)
+        assertEquals("Koramangala", plain.displayName)
+    }
 }

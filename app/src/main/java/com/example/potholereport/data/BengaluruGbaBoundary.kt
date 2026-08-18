@@ -53,6 +53,38 @@ object BengaluruGbaBoundary {
         return pointInLonLatPolygon(longitude, latitude, verts)
     }
 
+    /**
+     * Approximate geodesic distance (meters) from [latitude]/[longitude] to the nearest
+     * outline segment. Returns [Double.POSITIVE_INFINITY] when the ring is unavailable.
+     */
+    fun distanceToOutlineM(latitude: Double, longitude: Double): Double {
+        val verts = synchronized(lock) { ring }
+        if (verts.size < 2) return Double.POSITIVE_INFINITY
+        var best = Double.POSITIVE_INFINITY
+        for (i in 0 until verts.lastIndex) {
+            val a = verts[i]
+            val b = verts[i + 1]
+            val d = distancePointToSegmentM(
+                latitude, longitude,
+                a.latitude, a.longitude,
+                b.latitude, b.longitude,
+            )
+            if (d < best) best = d
+        }
+        // Closed ring: last → first (outlineRing usually already closes; safe either way).
+        val first = verts.first()
+        val last = verts.last()
+        if (first.latitude != last.latitude || first.longitude != last.longitude) {
+            val d = distancePointToSegmentM(
+                latitude, longitude,
+                last.latitude, last.longitude,
+                first.latitude, first.longitude,
+            )
+            if (d < best) best = d
+        }
+        return best
+    }
+
     /** Ray-cast point-in-polygon; [polygon] vertices are lat/lon [GeoPoint]s. */
     private fun pointInLonLatPolygon(lon: Double, lat: Double, polygon: List<GeoPoint>): Boolean {
         var inside = false
@@ -68,5 +100,41 @@ object BengaluruGbaBoundary {
             j = i
         }
         return inside
+    }
+
+    /** Local ENU approximation — fine for city-scale clearance checks. */
+    internal fun distancePointToSegmentM(
+        pLat: Double,
+        pLon: Double,
+        aLat: Double,
+        aLon: Double,
+        bLat: Double,
+        bLon: Double,
+    ): Double {
+        val midLat = Math.toRadians((aLat + bLat) * 0.5)
+        val mPerDegLat = 111_320.0
+        val mPerDegLon = 111_320.0 * kotlin.math.cos(midLat).coerceAtLeast(0.2)
+        val ax = (aLon) * mPerDegLon
+        val ay = (aLat) * mPerDegLat
+        val bx = (bLon) * mPerDegLon
+        val by = (bLat) * mPerDegLat
+        val px = (pLon) * mPerDegLon
+        val py = (pLat) * mPerDegLat
+        val abx = bx - ax
+        val aby = by - ay
+        val apx = px - ax
+        val apy = py - ay
+        val ab2 = abx * abx + aby * aby
+        if (ab2 < 1e-6) {
+            val dx = px - ax
+            val dy = py - ay
+            return kotlin.math.sqrt(dx * dx + dy * dy)
+        }
+        val t = ((apx * abx + apy * aby) / ab2).coerceIn(0.0, 1.0)
+        val cx = ax + t * abx
+        val cy = ay + t * aby
+        val dx = px - cx
+        val dy = py - cy
+        return kotlin.math.sqrt(dx * dx + dy * dy)
     }
 }

@@ -68,7 +68,7 @@ class PhaseFReportRulesTest {
         assertEquals(PotholePosition.FULL_WIDTH, PotholePosition.fromCode("F"))
         assertEquals(PotholePosition.FULL_WIDTH, PotholePosition.fromCode("full width"))
         assertEquals(
-            "Full road pothole",
+            "Full road",
             resolveDriverLaneLabel(
                 PotholePosition.FULL_WIDTH,
                 reportBearingDeg = null,
@@ -77,8 +77,12 @@ class PhaseFReportRulesTest {
             ),
         )
         assertEquals("across the road", formatTripPotholeSide("Full width"))
-        assertEquals("across the road", formatTripPotholeSide("Full road pothole"))
+        assertEquals("across the road", formatTripPotholeSide("Full road"))
+        assertEquals("across the road", formatTripPotholeSide("LMR"))
         assertEquals(PotholePosition.FULL_WIDTH, PotholePosition.fromCode("full road pothole"))
+        assertEquals(PotholePosition.FULL_WIDTH, PotholePosition.fromCode("LMR"))
+        assertEquals("between the left and middle of the road", formatTripPotholeSide("LM"))
+        assertEquals("between the middle and right of the road", formatTripPotholeSide("MR"))
     }
 
     @Test

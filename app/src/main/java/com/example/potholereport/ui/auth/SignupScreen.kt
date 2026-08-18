@@ -137,7 +137,7 @@ fun SignupScreen(
             Text("Back to login")
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         Text(
             text = "Create account",
@@ -145,7 +145,7 @@ fun SignupScreen(
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = "Enter your details to sign up",
             style = MaterialTheme.typography.bodyLarge,
@@ -153,7 +153,7 @@ fun SignupScreen(
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         OutlinedTextField(
             value = name,
@@ -167,7 +167,7 @@ fun SignupScreen(
             isError = nameError != null,
             supportingText = nameError?.let { { Text(it) } },
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedTextField(
             value = email,
@@ -184,7 +184,7 @@ fun SignupScreen(
             supportingText = emailError?.let { { Text(it) } },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedTextField(
             value = password,
@@ -209,7 +209,7 @@ fun SignupScreen(
             supportingText = passwordError?.let { { Text(it) } },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedTextField(
             value = confirmPassword,
@@ -235,7 +235,7 @@ fun SignupScreen(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         )
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         Button(
             onClick = {
@@ -283,7 +283,7 @@ fun SignupScreen(
         }
 
         if (verificationRequested) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             OutlinedTextField(
                 value = code,
                 onValueChange = {
@@ -298,7 +298,7 @@ fun SignupScreen(
                 supportingText = codeError?.let { { Text(it) } },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Button(
                 onClick = {
                     if (code.trim().length < 4) {
@@ -318,7 +318,7 @@ fun SignupScreen(
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         infoMessage?.let {
             Text(
@@ -328,7 +328,7 @@ fun SignupScreen(
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(12.dp))
         }
 
         Row(

@@ -4,6 +4,8 @@ Standalone reference for **how the citizen app decides whether a photo is a vali
 
 Broader ML pipeline (risk sizing, depth, planned cloud): [`ml_models_and_evaluation.md`](ml_models_and_evaluation.md)
 
+Model update process (#33M — photo counts, Supabase loop): [`../tools/train_pothole_model/MODEL_UPDATE_PROCESS.md`](../tools/train_pothole_model/MODEL_UPDATE_PROCESS.md)
+
 *Last reviewed: July 2026*
 
 ---
@@ -18,7 +20,10 @@ Broader ML pipeline (risk sizing, depth, planned cloud): [`ml_models_and_evaluat
 | **Goal** | Block obvious non-pothole content (people, indoor floors, manholes, walls, duplicate wide shot) while keeping real Indian road pothole photos |
 | **Entry point** | `PotholePhotoValidator.validate()` |
 
-**Production today:** rule-based **heuristics only** — no neural network runs in the photo gate. Optional on-device YOLO (`pothole_detect.tflite`) and cloud AI are planned but not active in the validator path.
+**Production today:** heuristics are the primary accept/reject gate. When
+`assets/ml/pothole_detect.tflite` is present, **Phase A** also runs
+`PotholeDetector` on close-ups (confidence boost + bbox cache for risk sizing).
+Without the `.tflite` file, behaviour matches the previous heuristics-only build.
 
 ---
 
@@ -46,7 +51,7 @@ Broader ML pipeline (risk sizing, depth, planned cloud): [`ml_models_and_evaluat
 
 | Model | Asset | Runtime | Status |
 |-------|-------|---------|--------|
-| `PotholeDetector` | `assets/ml/pothole_detect.tflite` | LiteRT `Interpreter` | Code ready; **`.tflite` not bundled**; **not called** by validator |
+| `PotholeDetector` | `assets/ml/pothole_detect.tflite` | LiteRT `Interpreter` | **Phase A wired** via `PotholeDetectorHolder`; optional asset — heuristics if missing |
 | `CloudPotholeAnalysisClient` | Remote API | Network | Interface only — not implemented |
 
 **Planned detector:** YOLOv8 detection or segmentation, class label `Pothole` (`pothole_labels.txt`), trained via `tools/train_pothole_model/train_yolov8.py`.

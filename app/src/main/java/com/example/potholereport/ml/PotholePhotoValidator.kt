@@ -5,14 +5,15 @@ import android.graphics.Bitmap
 import android.net.Uri
 
 /**
- * Validates close-up and wide road photos using **only heuristics**:
- *  - [SceneHeuristics] for road / asphalt / indoor / circular-vessel signatures.
- *  - [ContentClassifier] to reject people, animals, vegetation, food, photos
- *    of photos, phone/monitor screens, and other obvious non-road content.
+ * Validates close-up and wide road photos.
  *
- * The on-device TFLite detector is intentionally not invoked in this build —
- * pothole confirmation will move to the cloud pipeline (see
- * [CloudPotholeAnalysisClient]).
+ * Primary gate: heuristics ([SceneHeuristics], [ContentClassifier],
+ * [PotholeBlobLocator]).
+ *
+ * Phase A: when `assets/ml/pothole_detect.tflite` is present, runs
+ * [PotholeDetector] on accepted close-ups to boost confidence and cache a
+ * bbox/mask for [PotholeRiskAnalyzer]. Missing model → heuristics-only
+ * (unchanged behaviour).
  */
 object PotholePhotoValidator {
 
@@ -31,13 +32,8 @@ object PotholePhotoValidator {
     // 34 unique real Indian close-up potholes vs 53 negative samples
     // (cement pipelines, garbage, manholes, road blockers, sign boards,
     // trees, wall boundaries). See tools/calibrate/blob_survey.csv.
-    //
-    // The rule below is the conservative "validator" version - tuned to
-    // avoid false rejections of real potholes (relaxed thresholds). The
-    // lane-aware risk analyzer applies tighter thresholds because it has
-    // the user's left/middle/right hint to constrain the search.
-    private const val BLOB_MAX_AREA_PCT = 30.0f      // pos max 18; margin
-    private const val BLOB_MAX_CONTRAST = 0.80f      // pos max 0.74; margin
+    private const val BLOB_MAX_AREA_PCT = 30.0f
+    private const val BLOB_MAX_CONTRAST = 0.80f
     private const val BLOB_MID_AREA_PCT = 18.0f
     private const val BLOB_MID_INSIDE_ASPHALT = 0.50f
     private const val BLOB_HARD_INSIDE_ASPHALT = 0.18f
@@ -66,7 +62,7 @@ object PotholePhotoValidator {
             }
 
             when (kind) {
-                PhotoCaptureKind.CLOSE_UP -> validateCloseUp(bitmap, scene)
+                PhotoCaptureKind.CLOSE_UP -> validateCloseUp(context, uri, bitmap, scene)
                 PhotoCaptureKind.WIDE_ROAD -> validateWide(context, bitmap, scene, closeUpUri)
             }
         } catch (e: Exception) {
@@ -80,6 +76,8 @@ object PotholePhotoValidator {
     }
 
     private fun validateCloseUp(
+        context: Context,
+        uri: Uri,
         bitmap: Bitmap,
         scene: SceneAnalysis,
     ): PhotoValidationResult {
@@ -98,7 +96,6 @@ object PotholePhotoValidator {
             )
         }
 
-        // Bin / drain-cover guard from scene heuristics alone (no ML).
         if (scene.circularVesselScore >= 0.62f && scene.roadRatio < 0.42f) {
             return PhotoValidationResult.Rejected(
                 title = "Not a road pothole",
@@ -122,11 +119,6 @@ object PotholePhotoValidator {
             )
         }
 
-        // Final blob-based pass: looks for the largest dark blob in the
-        // frame and rejects if its size, contrast, or asphalt-overlap
-        // signature matches one of the negative-sample categories
-        // (cement pipelines, garbage, manholes, road blockers, sign
-        // boards, trees, wall boundaries). See thresholds above.
         val blob = PotholeBlobLocator.analyze(bitmap, position = null)
         if (blob.detected) {
             blobRejectionReason(blob)?.let { reason ->
@@ -137,19 +129,28 @@ object PotholePhotoValidator {
             }
         }
 
-        // Confidence is derived from how road-like the frame is.
-        val confidence = (scene.roadRatio * 0.6f + scene.asphaltRatio * 0.3f +
+        val heuristicConfidence = (scene.roadRatio * 0.6f + scene.asphaltRatio * 0.3f +
             scene.horizontalRoadLineScore * 0.1f).coerceIn(0f, 1f)
+        val heuristicSummary = "Road surface accepted. Keep the pothole centred in the frame."
+
+        // Phase A — optional on-device YOLO/SSD.
+        val detector = PotholeDetectorHolder.get(context)
+        val detection = detector?.bestPotholeDetection(bitmap)
+        PotholeDetectionCache.put(uri, detection)
+        val detectorScore = detection?.score
+        if (PotholeDetectorGate.shouldHardReject(modelLoaded = detector != null, detectorScore)) {
+            return PhotoValidationResult.Rejected(
+                title = "No pothole detected",
+                message = "The on-device checker did not find a clear pothole. Centre the damaged asphalt and try again.",
+            )
+        }
+
         return PhotoValidationResult.Accepted(
-            confidence = confidence,
-            summary = "Road surface accepted. Keep the pothole centred in the frame.",
+            confidence = PotholeDetectorGate.blendConfidence(heuristicConfidence, detectorScore),
+            summary = PotholeDetectorGate.acceptSummary(heuristicSummary, detectorScore),
         )
     }
 
-    /**
-     * Map a triggered blob-rejection rule to a user-facing message that
-     * tells the photographer why their photo is not a road pothole.
-     */
     private fun blobRejectionReason(blob: PotholeBlobAnalysis): String? = when {
         blob.areaPct >= BLOB_MAX_AREA_PCT ->
             "The dark area takes up too much of the frame. Photograph an actual " +

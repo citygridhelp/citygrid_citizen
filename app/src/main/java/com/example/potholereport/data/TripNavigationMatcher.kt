@@ -1,6 +1,7 @@
 package com.example.potholereport.data
 
 import com.example.potholereport.data.remote.OsrmRouteStep
+import com.example.potholereport.data.remote.TripVehicle
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -27,11 +28,19 @@ data class TripRouteProgress(
 /** How to recover after the driver leaves the active route. */
 enum class TripDeviationAction {
     NONE,
-    /** User is near a preview alternate — wait for tap to confirm. */
-    OFFER_KNOWN_ALTERNATE,
-    /** Short return to original route is viable (dashed rejoin line). */
+    /** Driver is on a preview alternate that still reaches the destination — continue it. */
+    ADOPT_KNOWN_ALTERNATE,
+    /**
+     * Driver is on a corridor that does **not** reach the destination —
+     * dashed rejoin back onto a route that does.
+     */
     SHOW_REJOIN,
-    /** Rejoin is too costly — full OSRM refetch to destination. */
+    /**
+     * Path is unsuitable for the chosen vehicle (e.g. car on a jungle / dirt-bike trail) —
+     * guide a U-turn back onto the vehicle network.
+     */
+    SUGGEST_UTURN,
+    /** Recalculate the best vehicle-appropriate route to the destination. */
     FULL_REROUTE,
 }
 
@@ -68,8 +77,39 @@ object TripNavigationMatcher {
     const val MAP_OVERVIEW_MAX_ALERTS = 10
     const val MAP_OVERVIEW_MAX_AHEAD_M = 2_000.0
 
-    /** Lateral offset on the map when side (L/R) is known (meters). */
-    const val MAP_SIDE_OFFSET_M = 7.0
+    /**
+     * Lateral offset from the **snapped route centerline** for a full Left/Right third
+     * (meters). Kept inside a typical urban carriageway (~half of ~5–6 m painted road on
+     * the basemap), not on sidewalks / medians. Slightly conservative so L/R stay on asphalt
+     * even when the OSRM centerline drifts toward one curb.
+     */
+    const val MAP_SIDE_OFFSET_M = 1.7
+
+    /** Hard cap so pins never leave the road corridor even if callers pass a large offset. */
+    const val MAP_SIDE_MAX_OFFSET_M = 2.2
+
+    /** LM / MR sit closer to center than pure L / R. */
+    const val MAP_SIDE_OFFSET_PARTIAL_FRAC = 0.50
+
+    /**
+     * MapLibre zoom at/above which trip potholes use L/M/R lane placement + span icons.
+     * Below this → small centerline dots (road not wide enough on screen).
+     */
+    const val DETAILED_PLACEMENT_ZOOM_MAPLIBRE = 15.8
+
+    /** osmdroid / CARTO zoom for the same switch (scale differs from MapLibre). */
+    const val DETAILED_PLACEMENT_ZOOM_OSM = 17.5
+
+    /** True when zoom is high enough to show L/M/R placement (vs overview dots). */
+    fun useDetailedLanePlacement(zoom: Double, mapLibre: Boolean): Boolean {
+        if (!zoom.isFinite()) return false
+        val threshold = if (mapLibre) DETAILED_PLACEMENT_ZOOM_MAPLIBRE else DETAILED_PLACEMENT_ZOOM_OSM
+        return zoom >= threshold
+    }
+
+    /** Coarse bucket so UI only rebuilds markers when crossing the placement threshold. */
+    fun placementZoomBucket(zoom: Double, mapLibre: Boolean): Int =
+        if (useDetailedLanePlacement(zoom, mapLibre)) 1 else 0
 
     /** Minimum GPS accuracy to show lane side (meters). */
     const val SIDE_MIN_ACCURACY_M = 25f
@@ -79,9 +119,12 @@ object TripNavigationMatcher {
 
     /**
      * Max lateral GPS drift (meters) we still pull onto the route polyline for the
-     * map cursor / camera. Beyond this, show raw GPS (truly off-route).
+     * map cursor / camera when accuracy is unknown. Beyond the hard cap, show raw GPS.
      */
-    const val DRIVER_MAP_SNAP_MAX_M = 45.0
+    const val DRIVER_MAP_SNAP_MAX_M = 65.0
+
+    /** Absolute ceiling for map snap (poor urban GPS / multipath). */
+    const val DRIVER_MAP_SNAP_HARD_MAX_M = 100.0
 
     /** Smaller one-time tolerance used to correct an inaccurate initial route origin. */
     const val START_CORRECTION_M = 15.0
@@ -95,8 +138,33 @@ object TripNavigationMatcher {
     /** Rejoin may be up to this many seconds slower than a full reroute and still win. */
     const val REJOIN_ETA_SLACK_SEC = 90.0
 
-    /** Corridor to treat GPS as “on” a known preview alternate. */
-    const val KNOWN_ALTERNATE_CORRIDOR_M = 45.0
+    /** Tiny GPS spur: allow dashed rejoin only within this return distance. */
+    const val REJOIN_GPS_DRIFT_MAX_M = 35.0
+
+    /** Tiny GPS spur: allow dashed rejoin only within this off-route distance. */
+    const val REJOIN_GPS_DRIFT_OFF_ROUTE_M = 28.0
+
+    /** Car GPS this far from the driving network → wrong path (trail / footway). */
+    const val WRONG_NETWORK_SNAP_CAR_M = 90.0
+
+    const val WRONG_NETWORK_SNAP_BIKE_M = 140.0
+
+    const val WRONG_NETWORK_SNAP_WALK_M = 200.0
+
+    /** Also require this much departure from the planned corridor before U-turn. */
+    const val WRONG_NETWORK_MIN_OFF_ROUTE_M = 35.0
+
+    /** Corridor to treat GPS as “on” a known preview alternate (parallel urban streets). */
+    const val KNOWN_ALTERNATE_CORRIDOR_M = 80.0
+
+    /**
+     * Adopt an alternate only when it is at least this much closer than the active
+     * route (avoids flapping near shared start/end segments).
+     */
+    const val KNOWN_ALTERNATE_MIN_IMPROVEMENT_M = 22.0
+
+    /** Alternate endpoint must finish this close to the trip destination. */
+    const val ALTERNATE_DEST_MATCH_M = 160.0
 
     /** Fallback speed (~30 km/h) when GPS speed is missing / too low for ETA estimates. */
     const val DEVIATION_FALLBACK_SPEED_MPS = 8.33
@@ -198,6 +266,30 @@ object TripNavigationMatcher {
         return completed to emptyList()
     }
 
+    /** Point on [routePoints] at cumulative distance [distanceM] from the start. */
+    fun pointAtDistanceAlongRoute(
+        routePoints: List<Pair<Double, Double>>,
+        distanceM: Double,
+    ): Pair<Double, Double>? {
+        if (routePoints.isEmpty()) return null
+        if (routePoints.size == 1 || !distanceM.isFinite() || distanceM <= 0.0) {
+            return routePoints.first()
+        }
+        var remainingBudget = distanceM
+        for (i in 0 until routePoints.lastIndex) {
+            val a = routePoints[i]
+            val b = routePoints[i + 1]
+            val segLen = haversineM(a.first, a.second, b.first, b.second)
+            if (segLen <= 1e-3) continue
+            if (remainingBudget <= segLen) {
+                val t = (remainingBudget / segLen).coerceIn(0.0, 1.0)
+                return (a.first + t * (b.first - a.first)) to (a.second + t * (b.second - a.second))
+            }
+            remainingBudget -= segLen
+        }
+        return routePoints.last()
+    }
+
     fun routeProgress(
         routePoints: List<Pair<Double, Double>>,
         driverLat: Double,
@@ -232,19 +324,38 @@ object TripNavigationMatcher {
     }
 
     /**
+     * How far sideways GPS may drift and still be drawn on the route.
+     * Scales with reported accuracy so a coarse fix does not leave the pin
+     * floating over buildings when zoomed in.
+     */
+    fun mapSnapLimitM(gpsAccuracyM: Float?): Double {
+        if (gpsAccuracyM == null || !gpsAccuracyM.isFinite() || gpsAccuracyM <= 0f) {
+            return DRIVER_MAP_SNAP_MAX_M
+        }
+        return maxOf(DRIVER_MAP_SNAP_MAX_M, gpsAccuracyM.toDouble() * 1.8)
+            .coerceAtMost(DRIVER_MAP_SNAP_HARD_MAX_M)
+    }
+
+    /**
      * Nearest point on [routePoints] for map display when GPS has drifted slightly
      * off the road (e.g. onto a building). Returns null if farther than [maxSnapMeters]
      * so a real off-route position is not forced onto the polyline.
+     *
+     * @param preferredAlongMeters when set (current trip progress), prefers segments
+     *   near that distance so parallel / return-path roads do not steal the cursor.
      */
     fun snapDriverToRoute(
         routePoints: List<Pair<Double, Double>>,
         driverLat: Double,
         driverLon: Double,
         maxSnapMeters: Double = DRIVER_MAP_SNAP_MAX_M,
+        preferredAlongMeters: Double? = null,
     ): Pair<Double, Double>? {
         if (routePoints.size < 2 || !driverLat.isFinite() || !driverLon.isFinite()) return null
         if (!maxSnapMeters.isFinite() || maxSnapMeters <= 0.0) return null
-        val seg = nearestSegmentIndex(routePoints, driverLat, driverLon) ?: return null
+        val seg = bestSnapSegmentIndex(
+            routePoints, driverLat, driverLon, preferredAlongMeters,
+        ) ?: return null
         val (aLat, aLon) = routePoints[seg]
         val (bLat, bLon) = routePoints[seg + 1]
         val t = projectT(aLat, aLon, bLat, bLon, driverLat, driverLon).coerceIn(0.0, 1.0)
@@ -309,30 +420,116 @@ object TripNavigationMatcher {
     }
 
     /**
-     * Map pin lat/lon for [alert]: report coordinates, nudged left/right of the route
-     * when placement is known so the driver can see approximate lane side.
+     * Map pin placement for [alert]:
+     * 1) snap report GPS onto the route centerline (kills sidewalk / building drift),
+     * 2) nudge by reported side (L / M / R / LM / MR) while staying inside the road,
+     * 3) [bearingDeg] = route travel direction at the pin (for rotating span icons
+     *    so the long axis lies across the carriageway).
+     *
+     * Mid / full stay on the centerline; L/R stay within [MAP_SIDE_MAX_OFFSET_M].
+     * Off-road GPS is always pulled onto the route when a polyline exists — never leave
+     * the marker on a sidewalk/building just because the stored coordinate drifted.
      */
+    data class AlertMapPlacement(
+        val latitude: Double,
+        val longitude: Double,
+        /** Degrees clockwise from north along the route at the pin. */
+        val bearingDeg: Float,
+    )
+
     fun displayPositionForAlert(
         routePoints: List<Pair<Double, Double>>,
         alert: TripPotholeAlert,
         offsetMeters: Double = MAP_SIDE_OFFSET_M,
+        applyLaneOffset: Boolean = true,
     ): Pair<Double, Double> {
+        val p = displayPlacementForAlert(routePoints, alert, offsetMeters, applyLaneOffset)
+        return p.latitude to p.longitude
+    }
+
+    fun displayPlacementForAlert(
+        routePoints: List<Pair<Double, Double>>,
+        alert: TripPotholeAlert,
+        offsetMeters: Double = MAP_SIDE_OFFSET_M,
+        applyLaneOffset: Boolean = true,
+    ): AlertMapPlacement {
         val lat = alert.report.latitude
         val lon = alert.report.longitude
-        if (!lat.isFinite() || !lon.isFinite()) return lat to lon
-        val side = normalizeSideKey(alert.sideLabel) ?: return lat to lon
-        if (side == "middle" || side == "full") return lat to lon
-        if (routePoints.size < 2 || offsetMeters <= 0.0) return lat to lon
-        val seg = nearestSegmentIndex(routePoints, lat, lon) ?: return lat to lon
+        if (!lat.isFinite() || !lon.isFinite()) {
+            return AlertMapPlacement(lat, lon, 0f)
+        }
+        if (routePoints.size < 2) {
+            return AlertMapPlacement(lat, lon, 0f)
+        }
+
+        // Always snap onto the route centerline first (off-road GPS → on-road pin).
+        val snapped = projectPointOntoRoute(routePoints, lat, lon) ?: (lat to lon)
+        val seg = nearestSegmentIndex(routePoints, snapped.first, snapped.second)
+        val routeBearing = if (seg != null) {
+            val (aLat, aLon) = routePoints[seg]
+            val (bLat, bLon) = routePoints[seg + 1]
+            bearingBetween(aLat, aLon, bLat, bLon)
+        } else {
+            0f
+        }
+
+        if (!applyLaneOffset || offsetMeters <= 0.0) {
+            return AlertMapPlacement(snapped.first, snapped.second, routeBearing)
+        }
+
+        val side = normalizeSideKey(alert.sideLabel)
+            ?: normalizeSideKey(alert.report.potholePositionEnum().displayLabel)
+            ?: normalizeSideKey(alert.report.potholePosition)
+        val cappedBase = offsetMeters.coerceIn(0.0, MAP_SIDE_MAX_OFFSET_M)
+        val lateralM = side?.let { laneLateralOffsetM(it, cappedBase) }
+        if (lateralM == null || lateralM == 0.0) {
+            return AlertMapPlacement(snapped.first, snapped.second, routeBearing)
+        }
+
+        val perpBearing = if (lateralM < 0.0) routeBearing - 90f else routeBearing + 90f
+        val nudgeM = kotlin.math.abs(lateralM).coerceAtMost(MAP_SIDE_MAX_OFFSET_M)
+        val (olat, olon) = destinationPoint(
+            snapped.first,
+            snapped.second,
+            perpBearing,
+            nudgeM,
+        )
+        // Safety: if numerical drift somehow exceeds the corridor, fall back to centerline.
+        val drift = haversineM(snapped.first, snapped.second, olat, olon)
+        if (drift > MAP_SIDE_MAX_OFFSET_M + 0.35) {
+            return AlertMapPlacement(snapped.first, snapped.second, routeBearing)
+        }
+        return AlertMapPlacement(olat, olon, routeBearing)
+    }
+
+    /**
+     * Signed meters left (−) / right (+) of travel direction from centerline,
+     * or null when no lateral nudge applies (middle / full / unknown).
+     */
+    internal fun laneLateralOffsetM(sideKey: String, baseOffsetM: Double): Double? {
+        val capped = baseOffsetM.coerceIn(0.0, MAP_SIDE_MAX_OFFSET_M)
+        return when (sideKey) {
+            "left" -> -capped
+            "right" -> capped
+            "lm" -> -capped * MAP_SIDE_OFFSET_PARTIAL_FRAC
+            "mr" -> capped * MAP_SIDE_OFFSET_PARTIAL_FRAC
+            "middle", "full" -> 0.0
+            else -> null
+        }
+    }
+
+    /** Nearest point on the route polyline (clamped to segments). */
+    fun projectPointOntoRoute(
+        routePoints: List<Pair<Double, Double>>,
+        lat: Double,
+        lon: Double,
+    ): Pair<Double, Double>? {
+        if (routePoints.size < 2 || !lat.isFinite() || !lon.isFinite()) return null
+        val seg = nearestSegmentIndex(routePoints, lat, lon) ?: return null
         val (aLat, aLon) = routePoints[seg]
         val (bLat, bLon) = routePoints[seg + 1]
-        val routeBearing = bearingBetween(aLat, aLon, bLat, bLon)
-        val perpBearing = when (side) {
-            "left" -> routeBearing - 90f
-            "right" -> routeBearing + 90f
-            else -> return lat to lon
-        }
-        return destinationPoint(lat, lon, perpBearing, offsetMeters)
+        val t = projectT(aLat, aLon, bLat, bLon, lat, lon).coerceIn(0.0, 1.0)
+        return aLat + t * (bLat - aLat) to aLon + t * (bLon - aLon)
     }
 
     internal fun normalizeSideKey(sideLabel: String?): String? {
@@ -342,14 +539,18 @@ object TripNavigationMatcher {
             "left", "l", "on your left" -> "left"
             "right", "r", "on your right" -> "right"
             "middle", "m", "center", "centre", "in the middle of the road" -> "middle"
-            "full width", "fullwidth", "f", "across", "across the road", "whole road",
+            "lm", "left+middle", "left-middle", "l+m", "ml", "on your left-middle" -> "lm"
+            "mr", "middle+right", "middle-right", "m+r", "rm", "on your right-middle" -> "mr"
+            "lmr", "full width", "fullwidth", "f", "across", "across the road", "whole road",
             "full road", "full road pothole", "crater",
             -> "full"
             else -> when {
+                raw.contains("left") && raw.contains("middle") -> "lm"
+                raw.contains("right") && raw.contains("middle") -> "mr"
                 raw.contains("left") -> "left"
                 raw.contains("right") -> "right"
                 raw.contains("middle") || raw.contains("center") || raw.contains("centre") -> "middle"
-                raw.contains("full") || raw.contains("across") -> "full"
+                raw.contains("full") || raw.contains("across") || raw == "lmr" -> "full"
                 else -> null
             }
         }
@@ -450,6 +651,49 @@ object TripNavigationMatcher {
         return best
     }
 
+    /**
+     * Segment pick for map snapping: nearest lateral distance, biased toward the
+     * driver's current along-route progress so the cursor stays on the active road.
+     */
+    private fun bestSnapSegmentIndex(
+        route: List<Pair<Double, Double>>,
+        lat: Double,
+        lon: Double,
+        preferredAlongMeters: Double?,
+    ): Int? {
+        if (route.size < 2) return null
+        var best = 0
+        var bestScore = Double.MAX_VALUE
+        var cumAlong = 0.0
+        for (i in 0 until route.size - 1) {
+            val (aLat, aLon) = route[i]
+            val (bLat, bLon) = route[i + 1]
+            val segLen = haversineM(aLat, aLon, bLat, bLon)
+            val d = perpendicularDistanceM(route[i], route[i + 1], lat, lon)
+            val t = projectT(aLat, aLon, bLat, bLon, lat, lon).coerceIn(0.0, 1.0)
+            val along = cumAlong + t * segLen
+            var score = d
+            val preferred = preferredAlongMeters
+            if (preferred != null && preferred.isFinite()) {
+                val delta = along - preferred
+                // Heavily penalize snapping far behind (common parallel / opposite carriageway).
+                if (delta < -35.0) {
+                    score += (-delta - 35.0) * 0.35
+                }
+                // Mild penalty for jumping far ahead of progress on a parallel road.
+                if (delta > 280.0) {
+                    score += (delta - 280.0) * 0.08
+                }
+            }
+            if (score < bestScore) {
+                bestScore = score
+                best = i
+            }
+            cumAlong += segLen
+        }
+        return best
+    }
+
     private fun alongDistanceAt(
         route: List<Pair<Double, Double>>,
         seg: Int,
@@ -540,20 +784,72 @@ object TripNavigationMatcher {
         driverLat: Double,
         driverLon: Double,
         corridorM: Double = KNOWN_ALTERNATE_CORRIDOR_M,
+        destLat: Double? = null,
+        destLon: Double? = null,
+    ): Int? = findPreferredKnownAlternateIndex(
+        knownAlternates = knownAlternates,
+        activeRoute = activeRoute,
+        driverLat = driverLat,
+        driverLon = driverLon,
+        activeOffRouteMeters = routeProgress(activeRoute, driverLat, driverLon)?.offRouteMeters,
+        corridorM = corridorM,
+        destLat = destLat,
+        destLon = destLon,
+    )
+
+    /**
+     * Prefer a known alternate when the driver is clearly on it (closer than the
+     * active route) and that corridor still ends at the destination.
+     */
+    fun findPreferredKnownAlternateIndex(
+        knownAlternates: List<List<Pair<Double, Double>>>,
+        activeRoute: List<Pair<Double, Double>>,
+        driverLat: Double,
+        driverLon: Double,
+        activeOffRouteMeters: Double?,
+        corridorM: Double = KNOWN_ALTERNATE_CORRIDOR_M,
+        minImprovementM: Double = KNOWN_ALTERNATE_MIN_IMPROVEMENT_M,
+        destLat: Double? = null,
+        destLon: Double? = null,
     ): Int? {
         if (!driverLat.isFinite() || !driverLon.isFinite() || corridorM <= 0.0) return null
+        val activeOff = activeOffRouteMeters?.takeIf { it.isFinite() } ?: return null
+        val destPair = when {
+            destLat != null && destLon != null && destLat.isFinite() && destLon.isFinite() ->
+                destLat to destLon
+            activeRoute.size >= 2 -> activeRoute.last()
+            else -> null
+        }
         var bestIdx: Int? = null
         var bestDist = Double.MAX_VALUE
         knownAlternates.forEachIndexed { index, alt ->
             if (alt.size < 2) return@forEachIndexed
             if (routesLookAlike(alt, activeRoute)) return@forEachIndexed
+            if (destPair != null && !routeReachesDestination(alt, destPair.first, destPair.second)) {
+                return@forEachIndexed
+            }
             val progress = routeProgress(alt, driverLat, driverLon) ?: return@forEachIndexed
-            if (progress.offRouteMeters <= corridorM && progress.offRouteMeters < bestDist) {
+            if (progress.offRouteMeters > corridorM) return@forEachIndexed
+            // Need a clear improvement vs the active corridor (not GPS noise at a shared start).
+            if (progress.offRouteMeters + minImprovementM >= activeOff) return@forEachIndexed
+            if (progress.offRouteMeters < bestDist) {
                 bestDist = progress.offRouteMeters
                 bestIdx = index
             }
         }
         return bestIdx
+    }
+
+    /** True when the route’s last vertex is close enough to the trip destination. */
+    fun routeReachesDestination(
+        routePoints: List<Pair<Double, Double>>,
+        destLat: Double,
+        destLon: Double,
+        maxEndGapM: Double = ALTERNATE_DEST_MATCH_M,
+    ): Boolean {
+        val end = routePoints.lastOrNull() ?: return false
+        if (!destLat.isFinite() || !destLon.isFinite() || !maxEndGapM.isFinite()) return false
+        return haversineM(end.first, end.second, destLat, destLon) <= maxEndGapM
     }
 
     fun routesLookAlike(
@@ -583,9 +879,15 @@ object TripNavigationMatcher {
     }
 
     /**
-     * Hybrid #23.3 decision once the driver is clearly off the active route.
-     * [fullRerouteDurationSec] may be null before an OSRM probe completes —
-     * then distance alone decides (≤ [REJOIN_PREF_MAX_RETURN_M] → rejoin).
+     * #23.3 — recover after leaving the active route, using the trip vehicle.
+     *
+     * - On a **known alternate that reaches the destination** → auto-adopt (continue).
+     * - On a corridor that **does not reach the destination** → dashed **rejoin** to one that does.
+     * - On a path **unsuitable for the vehicle** (poor network snap, e.g. car in jungle) → **U-turn**.
+     * - Otherwise → **full reroute** for the best vehicle-appropriate path to the destination.
+     *
+     * @param vehicleNetworkSnapM OSRM start-snap from the driver to the vehicle profile
+     *   network (meters). Large values mean the GPS is not on roads for that vehicle.
      */
     fun planDeviation(
         routePoints: List<Pair<Double, Double>>,
@@ -595,55 +897,153 @@ object TripNavigationMatcher {
         progress: TripRouteProgress,
         speedMps: Float?,
         fullRerouteDurationSec: Double?,
+        destLat: Double? = null,
+        destLon: Double? = null,
+        vehicle: TripVehicle = TripVehicle.CAR,
+        vehicleNetworkSnapM: Double? = null,
     ): TripDeviationPlan {
-        val nearbyAlt = findNearbyKnownAlternateIndex(
-            knownAlternates, routePoints, driverLat, driverLon,
+        @Suppress("UNUSED_PARAMETER")
+        val unusedEtaProbe = fullRerouteDurationSec
+        val destPair = when {
+            destLat != null && destLon != null && destLat.isFinite() && destLon.isFinite() ->
+                destLat to destLon
+            routePoints.size >= 2 -> routePoints.last()
+            else -> null
+        }
+
+        // 1) Vehicle-valid preview alternate that still reaches dest → continue it.
+        val nearbyAlt = findPreferredKnownAlternateIndex(
+            knownAlternates = knownAlternates,
+            activeRoute = routePoints,
+            driverLat = driverLat,
+            driverLon = driverLon,
+            activeOffRouteMeters = progress.offRouteMeters,
+            destLat = destPair?.first,
+            destLon = destPair?.second,
         )
         if (nearbyAlt != null) {
             return TripDeviationPlan(
-                action = TripDeviationAction.OFFER_KNOWN_ALTERNATE,
+                action = TripDeviationAction.ADOPT_KNOWN_ALTERNATE,
                 knownAlternateIndex = nearbyAlt,
             )
         }
-
-        val rejoin = buildRejoinPolyline(routePoints, driverLat, driverLon)
-            ?: return TripDeviationPlan(TripDeviationAction.FULL_REROUTE)
-        val (rejoinPoints, returnM) = rejoin
-
-        // Snap behind the driver by a lot while drifting → treat as intentional detour.
-        val snapAlong = progress.traveledMeters
-        val headingAway =
-            returnM > 120.0 &&
-                progress.offRouteMeters > OFF_ROUTE_REROUTE_M * 1.5 &&
-                snapAlong < progress.totalMeters * 0.15 &&
-                progress.completionFraction < 0.12
-
-        if (headingAway || returnM > REJOIN_HARD_MAX_RETURN_M) {
-            return TripDeviationPlan(TripDeviationAction.FULL_REROUTE)
-        }
-
-        val remainingAfterSnap = (progress.remainingMeters).coerceAtLeast(0.0)
-        // Rough remaining after rejoining ≈ remaining on original − nothing for return on-route.
-        // Return leg is off-route; remaining is still roughly progress.remainingMeters from snap.
-        val rejoinEtaSec =
-            estimateTravelSeconds(returnM, speedMps) +
-                estimateTravelSeconds(remainingAfterSnap, speedMps)
-
-        val preferRejoin = when {
-            returnM > REJOIN_PREF_MAX_RETURN_M -> false
-            fullRerouteDurationSec == null -> true
-            else -> rejoinEtaSec <= fullRerouteDurationSec + REJOIN_ETA_SLACK_SEC
-        }
-
-        return if (preferRejoin) {
-            TripDeviationPlan(
-                action = TripDeviationAction.SHOW_REJOIN,
-                rejoinPoints = rejoinPoints,
-                rejoinReturnMeters = returnM,
+        val softAlt = findPreferredKnownAlternateIndex(
+            knownAlternates = knownAlternates,
+            activeRoute = routePoints,
+            driverLat = driverLat,
+            driverLon = driverLon,
+            activeOffRouteMeters = progress.offRouteMeters,
+            minImprovementM = 0.0,
+            destLat = destPair?.first,
+            destLon = destPair?.second,
+        )
+        if (softAlt != null) {
+            return TripDeviationPlan(
+                action = TripDeviationAction.ADOPT_KNOWN_ALTERNATE,
+                knownAlternateIndex = softAlt,
             )
-        } else {
-            TripDeviationPlan(TripDeviationAction.FULL_REROUTE)
         }
+
+        // 2) Wrong network for this vehicle (jungle / footpath while driving a car, etc.).
+        if (isWrongNetworkForVehicle(vehicle, vehicleNetworkSnapM, progress.offRouteMeters)) {
+            return TripDeviationPlan(TripDeviationAction.SUGGEST_UTURN)
+        }
+
+        // 3) On a known corridor that does NOT reach the destination → dashed rejoin
+        //    onto the active route (which does).
+        if (destPair != null) {
+            val deadEndIdx = findKnownAlternateMissingDestination(
+                knownAlternates = knownAlternates,
+                activeRoute = routePoints,
+                driverLat = driverLat,
+                driverLon = driverLon,
+                destLat = destPair.first,
+                destLon = destPair.second,
+            )
+            if (deadEndIdx != null) {
+                val rejoin = buildRejoinPolyline(routePoints, driverLat, driverLon)
+                if (rejoin != null && rejoin.second <= REJOIN_HARD_MAX_RETURN_M) {
+                    return TripDeviationPlan(
+                        action = TripDeviationAction.SHOW_REJOIN,
+                        rejoinPoints = rejoin.first,
+                        rejoinReturnMeters = rejoin.second,
+                    )
+                }
+                return TripDeviationPlan(TripDeviationAction.FULL_REROUTE)
+            }
+        }
+
+        // 4) Rematch the best vehicle route to the destination (no rejoin dash for
+        //    parallel / intentional corridors). Tiny GPS spur may still rejoin.
+        val rejoin = buildRejoinPolyline(routePoints, driverLat, driverLon)
+        if (rejoin != null) {
+            val returnM = rejoin.second
+            val activeReaches = destPair == null || routeReachesDestination(
+                routePoints,
+                destPair.first,
+                destPair.second,
+            )
+            if (
+                activeReaches &&
+                returnM <= REJOIN_GPS_DRIFT_MAX_M &&
+                progress.offRouteMeters <= REJOIN_GPS_DRIFT_OFF_ROUTE_M
+            ) {
+                return TripDeviationPlan(
+                    action = TripDeviationAction.SHOW_REJOIN,
+                    rejoinPoints = rejoin.first,
+                    rejoinReturnMeters = returnM,
+                )
+            }
+        }
+        return TripDeviationPlan(TripDeviationAction.FULL_REROUTE)
+    }
+
+    /**
+     * OSRM / GPS says the driver is not on roads for [vehicle]
+     * (e.g. car GPS deep on a foot / dirt-bike trail).
+     */
+    fun isWrongNetworkForVehicle(
+        vehicle: TripVehicle,
+        vehicleNetworkSnapM: Double?,
+        offRouteMeters: Double,
+    ): Boolean {
+        val snap = vehicleNetworkSnapM?.takeIf { it.isFinite() && it >= 0.0 } ?: return false
+        val threshold = when (vehicle) {
+            TripVehicle.CAR -> WRONG_NETWORK_SNAP_CAR_M
+            TripVehicle.BIKE -> WRONG_NETWORK_SNAP_BIKE_M
+            TripVehicle.WALK -> WRONG_NETWORK_SNAP_WALK_M
+        }
+        if (snap < threshold) return false
+        return offRouteMeters >= WRONG_NETWORK_MIN_OFF_ROUTE_M
+    }
+
+    /**
+     * Index of a known alternate the driver is near that does **not** finish at the destination.
+     */
+    fun findKnownAlternateMissingDestination(
+        knownAlternates: List<List<Pair<Double, Double>>>,
+        activeRoute: List<Pair<Double, Double>>,
+        driverLat: Double,
+        driverLon: Double,
+        destLat: Double,
+        destLon: Double,
+        corridorM: Double = KNOWN_ALTERNATE_CORRIDOR_M,
+    ): Int? {
+        if (!driverLat.isFinite() || !driverLon.isFinite()) return null
+        var bestIdx: Int? = null
+        var bestDist = Double.MAX_VALUE
+        knownAlternates.forEachIndexed { index, alt ->
+            if (alt.size < 2) return@forEachIndexed
+            if (routesLookAlike(alt, activeRoute)) return@forEachIndexed
+            if (routeReachesDestination(alt, destLat, destLon)) return@forEachIndexed
+            val progress = routeProgress(alt, driverLat, driverLon) ?: return@forEachIndexed
+            if (progress.offRouteMeters > corridorM) return@forEachIndexed
+            if (progress.offRouteMeters < bestDist) {
+                bestDist = progress.offRouteMeters
+                bestIdx = index
+            }
+        }
+        return bestIdx
     }
 
     fun haversineM(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {

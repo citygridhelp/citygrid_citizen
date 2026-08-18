@@ -10,7 +10,13 @@ data class TripRecentPlace(
     val longitude: Double,
     val usedAtMs: Long = 0L,
     val isFavorite: Boolean = false,
-)
+    /** User-chosen name when saved (e.g. Home, Work). Null = untitled favorite. */
+    val savedName: String? = null,
+) {
+    /** Name shown in lists: saved nickname, else address/search label. */
+    val displayName: String
+        get() = savedName?.trim()?.takeIf { it.isNotEmpty() } ?: label
+}
 
 /** Device-local recent + saved places for the trip planner. */
 object TripRecentPlacesRepository {
@@ -22,6 +28,9 @@ object TripRecentPlacesRepository {
     private const val MAX_DESTINATIONS = 12
     private const val MAX_STARTS = 8
     private const val MAX_FAVORITES = 6
+
+    /** Suggested nicknames when saving a place. */
+    val SAVE_NAME_PRESETS: List<String> = listOf("Home", "Work", "Gym", "School", "Family", "Other")
 
     fun destinations(context: Context): List<TripRecentPlace> =
         loadPlaces(context, KEY_DESTINATIONS, KEY_DESTINATIONS_LEGACY)
@@ -45,6 +54,50 @@ object TripRecentPlacesRepository {
     ): List<TripRecentPlace> =
         rememberPlace(context, KEY_STARTS, starts(context), label, latitude, longitude, MAX_STARTS)
 
+    /**
+     * Save or update a named favorite destination (Home, Work, …).
+     * Replaces an existing favorite at the same coordinates.
+     */
+    fun saveNamedDestination(
+        context: Context,
+        label: String,
+        latitude: Double,
+        longitude: Double,
+        savedName: String,
+    ): List<TripRecentPlace> {
+        val name = savedName.trim().ifBlank { return destinations(context) }
+        val cleanLabel = label.trim().ifBlank { name }
+        if (!latitude.isFinite() || !longitude.isFinite()) return destinations(context)
+
+        val current = destinations(context)
+        val withoutSameCoords = current.filterNot {
+            coordinatesMatch(it.latitude, it.longitude, latitude, longitude)
+        }
+        // One place per nickname: drop older favorite with the same saved name.
+        val withoutSameName = withoutSameCoords.filterNot {
+            it.isFavorite && it.savedName?.equals(name, ignoreCase = true) == true
+        }
+        val favoriteCount = withoutSameName.count { it.isFavorite }
+        if (favoriteCount >= MAX_FAVORITES) {
+            return current
+        }
+        val updated = (
+            listOf(
+                TripRecentPlace(
+                    label = cleanLabel,
+                    latitude = latitude,
+                    longitude = longitude,
+                    usedAtMs = System.currentTimeMillis(),
+                    isFavorite = true,
+                    savedName = name,
+                ),
+            ) + withoutSameName
+            ).sortedWith(placeComparator()).take(MAX_DESTINATIONS)
+        persist(context, KEY_DESTINATIONS, updated)
+        return updated
+    }
+
+    /** Star toggle without a name (legacy). Prefer [saveNamedDestination] for new saves. */
     fun toggleFavoriteDestination(
         context: Context,
         label: String,
@@ -55,22 +108,30 @@ object TripRecentPlacesRepository {
         val existing = current.firstOrNull {
             coordinatesMatch(it.latitude, it.longitude, latitude, longitude)
         }
+        if (existing?.isFavorite == true) {
+            // Unsave
+            val updated = current.map {
+                if (coordinatesMatch(it.latitude, it.longitude, latitude, longitude)) {
+                    it.copy(isFavorite = false, savedName = null, usedAtMs = System.currentTimeMillis())
+                } else {
+                    it
+                }
+            }.sortedWith(placeComparator())
+            persist(context, KEY_DESTINATIONS, updated)
+            return updated
+        }
+        // Star without name — keep for quick save; UI should offer naming.
         val favoriteCount = current.count { it.isFavorite }
+        if (favoriteCount >= MAX_FAVORITES) return current
         val updated = if (existing != null) {
-            val willFavorite = !existing.isFavorite
-            if (willFavorite && favoriteCount >= MAX_FAVORITES) {
-                // Cap favorites — keep list unchanged if already at max.
-                return current
-            }
             current.map {
                 if (coordinatesMatch(it.latitude, it.longitude, latitude, longitude)) {
-                    it.copy(isFavorite = willFavorite, usedAtMs = System.currentTimeMillis())
+                    it.copy(isFavorite = true, usedAtMs = System.currentTimeMillis())
                 } else {
                     it
                 }
             }
         } else {
-            if (favoriteCount >= MAX_FAVORITES) return current
             listOf(
                 TripRecentPlace(
                     label = label.trim().ifBlank { "Saved place" },
@@ -94,6 +155,18 @@ object TripRecentPlacesRepository {
             coordinatesMatch(it.latitude, it.longitude, latitude, longitude)
         }
         persist(context, KEY_DESTINATIONS, updated)
+        return updated
+    }
+
+    fun removeStart(
+        context: Context,
+        latitude: Double,
+        longitude: Double,
+    ): List<TripRecentPlace> {
+        val updated = starts(context).filterNot {
+            coordinatesMatch(it.latitude, it.longitude, latitude, longitude)
+        }
+        persist(context, KEY_STARTS, updated)
         return updated
     }
 
@@ -121,6 +194,7 @@ object TripRecentPlacesRepository {
                     longitude = longitude,
                     usedAtMs = System.currentTimeMillis(),
                     isFavorite = previous?.isFavorite == true,
+                    savedName = previous?.savedName,
                 ),
             )
             addAll(
@@ -156,8 +230,18 @@ object TripRecentPlacesRepository {
                     val longitude = item.optDouble("longitude", Double.NaN)
                     val usedAtMs = item.optLong("usedAtMs", 0L)
                     val isFavorite = item.optBoolean("isFavorite", false)
+                    val savedName = item.optString("savedName", "").trim().takeIf { it.isNotEmpty() }
                     if (label.isNotBlank() && latitude.isFinite() && longitude.isFinite()) {
-                        add(TripRecentPlace(label, latitude, longitude, usedAtMs, isFavorite))
+                        add(
+                            TripRecentPlace(
+                                label = label,
+                                latitude = latitude,
+                                longitude = longitude,
+                                usedAtMs = usedAtMs,
+                                isFavorite = isFavorite,
+                                savedName = savedName,
+                            ),
+                        )
                     }
                 }
             }.sortedWith(placeComparator())
@@ -173,7 +257,8 @@ object TripRecentPlacesRepository {
                         .put("latitude", place.latitude)
                         .put("longitude", place.longitude)
                         .put("usedAtMs", place.usedAtMs)
-                        .put("isFavorite", place.isFavorite),
+                        .put("isFavorite", place.isFavorite)
+                        .put("savedName", place.savedName.orEmpty()),
                 )
             }
         }

@@ -13,5 +13,14 @@ data class CitizenNotification(
         APP_UPDATE,
         STATUS_CHANGE,
         GENERAL,
+        WEATHER,
+        UNCONFIRMED,
+    }
+
+    /** Alert should open My reports → Unconfirmed review. */
+    fun opensUnconfirmedReview(): Boolean {
+        if (type == Type.UNCONFIRMED) return true
+        val hay = "$title $body".lowercase()
+        return hay.contains("unconfirmed") && !hay.contains("filed from")
     }
 }

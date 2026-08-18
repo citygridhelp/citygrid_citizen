@@ -59,12 +59,30 @@ fun PotholeReportTheme(
     )
 }
 
+/** Force light surfaces so hardcoded [CitizenInk] copy stays readable in system dark theme. */
+@Composable
+fun CitizenLightSurface(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = lightColorScheme(
+            primary = Color(0xFF1B2A4A),
+            onPrimary = Color.White,
+            surface = Color.White,
+            onSurface = Color(0xFF111827),
+            onSurfaceVariant = Color(0xFF4B5563),
+            background = Color.White,
+            onBackground = Color(0xFF111827),
+        ),
+        typography = MaterialTheme.typography,
+        content = content,
+    )
+}
+
 /** Light-surface text fields (sign-in modal) — avoids grey-on-pale in dark system theme. */
 @Composable
 fun citizenLightSurfaceFieldColors(
     textColor: Color = Color(0xFF101828),
     borderColor: Color = Color(0xFF374151),
-    placeholderColor: Color = Color(0xFF6B7280),
+    placeholderColor: Color = CitizenInk.Helper,
 ) = OutlinedTextFieldDefaults.colors(
     focusedTextColor = textColor,
     unfocusedTextColor = textColor,

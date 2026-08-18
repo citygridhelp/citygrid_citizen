@@ -15,6 +15,8 @@ val localProperties = Properties().apply {
 }
 val supabaseUrl: String = (localProperties.getProperty("SUPABASE_URL") ?: "").trim()
 val supabaseAnonKey: String = (localProperties.getProperty("SUPABASE_ANON_KEY") ?: "").trim()
+// Optional MapTiler key. Without it the app uses free OpenFreeMap vector tiles.
+val mapTilerKey: String = (localProperties.getProperty("MAPTILER_KEY") ?: "").trim()
 
 android {
     namespace = "com.example.potholereport"
@@ -35,6 +37,9 @@ android {
 
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+        buildConfigField("String", "MAPTILER_KEY", "\"$mapTilerKey\"")
+        // MapLibre vector basemap (OpenFreeMap free by default; MapTiler when key is set).
+        buildConfigField("boolean", "USE_MAPLIBRE_BASEMAP", "true")
     }
 
     buildTypes {
@@ -64,6 +69,11 @@ android {
     androidResources {
         noCompress += "tflite"
     }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
 }
 
 dependencies {
@@ -80,9 +90,18 @@ dependencies {
     implementation("androidx.core:core-splashscreen:1.2.0")
     implementation("com.google.android.play:app-update-ktx:2.1.0")
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
+    // MapLibre vector basemap (OpenFreeMap free; optional MAPTILER_KEY for MapTiler Streets).
+    implementation("org.maplibre.gl:android-sdk:11.13.5")
+    // Trip capture preview (#32 Phase 1–2).
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-view:1.4.2")
+    // Host-mode UVC when the OEM does not expose the webcam through CameraX (16 KB–aligned).
+    implementation("com.herohan:UVCAndroid:1.0.13")
     // LiteRT replaces legacy tensorflow-lite; required for 16 KB page size (Android 15+ / Play).
     implementation("com.google.ai.edge.litert:litert:2.1.0")
     // Supabase backend (auth + reports table + evidence storage).

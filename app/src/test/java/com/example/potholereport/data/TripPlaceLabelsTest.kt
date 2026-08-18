@@ -99,4 +99,63 @@ class TripPlaceLabelsTest {
         assertEquals("Bren Imperia", TripPlaceLabels.titleFromQuery("bren imperia"))
         assertEquals("Klay Harlur", TripPlaceLabels.titleFromQuery("klay harlur"))
     }
+
+    @Test
+    fun bangaloreDivision_neverShownInTripSearchSubtitle() {
+        val fields = PlaceAddressFields(
+            featureName = "Bren Imperia",
+            subLocality = "Harlur",
+            locality = "Bengaluru",
+            subAdminArea = "Bangalore Division",
+            addressLines = listOf("Bren Imperia, Harlur, Bengaluru, Bangalore Division, Karnataka, India"),
+        )
+        val label = TripPlaceLabels.formatSearchResult(fields, queryHint = "bren imperia")
+        assertTrue(label.startsWith("Bren Imperia"))
+        assertFalse(label.contains("Division", ignoreCase = true))
+        assertTrue(label.contains("Harlur"))
+        assertTrue(label.contains("Bengaluru"))
+    }
+
+    @Test
+    fun bangaloreDivision_alone_becomesBengaluru() {
+        val fields = PlaceAddressFields(
+            featureName = "Bangalore Division",
+            subAdminArea = "Bangalore Division",
+            locality = null,
+            addressLines = listOf("Bangalore Division, Karnataka, India"),
+        )
+        val label = TripPlaceLabels.formatSearchResult(fields)
+        assertFalse(label.contains("Division", ignoreCase = true))
+        assertTrue(label.contains("Bengaluru"))
+        assertEquals("Bengaluru", TripPlaceLabels.formatCitySearchLabel(fields))
+    }
+
+    @Test
+    fun bangalore_locality_canonicalizesToBengaluru() {
+        val fields = PlaceAddressFields(
+            thoroughfare = "MG Road",
+            locality = "Bangalore",
+            subAdminArea = "Bangalore Division",
+        )
+        val label = TripPlaceLabels.formatSearchResult(fields, queryHint = "MG Road")
+        assertTrue(label.contains("MG Road"))
+        assertTrue(label.contains("Bengaluru"))
+        assertFalse(label.contains("Division", ignoreCase = true))
+        assertFalse(label.contains("Bangalore"))
+    }
+
+    @Test
+    fun urbanNest_notTreatedAsAdminUnit() {
+        assertFalse(TripPlaceLabels.isAdministrativeUnitName("Urban Nest"))
+        assertTrue(TripPlaceLabels.isPlaceNameCandidate("Urban Nest"))
+    }
+
+    @Test
+    fun isAdministrativeUnitName_detectsCommonNoise() {
+        assertTrue(TripPlaceLabels.isAdministrativeUnitName("Bangalore Division"))
+        assertTrue(TripPlaceLabels.isAdministrativeUnitName("Bengaluru Urban"))
+        assertTrue(TripPlaceLabels.isAdministrativeUnitName("Bengaluru Urban District"))
+        assertFalse(TripPlaceLabels.isAdministrativeUnitName("Koramangala"))
+        assertFalse(TripPlaceLabels.isAdministrativeUnitName("HSR Layout"))
+    }
 }

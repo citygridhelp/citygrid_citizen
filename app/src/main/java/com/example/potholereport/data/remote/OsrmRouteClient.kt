@@ -7,9 +7,11 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.math.atan2
@@ -65,23 +67,32 @@ object OsrmRouteClient {
         HttpClient(Android) {
             install(HttpTimeout) {
                 // Fail fast offline / on flaky mobile data so nav UI is never stuck "Rerouting…".
-                requestTimeoutMillis = 12_000
-                connectTimeoutMillis = 8_000
-                socketTimeoutMillis = 12_000
+                requestTimeoutMillis = 8_000
+                connectTimeoutMillis = 4_000
+                socketTimeoutMillis = 8_000
             }
         }
     }
-    private val requestMutex = Mutex()
+    private val requestSemaphore = Semaphore(permits = 3)
     private var lastRequestAtMs = 0L
 
-    /** Generous snap so GPS in a courtyard/park still finds a nearby road. */
-    private const val SNAP_RADIUS_M = 500
+    /** Fallback snap when GPS accuracy is unknown (courtyard / coarse pin). */
+    private const val DEFAULT_SNAP_RADIUS_M = 220
 
     /** Soft upper bound: 1 primary + up to 2 useful alternates (trust over quantity). */
     private const val MAX_ROUTE_OPTIONS = 3
 
     /** Max alternatives parameter accepted by FOSSGIS OSRM (higher → TooBig, zero routes). */
     private const val OSRM_MAX_ALTERNATIVES = 3
+
+    /**
+     * Extra via probes only when OSRM returns a single corridor.
+     * Kept tiny — each probe is a full HTTP round-trip.
+     */
+    private const val MAX_VIA_PROBES = 4
+
+    /** Light spacing so FOSSGIS is not hammered; primary route should not wait long. */
+    private const val MIN_REQUEST_GAP_MS = 80L
 
     /** Bike vs car: if cycling is this much longer, prefer drivable roads. */
     internal const val BIKE_DETOUR_RATIO = 1.35
@@ -99,6 +110,21 @@ object OsrmRouteClient {
         val useRoadNetwork: Boolean = false,
     )
 
+    /**
+     * Tighter snap when the fix is precise so the route starts on the nearest road,
+     * not a parallel arterial hundreds of meters away.
+     */
+    fun snapRadiusForAccuracy(accuracyM: Float?): Int {
+        val acc = accuracyM?.takeIf { it.isFinite() && it > 0f } ?: return DEFAULT_SNAP_RADIUS_M
+        return when {
+            acc <= 10f -> 55
+            acc <= 18f -> 85
+            acc <= 30f -> 130
+            acc <= 50f -> 180
+            else -> DEFAULT_SNAP_RADIUS_M
+        }
+    }
+
     /** Best single route (used for active-trip reroutes). */
     suspend fun fetchRoute(
         startLat: Double,
@@ -106,12 +132,48 @@ object OsrmRouteClient {
         endLat: Double,
         endLon: Double,
         vehicle: TripVehicle = TripVehicle.CAR,
-    ): OsrmRouteResult? = fetchRoutes(startLat, startLon, endLat, endLon, vehicle).firstOrNull()
+        snapRadiusM: Int = DEFAULT_SNAP_RADIUS_M,
+        viaPoints: List<Pair<Double, Double>> = emptyList(),
+    ): OsrmRouteResult? = fetchRoutes(
+        startLat, startLon, endLat, endLon, vehicle, snapRadiusM, viaPoints,
+    ).firstOrNull()
+
+    /**
+     * Fast A→B duration/distance only (no geometry, steps, or alternates).
+     * Used for SOS nearest-place ranking where many destinations are compared.
+     */
+    suspend fun fetchQuickRoute(
+        startLat: Double,
+        startLon: Double,
+        endLat: Double,
+        endLon: Double,
+        vehicle: TripVehicle = TripVehicle.CAR,
+        snapRadiusM: Int = DEFAULT_SNAP_RADIUS_M,
+    ): OsrmRouteResult? {
+        if (!startLat.isFinite() || !startLon.isFinite() || !endLat.isFinite() || !endLon.isFinite()) {
+            return null
+        }
+        val snap = snapRadiusM.coerceIn(40, 500)
+        val withSnap = fetchForProfile(
+            startLat, startLon, endLat, endLon, vehicle,
+            useRadiuses = true,
+            snapRadiusM = snap,
+            lite = true,
+        )
+        if (withSnap.isNotEmpty()) return withSnap.minByOrNull { it.durationSeconds }
+        return fetchForProfile(
+            startLat, startLon, endLat, endLon, vehicle,
+            useRadiuses = false,
+            snapRadiusM = snap,
+            lite = true,
+        ).minByOrNull { it.durationSeconds }
+    }
 
     /**
      * Possible A→B routes for planner preview, fastest first.
      * Prefers connected, mode-appropriate paths; rejects disconnected spurs.
      * Slightly slower alts are kept so the user can choose.
+     * [viaPoints] are intermediate stops (lat, lon), visited in order.
      */
     suspend fun fetchRoutes(
         startLat: Double,
@@ -119,16 +181,34 @@ object OsrmRouteClient {
         endLat: Double,
         endLon: Double,
         vehicle: TripVehicle = TripVehicle.CAR,
+        snapRadiusM: Int = DEFAULT_SNAP_RADIUS_M,
+        viaPoints: List<Pair<Double, Double>> = emptyList(),
     ): List<OsrmRouteResult> {
         if (!startLat.isFinite() || !startLon.isFinite() || !endLat.isFinite() || !endLon.isFinite()) {
             return emptyList()
         }
-        val seed = when (vehicle) {
-            TripVehicle.BIKE -> fetchBikeRoutesWithRoadFallback(startLat, startLon, endLat, endLon)
-            else -> RouteSeed(fetchPrimaryRoutes(startLat, startLon, endLat, endLon, vehicle))
+        val vias = viaPoints.filter { it.first.isFinite() && it.second.isFinite() }
+        val snap = snapRadiusM.coerceIn(40, 500)
+        val seed = when {
+            vias.isNotEmpty() -> RouteSeed(
+                fetchPrimaryRoutes(startLat, startLon, endLat, endLon, vehicle, snap, vias),
+            )
+            vehicle == TripVehicle.BIKE -> fetchBikeRoutesWithRoadFallback(
+                startLat, startLon, endLat, endLon, snap,
+            )
+            else -> RouteSeed(
+                fetchPrimaryRoutes(startLat, startLon, endLat, endLon, vehicle, snap),
+            )
+        }
+        // With intermediate stops, keep the primary corridor only (no via-probed alts).
+        if (vias.isNotEmpty()) {
+            return seed.routes
+                .sortedBy { it.durationSeconds }
+                .distinctBy { routeFingerprint(it) }
+                .take(MAX_ROUTE_OPTIONS)
         }
         return enrichWithNearbyAlternates(
-            startLat, startLon, endLat, endLon, vehicle, seed,
+            startLat, startLon, endLat, endLon, vehicle, seed, snap,
         )
     }
 
@@ -138,27 +218,30 @@ object OsrmRouteClient {
         endLat: Double,
         endLon: Double,
         vehicle: TripVehicle,
+        snapRadiusM: Int,
+        viaPoints: List<Pair<Double, Double>> = emptyList(),
     ): List<OsrmRouteResult> {
         val withSnap = fetchForProfile(
-            startLat, startLon, endLat, endLon, vehicle, useRadiuses = true,
+            startLat, startLon, endLat, endLon, vehicle,
+            useRadiuses = true,
+            snapRadiusM = snapRadiusM,
+            viaPoints = viaPoints,
         )
-        // Prefer the response with more distinct alternatives when the snapped
-        // request only returns the primary path.
-        if (withSnap.size >= 2) return withSnap
-        val withoutSnap = fetchForProfile(
-            startLat, startLon, endLat, endLon, vehicle, useRadiuses = false,
+        // One round-trip is enough when OSRM already returned a corridor.
+        if (withSnap.isNotEmpty()) return withSnap
+        // Only retry without radiuses when the snapped request found nothing.
+        return fetchForProfile(
+            startLat, startLon, endLat, endLon, vehicle,
+            useRadiuses = false,
+            snapRadiusM = snapRadiusM,
+            viaPoints = viaPoints,
         )
-        return when {
-            withoutSnap.size > withSnap.size -> withoutSnap
-            withSnap.isNotEmpty() -> withSnap
-            else -> withoutSnap
-        }
     }
 
     /**
      * OSRM often returns a single route even when a different arterial corridor
-     * exists. Probe left/right vias, then keep connected non-waste paths.
-     * Google-like goal: show 2+ real choices when they exist; never invent junk.
+     * exists. Probe a few left/right vias only when needed — never block the
+     * primary result on a long probe chain.
      */
     private suspend fun enrichWithNearbyAlternates(
         startLat: Double,
@@ -167,6 +250,7 @@ object OsrmRouteClient {
         endLon: Double,
         vehicle: TripVehicle,
         seed: RouteSeed,
+        snapRadiusM: Int,
     ): List<OsrmRouteResult> {
         if (seed.routes.isEmpty()) return emptyList()
         val dedupedSeed = seed.routes
@@ -180,45 +264,35 @@ object OsrmRouteClient {
             requestEndLat = endLat,
             requestEndLon = endLon,
         )
-        // Native OSRM alts: light filter only (engine already ranked them).
+        // Native OSRM alts still must not be dead-ends / spurs.
         val usableSeed = listOf(primary) + dedupedSeed.drop(1).filter {
-            passesRouteQuality(it, qualityCtx, geometryStrict = false)
-        }
-
-        val viaBudget = when {
-            primary.distanceMeters < 2_000.0 -> 12
-            primary.distanceMeters < 8_000.0 -> 14
-            else -> 18
-        }
-        val needMoreAlts = usableSeed.size < 2
-
-        val rawProbed = ArrayList<OsrmRouteResult>(viaBudget)
-        if (needMoreAlts || usableSeed.size < MAX_ROUTE_OPTIONS) {
-            for (via in diversionViaPoints(primary).take(viaBudget)) {
-                if (rawProbed.size >= viaBudget) break
-                val candidate = fetchDivertedRoute(
-                    startLat, startLon, via.first, via.second, endLat, endLon,
-                    vehicle = vehicle,
-                    useRoadNetwork = seed.useRoadNetwork,
-                ) ?: continue
-                if (!routesAreVisiblyDistinct(candidate, primary)) continue
-                if (rawProbed.any { !routesAreVisiblyDistinct(candidate, it) }) continue
-                rawProbed += candidate
-            }
-        }
-
-        // Prefer strict geometry (no spurs / gross wrong-way); fall back to light
-        // gates so the user still sees real corridor choices when possible.
-        val strictProbed = rawProbed.filter {
             passesRouteQuality(it, qualityCtx, geometryStrict = true)
         }
-        val probed = if (usableSeed.size + strictProbed.size >= 2) {
-            strictProbed
-        } else {
-            rawProbed.filter {
-                passesRouteQuality(it, qualityCtx, geometryStrict = false) &&
-                    !hasGrossWrongWayDetour(it, primary)
-            }
+
+        // Fast path: OSRM already gave distinct usable corridors — skip via probing.
+        if (usableSeed.size >= 2) {
+            return pickDiverseRoutes(usableSeed, MAX_ROUTE_OPTIONS)
+        }
+
+        val viaCandidates = diversionViaPoints(primary).take(MAX_VIA_PROBES)
+        val rawProbed = coroutineScope {
+            viaCandidates.map { via ->
+                async {
+                    fetchDivertedRoute(
+                        startLat, startLon, via.first, via.second, endLat, endLon,
+                        vehicle = vehicle,
+                        useRoadNetwork = seed.useRoadNetwork,
+                        snapRadiusM = snapRadiusM,
+                    )
+                }
+            }.mapNotNull { it.await() }
+                .filter { routesAreVisiblyDistinct(it, primary) }
+                .distinctBy { routeFingerprint(it) }
+        }
+
+        // Strict only — never surface irregular / dead-end corridors as “alternates”.
+        val probed = rawProbed.filter {
+            passesRouteQuality(it, qualityCtx, geometryStrict = true)
         }
 
         return pickDiverseRoutes(usableSeed + probed, MAX_ROUTE_OPTIONS)
@@ -336,27 +410,31 @@ object OsrmRouteClient {
             return false
         }
 
-        // Google-like: keep alts within a generous band (traffic can swing ETAs).
-        val maxDist = primary.distanceMeters * 1.55 + 1_200.0
+        // Google-like: keep alts within a useful band (traffic can swing ETAs).
+        val maxDist = primary.distanceMeters * 1.40 + 800.0
         if (candidate.distanceMeters > maxDist) return false
 
-        val maxDuration = primary.durationSeconds * 1.50 + 600.0 // +10 min slack
+        val maxDuration = primary.durationSeconds * 1.35 + 420.0 // +7 min slack
         if (candidate.durationSeconds > maxDuration) return false
 
+        // Always reject dead-ends / out-and-back spurs (native OSRM alts included).
+        if (hasPointlessSpur(candidate)) return false
+        if (hasDeadEndReversal(candidate, primary)) return false
+
         if (geometryStrict) {
-            if (hasPointlessSpur(candidate)) return false
             if (hasGrossWrongWayDetour(candidate, primary)) return false
             val primaryUTurns = countSharpReversals(primary)
             val candidateUTurns = countSharpReversals(candidate)
-            if (candidateUTurns >= 4 && candidateUTurns > primaryUTurns + 2) return false
+            if (candidateUTurns >= 3 && candidateUTurns > primaryUTurns + 1) return false
+            // Irregular: much longer with little real corridor diversity.
+            if (!isUsefulAlternateCorridor(candidate, primary)) return false
         }
 
         return true
     }
 
     /**
-     * True out-and-back only. Normal OSM zigzags / diamond ramps must NOT match —
-     * over-aggressive kink detection was wiping every alternate.
+     * True out-and-back / cul-de-sac spur. Normal arterial zigzags must NOT match.
      */
     internal fun hasPointlessSpur(route: OsrmRouteResult): Boolean {
         val pts = route.points
@@ -369,20 +447,60 @@ object OsrmRouteClient {
         }
         val step = (pts.size / 80).coerceAtLeast(1)
         for (i in 0 until pts.size step step) {
-            for (j in (i + 4) until pts.size step step) {
+            for (j in (i + 3) until pts.size step step) {
                 val traveled = alongAt[j] - alongAt[i]
-                if (traveled < 200.0) continue
+                if (traveled < 120.0) continue
                 if (traveled > 3_500.0) break
                 val gap = haversineM(pts[i].first, pts[i].second, pts[j].first, pts[j].second)
                 val chord = gap.coerceAtLeast(1.0)
                 val ratio = traveled / chord
-                // Closed loop: long travel, return near start, highly non-linear.
-                if (gap < 45.0 && ratio >= 5.0) return true
-                // Clear side spur: medium travel, returns close, strong bulge.
-                if (traveled in 200.0..900.0 && gap < 35.0 && ratio >= 4.0) return true
+                // Closed loop / dead-end: long travel, return near start, highly non-linear.
+                if (gap < 40.0 && ratio >= 4.0) return true
+                // Clear side spur / cul-de-sac stub.
+                if (traveled in 120.0..1_200.0 && gap < 30.0 && ratio >= 3.2) return true
             }
         }
         return false
+    }
+
+    /**
+     * Reject alternates that reverse sharply more than the primary (typical dead-end
+     * turnaround) without offering a meaningfully different corridor.
+     */
+    internal fun hasDeadEndReversal(
+        candidate: OsrmRouteResult,
+        primary: OsrmRouteResult,
+    ): Boolean {
+        val candidateUTurns = countSharpReversals(candidate)
+        val primaryUTurns = countSharpReversals(primary)
+        if (candidateUTurns >= 2 && candidateUTurns > primaryUTurns + 1) {
+            // Only treat as dead-end when the path also fails to diverge usefully.
+            if (maxSampleGapM(candidate, primary) < 120.0) return true
+            if (candidate.distanceMeters > primary.distanceMeters * 1.15) return true
+        }
+        // Explicit U-turn maneuvers on short stubs.
+        val uTurnSteps = candidate.steps.count { step ->
+            val mod = step.modifier.lowercase()
+            val type = step.maneuverType.lowercase()
+            (mod.contains("uturn") || mod.contains("u-turn") ||
+                type.contains("uturn") || type.contains("u-turn")) &&
+                step.stepDistanceMeters < 180.0
+        }
+        return uTurnSteps >= 2 && candidateUTurns > primaryUTurns
+    }
+
+    /** Keep only alternates that are a real parallel corridor, not a noisy detour. */
+    internal fun isUsefulAlternateCorridor(
+        candidate: OsrmRouteResult,
+        primary: OsrmRouteResult,
+    ): Boolean {
+        val gap = maxSampleGapM(candidate, primary)
+        if (gap < 55.0) return false
+        val extraDist = candidate.distanceMeters - primary.distanceMeters
+        // Long extra distance without a wide corridor gap = irregular loop / dead-end.
+        if (extraDist > 600.0 && gap < 140.0) return false
+        if (extraDist > primary.distanceMeters * 0.28 && gap < 200.0) return false
+        return true
     }
 
     /**
@@ -485,28 +603,32 @@ object OsrmRouteClient {
         endLon: Double,
         vehicle: TripVehicle,
         useRoadNetwork: Boolean,
+        snapRadiusM: Int,
     ): OsrmRouteResult? {
         return when {
             // Bike already on car roads → keep alts on the same connected network.
             vehicle == TripVehicle.BIKE && useRoadNetwork -> {
                 fetchViaRoute(
                     startLat, startLon, viaLat, viaLon, endLat, endLon, TripVehicle.CAR,
+                    snapRadiusM,
                 )?.let { asBikeEta(it) }
             }
             vehicle == TripVehicle.BIKE -> {
                 // Prefer cycling; only accept a road alt if the cycle via is missing/bad.
                 val bikeVia = fetchViaRoute(
                     startLat, startLon, viaLat, viaLon, endLat, endLon, TripVehicle.BIKE,
+                    snapRadiusM,
                 )
                 if (bikeVia != null) bikeVia
                 else {
                     fetchViaRoute(
                         startLat, startLon, viaLat, viaLon, endLat, endLon, TripVehicle.CAR,
+                        snapRadiusM,
                     )?.let { asBikeEta(it) }
                 }
             }
             else -> fetchViaRoute(
-                startLat, startLon, viaLat, viaLon, endLat, endLon, vehicle,
+                startLat, startLon, viaLat, viaLon, endLat, endLon, vehicle, snapRadiusM,
             )
         }
     }
@@ -519,6 +641,7 @@ object OsrmRouteClient {
         endLat: Double,
         endLon: Double,
         vehicle: TripVehicle,
+        snapRadiusM: Int,
     ): OsrmRouteResult? {
         if (!viaLat.isFinite() || !viaLon.isFinite()) return null
         // Tight via snap for short parallel streets; slightly looser for long
@@ -529,7 +652,7 @@ object OsrmRouteClient {
             "https://routing.openstreetmap.de/${vehicle.serverPath}/route/v1/${vehicle.osrmProfile}/" +
                 "$startLon,$startLat;$viaLon,$viaLat;$endLon,$endLat" +
                 "?overview=full&geometries=geojson&steps=true" +
-                "&radiuses=$SNAP_RADIUS_M;$viaRadiusM;$SNAP_RADIUS_M"
+                "&radiuses=$snapRadiusM;$viaRadiusM;$snapRadiusM"
         return throttledGet(url) { body ->
             val parsed = json.decodeFromString<OsrmRouteResponse>(body)
             if (!parsed.code.equals("Ok", ignoreCase = true) || parsed.routes.isEmpty()) {
@@ -637,9 +760,18 @@ object OsrmRouteClient {
         startLon: Double,
         endLat: Double,
         endLon: Double,
+        snapRadiusM: Int,
     ): RouteSeed {
-        val bikeRoutes = fetchPrimaryRoutes(startLat, startLon, endLat, endLon, TripVehicle.BIKE)
-        val carRoutes = fetchPrimaryRoutes(startLat, startLon, endLat, endLon, TripVehicle.CAR)
+        // Bike + car primary in parallel — avoids waiting for two sequential OSRM calls.
+        val (bikeRoutes, carRoutes) = coroutineScope {
+            val bikeDeferred = async {
+                fetchPrimaryRoutes(startLat, startLon, endLat, endLon, TripVehicle.BIKE, snapRadiusM)
+            }
+            val carDeferred = async {
+                fetchPrimaryRoutes(startLat, startLon, endLat, endLon, TripVehicle.CAR, snapRadiusM)
+            }
+            bikeDeferred.await() to carDeferred.await()
+        }
         val picked = pickFeasibleBikeRoute(bikeRoutes.firstOrNull(), carRoutes.firstOrNull())
             ?: return RouteSeed(emptyList())
         val bestBike = bikeRoutes.firstOrNull()
@@ -693,23 +825,56 @@ object OsrmRouteClient {
         endLon: Double,
         vehicle: TripVehicle,
         useRadiuses: Boolean,
+        snapRadiusM: Int,
+        viaPoints: List<Pair<Double, Double>> = emptyList(),
+        lite: Boolean = false,
     ): List<OsrmRouteResult> {
+        val coordParts = buildList {
+            add("$startLon,$startLat")
+            viaPoints.forEach { (lat, lon) -> add("$lon,$lat") }
+            add("$endLon,$endLat")
+        }
         val radiusQuery = if (useRadiuses) {
-            "&radiuses=$SNAP_RADIUS_M;$SNAP_RADIUS_M"
+            "&radiuses=" + List(coordParts.size) { snapRadiusM }.joinToString(";")
         } else {
             ""
         }
+        // Lite: duration/distance only — much faster for SOS shortlist ranking.
+        val alternatives = when {
+            lite -> 0
+            viaPoints.isEmpty() -> OSRM_MAX_ALTERNATIVES
+            else -> 0
+        }
+        val overview = if (lite) "false" else "full"
+        val steps = if (lite) "false" else "true"
+        val geometries = if (lite) "" else "&geometries=geojson"
         val url =
             "https://routing.openstreetmap.de/${vehicle.serverPath}/route/v1/${vehicle.osrmProfile}/" +
-                "$startLon,$startLat;$endLon,$endLat" +
-                "?overview=full&geometries=geojson&steps=true&alternatives=$OSRM_MAX_ALTERNATIVES$radiusQuery"
+                coordParts.joinToString(";") +
+                "?overview=$overview$geometries&steps=$steps&alternatives=$alternatives$radiusQuery"
         return throttledGet(url) { body ->
+            if (lite) {
+                val parsed = json.decodeFromString<OsrmLiteRouteResponse>(body)
+                if (!parsed.code.equals("Ok", ignoreCase = true) || parsed.routes.isEmpty()) {
+                    return@throttledGet emptyList()
+                }
+                return@throttledGet parsed.routes.map { route ->
+                    OsrmRouteResult(
+                        points = listOf(startLat to startLon, endLat to endLon),
+                        durationSeconds = route.duration.coerceAtLeast(0.0),
+                        distanceMeters = route.distance.coerceAtLeast(0.0),
+                        steps = emptyList(),
+                        startSnapMeters = 0.0,
+                        endSnapMeters = 0.0,
+                    )
+                }.sortedBy { it.durationSeconds }
+            }
             val parsed = json.decodeFromString<OsrmRouteResponse>(body)
             if (!parsed.code.equals("Ok", ignoreCase = true) || parsed.routes.isEmpty()) {
                 return@throttledGet emptyList()
             }
             val startSnap = parsed.waypoints.getOrNull(0)?.distance?.coerceAtLeast(0.0) ?: 0.0
-            val endSnap = parsed.waypoints.getOrNull(1)?.distance?.coerceAtLeast(0.0) ?: 0.0
+            val endSnap = parsed.waypoints.lastOrNull()?.distance?.coerceAtLeast(0.0) ?: 0.0
             parsed.routes.mapNotNull { route ->
                 val points = route.geometry.coordinates.mapNotNull { coordinate ->
                     if (coordinate.size < 2) null else coordinate[1] to coordinate[0]
@@ -748,8 +913,9 @@ object OsrmRouteClient {
     }
 
     private suspend fun <T> throttledGet(url: String, parse: (String) -> T?): T? {
-        return requestMutex.withLock {
-            val waitMs = (400L - (System.currentTimeMillis() - lastRequestAtMs)).coerceAtLeast(0L)
+        return requestSemaphore.withPermit {
+            val waitMs = (MIN_REQUEST_GAP_MS - (System.currentTimeMillis() - lastRequestAtMs))
+                .coerceAtLeast(0L)
             if (waitMs > 0L) delay(waitMs)
             try {
                 val body = http.get(url) {
@@ -831,6 +997,19 @@ private data class OsrmRouteResponse(
     val code: String = "",
     val routes: List<OsrmRoute> = emptyList(),
     val waypoints: List<OsrmWaypoint> = emptyList(),
+)
+
+/** Duration/distance only — used when overview=false (geometry may be absent or a string). */
+@Serializable
+private data class OsrmLiteRouteResponse(
+    val code: String = "",
+    val routes: List<OsrmLiteRoute> = emptyList(),
+)
+
+@Serializable
+private data class OsrmLiteRoute(
+    val duration: Double = 0.0,
+    val distance: Double = 0.0,
 )
 
 @Serializable

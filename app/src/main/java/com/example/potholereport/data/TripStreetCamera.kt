@@ -29,7 +29,7 @@ object TripStreetCamera {
     const val SPEED_FAST_KMH = 70.0
 
     /** Soft zoom lerp per continuous follow update (0–1). Lower = smoother. */
-    const val ZOOM_SMOOTH = 0.16
+    const val ZOOM_SMOOTH = 0.14
 
     /**
      * Duration of the Navigate → street-view zoom-in transition (ms).
@@ -38,16 +38,52 @@ object TripStreetCamera {
     const val INTRO_ZOOM_MS = 1400L
 
     /**
-     * Look-ahead along bearing (meters). Kept small — vehicle bottom placement
-     * primarily uses [VEHICLE_BOTTOM_OFFSET_FRAC] screen offset.
+     * Look-ahead along bearing (meters) while moving — frames more road ahead.
+     * Zero when nearly stopped ([HEADING_LOCK_MIN_SPEED_MPS]).
      */
-    const val LOOKAHEAD_M = 0.0
+    const val LOOKAHEAD_M = 18.0
+
+    /** MapLibre street-follow ease duration (ms). */
+    const val STREET_ML_EASE_MS = 360
 
     /**
      * Street follow: draw the map center this fraction of the view height *below*
      * the screen midpoint so the vehicle sits near the bottom (road ahead on top).
      */
-    const val VEHICLE_BOTTOM_OFFSET_FRAC = 0.30f
+    const val VEHICLE_BOTTOM_OFFSET_FRAC = 0.40f
+
+    /**
+     * Street / Play follow while the bottom Report (+ Video) chrome is visible —
+     * slightly less offset so the cursor sits above the FABs (no overlap).
+     */
+    const val VEHICLE_BOTTOM_OFFSET_FRAC_WITH_NAV_CHROME = 0.30f
+
+    /** Bottom inset (dp) under the MapLibre focal point so the cursor clears Report FAB. */
+    const val NAV_CHROME_BOTTOM_CLEARANCE_DP = 118f
+
+    /**
+     * Play mode: sit the vehicle even lower so more road fills the top of the
+     * frame (stronger “riding on the map” POV while tilted).
+     */
+    const val PLAY_VEHICLE_BOTTOM_OFFSET_FRAC = 0.48f
+
+    /** Play + nav chrome: keep cursor clearly above Report / Video FABs. */
+    const val PLAY_VEHICLE_BOTTOM_OFFSET_FRAC_WITH_NAV_CHROME = 0.30f
+
+    /** MapLibre ease duration for Play tilt/zoom updates (ms) — cinematic, not jumpy. */
+    const val PLAY_CAMERA_EASE_MS = 720
+
+    /** MapLibre ease when settling to halt (flat 0°). */
+    const val PLAY_HALT_CAMERA_EASE_MS = 1_100
+
+    /**
+     * MapLibre Android hard-caps camera pitch at 60°
+     * (`MapLibreConstants.MAXIMUM_PITCH`). Play mode uses this ceiling.
+     */
+    const val MAPLIBRE_MAX_PITCH_DEG = 60.0
+
+    /** Allow overzoom so ~7 ft play POV is reachable (default map max was 20). */
+    const val PLAY_ML_MAX_ZOOM = 22.0
 
     /**
      * Below this speed (m/s, ~7 km/h) do not rotate the map — freezes orientation
@@ -71,24 +107,208 @@ object TripStreetCamera {
     const val TILT_DEG = 48f
     const val TILT_SCALE = 1.38f
 
+    // --- Play mode (game POV): ~15 ft at crawl → ~7 ft as speed builds ---
+
+    /**
+     * OSM play zoom. Higher = closer to the road (roads look wider).
+     * REST = halted top-down; 15 ft / 7 ft while moving.
+     */
+    const val PLAY_ZOOM_REST = 20.5
+    const val PLAY_ZOOM_15FT = 21.55
+    const val PLAY_ZOOM_7FT = 22.65
+
+    /** @deprecated Use [PLAY_ZOOM_15FT]. */
+    const val PLAY_ZOOM_20FT = PLAY_ZOOM_15FT
+    /** @deprecated Use [PLAY_ZOOM_7FT]. */
+    const val PLAY_ZOOM_10FT = PLAY_ZOOM_7FT
+    /** @deprecated Use [PLAY_ZOOM_7FT]. */
+    const val PLAY_ZOOM_MOVING = PLAY_ZOOM_7FT
+    /** @deprecated */
+    const val PLAY_ZOOM_SLOW = PLAY_ZOOM_REST
+    /** @deprecated */
+    const val PLAY_ZOOM_MODERATE = PLAY_ZOOM_15FT
+    /** @deprecated */
+    const val PLAY_ZOOM_FAST = PLAY_ZOOM_7FT
+
+    /** MapLibre play zoom (scale differs from osmdroid). */
+    const val PLAY_ML_ZOOM_REST = 16.6
+    /** ~15 ft overhead while rolling slowly (~5 km/h). */
+    const val PLAY_ML_ZOOM_15FT = 18.55
+    /** ~7 ft dive — max widen / riding feel (~10 km/h+). */
+    const val PLAY_ML_ZOOM_7FT = 20.55
+
+    /** @deprecated Use [PLAY_ML_ZOOM_15FT]. */
+    const val PLAY_ML_ZOOM_20FT = PLAY_ML_ZOOM_15FT
+    /** @deprecated Use [PLAY_ML_ZOOM_7FT]. */
+    const val PLAY_ML_ZOOM_10FT = PLAY_ML_ZOOM_7FT
+    /** @deprecated */
+    const val PLAY_ML_ZOOM_MOVING = PLAY_ML_ZOOM_7FT
+    /** @deprecated */
+    const val PLAY_ML_ZOOM_SLOW = PLAY_ML_ZOOM_REST
+    /** @deprecated */
+    const val PLAY_ML_ZOOM_MODERATE = PLAY_ML_ZOOM_15FT
+    /** @deprecated */
+    const val PLAY_ML_ZOOM_FAST = PLAY_ML_ZOOM_7FT
+
+    /**
+     * MapLibre tilt: halted → 0°; moving 15 ft → 7 ft dive.
+     * Max is [MAPLIBRE_MAX_PITCH_DEG] (SDK hard ceiling — values above 60° are ignored).
+     */
+    const val PLAY_TILT_MIN_DEG = 0.0
+    /** Game tilt as soon as rolling (15 ft POV) — not flat. */
+    const val PLAY_TILT_15FT_DEG = 48.0
+    /** Max dive tilt at 7 ft — MapLibre absolute ceiling. */
+    const val PLAY_TILT_7FT_DEG = MAPLIBRE_MAX_PITCH_DEG
+    const val PLAY_TILT_MAX_DEG = PLAY_TILT_7FT_DEG
+
+    /** @deprecated Use [PLAY_TILT_15FT_DEG]. */
+    const val PLAY_TILT_20FT_DEG = PLAY_TILT_15FT_DEG
+    /** @deprecated Use [PLAY_TILT_7FT_DEG]. */
+    const val PLAY_TILT_10FT_DEG = PLAY_TILT_7FT_DEG
+
+    /** @deprecated Prefer intensity/dive helpers. */
+    const val PLAY_ML_TILT_SLOW = 0.0
+    /** @deprecated */
+    const val PLAY_ML_TILT_MODERATE = PLAY_TILT_15FT_DEG
+    /** @deprecated */
+    const val PLAY_ML_TILT_FAST = PLAY_TILT_MAX_DEG
+
+    /** Street-follow MapLibre zoom bands (flat). Scale differs from osmdroid. */
+    const val STREET_ML_ZOOM_SLOW = 16.8
+    const val STREET_ML_ZOOM_MODERATE = 17.6
+    const val STREET_ML_ZOOM_FAST = 18.4
+
+    /** @deprecated Prefer [mapLibreZoomForSpeedMps]; mid-band default. */
+    const val STREET_ML_ZOOM = STREET_ML_ZOOM_MODERATE
+
+    /** Map overview MapLibre zoom. */
+    const val MAP_ML_ZOOM = 15.5
+
     /**
      * Continuous street zoom from GPS speed (m/s).
      * 0 → [ZOOM_SLOW], 30 km/h → [ZOOM_MODERATE], 70+ km/h → [ZOOM_FAST].
      */
     fun zoomForSpeedMps(speedMps: Float?): Double {
-        val kmh = mpsToKmh(speedMps)
-        return when {
-            kmh <= 0.0 -> ZOOM_SLOW
-            kmh < SPEED_SLOW_KMH -> {
-                val t = kmh / SPEED_SLOW_KMH
-                ZOOM_SLOW + t * (ZOOM_MODERATE - ZOOM_SLOW)
-            }
-            kmh < SPEED_FAST_KMH -> {
-                val t = (kmh - SPEED_SLOW_KMH) / (SPEED_FAST_KMH - SPEED_SLOW_KMH)
-                ZOOM_MODERATE + t * (ZOOM_FAST - ZOOM_MODERATE)
-            }
-            else -> ZOOM_FAST
-        }
+        return lerpZoomForSpeed(
+            speedMps,
+            ZOOM_SLOW,
+            ZOOM_MODERATE,
+            ZOOM_FAST,
+        )
+    }
+
+    /** MapLibre street zoom from the same speed bands as [zoomForSpeedMps]. */
+    fun mapLibreZoomForSpeedMps(speedMps: Float?): Double {
+        return lerpZoomForSpeed(
+            speedMps,
+            STREET_ML_ZOOM_SLOW,
+            STREET_ML_ZOOM_MODERATE,
+            STREET_ML_ZOOM_FAST,
+        )
+    }
+
+    /**
+     * Look-ahead meters while street-following. Zero when speed is below the
+     * heading-lock floor so the pin doesn't drift while stopped.
+     */
+    fun lookAheadMetersForSpeed(speedMps: Float?): Double {
+        val speed = speedMps?.takeIf { it.isFinite() && it >= HEADING_LOCK_MIN_SPEED_MPS }
+            ?: return 0.0
+        val kmh = speed * 3.6
+        val t = ((kmh - SPEED_SLOW_KMH * 0.2) / (SPEED_FAST_KMH - SPEED_SLOW_KMH * 0.2))
+            .coerceIn(0.0, 1.0)
+        return LOOKAHEAD_M * (0.45 + 0.55 * t)
+    }
+
+    /** Soft-lerp current zoom toward a speed target (MapLibre / osmdroid). */
+    fun smoothZoomToward(current: Double, target: Double, factor: Double = ZOOM_SMOOTH): Double {
+        if (!current.isFinite()) return target
+        if (!target.isFinite()) return current
+        return current + (target - current) * factor.coerceIn(0.0, 1.0)
+    }
+
+    /**
+     * Play OSM zoom from motion.
+     * Halted → [PLAY_ZOOM_REST]; moving dive 0 → [PLAY_ZOOM_15FT]; dive 1 → [PLAY_ZOOM_7FT].
+     */
+    fun playZoomForIntensity(intensity: Float, moving: Boolean = intensity > 0.001f): Double {
+        if (!moving) return PLAY_ZOOM_REST
+        val t = intensity.coerceIn(0f, 1f).toDouble()
+        return PLAY_ZOOM_15FT + t * (PLAY_ZOOM_7FT - PLAY_ZOOM_15FT)
+    }
+
+    /** Play MapLibre zoom from motion (15 ft → 7 ft while rolling). */
+    fun playMapLibreZoomForIntensity(intensity: Float, moving: Boolean = intensity > 0.001f): Double {
+        if (!moving) return PLAY_ML_ZOOM_REST
+        val t = intensity.coerceIn(0f, 1f).toDouble()
+        return PLAY_ML_ZOOM_15FT + t * (PLAY_ML_ZOOM_7FT - PLAY_ML_ZOOM_15FT)
+    }
+
+    /**
+     * Play MapLibre tilt: 0° halted; as soon as moving use ≥ [PLAY_TILT_15FT_DEG],
+     * diving to [PLAY_TILT_7FT_DEG] (SDK max 60°) with speed/accel.
+     */
+    fun playMapLibreTiltForIntensity(intensity: Float, moving: Boolean = intensity > 0.001f): Double {
+        if (!moving) return PLAY_TILT_MIN_DEG
+        val t = intensity.coerceIn(0f, 1f).toDouble()
+        return PLAY_TILT_15FT_DEG + t * (PLAY_TILT_7FT_DEG - PLAY_TILT_15FT_DEG)
+    }
+
+    /**
+     * Extra look-ahead in Play so the tilted POV frames more road ahead
+     * (stronger riding feel as dive increases).
+     */
+    fun playLookAheadMeters(speedMps: Float?, dive: Float): Double {
+        val base = lookAheadMetersForSpeed(speedMps)
+        if (base <= 0.0) return 0.0
+        val t = dive.coerceIn(0f, 1f).toDouble()
+        return base * (1.20 + 0.45 * t)
+    }
+
+    fun playZoomForSnapshot(motion: TripPlayMotionSnapshot): Double =
+        playZoomForIntensity(motion.dive, motion.moving)
+
+    fun playMapLibreZoomForSnapshot(motion: TripPlayMotionSnapshot): Double =
+        playMapLibreZoomForIntensity(motion.dive, motion.moving)
+
+    fun playMapLibreTiltForSnapshot(motion: TripPlayMotionSnapshot): Double =
+        playMapLibreTiltForIntensity(motion.dive, motion.moving)
+
+    /**
+     * One-shot play zoom from speed alone (no accel history). Prefer
+     * [TripPlayMotionTracker] + [playZoomForSnapshot] while navigating.
+     */
+    fun playZoomForSpeedMps(speedMps: Float?): Double {
+        val speed = speedMps?.takeIf { it.isFinite() && it >= 0f } ?: 0f
+        val (moving, dive) = TripPlayMotionTracker.nextDive(
+            currentDive = 0f,
+            wasMoving = false,
+            speedMps = speed,
+            accelMps2 = 0f,
+        )
+        return playZoomForIntensity(dive, moving)
+    }
+
+    fun playMapLibreZoomForSpeedMps(speedMps: Float?): Double {
+        val speed = speedMps?.takeIf { it.isFinite() && it >= 0f } ?: 0f
+        val (moving, dive) = TripPlayMotionTracker.nextDive(
+            currentDive = 0f,
+            wasMoving = false,
+            speedMps = speed,
+            accelMps2 = 0f,
+        )
+        return playMapLibreZoomForIntensity(dive, moving)
+    }
+
+    fun playMapLibreTiltForSpeedMps(speedMps: Float?): Double {
+        val speed = speedMps?.takeIf { it.isFinite() && it >= 0f } ?: 0f
+        val (moving, dive) = TripPlayMotionTracker.nextDive(
+            currentDive = 0f,
+            wasMoving = false,
+            speedMps = speed,
+            accelMps2 = 0f,
+        )
+        return playMapLibreTiltForIntensity(dive, moving)
     }
 
     /**
@@ -105,6 +325,27 @@ object TripStreetCamera {
                 (0.45 + t * 0.55).toFloat()
             }
             else -> 1f
+        }
+    }
+
+    private fun lerpZoomForSpeed(
+        speedMps: Float?,
+        slow: Double,
+        moderate: Double,
+        fast: Double,
+    ): Double {
+        val kmh = mpsToKmh(speedMps)
+        return when {
+            kmh <= 0.0 -> slow
+            kmh < SPEED_SLOW_KMH -> {
+                val t = kmh / SPEED_SLOW_KMH
+                slow + t * (moderate - slow)
+            }
+            kmh < SPEED_FAST_KMH -> {
+                val t = (kmh - SPEED_SLOW_KMH) / (SPEED_FAST_KMH - SPEED_SLOW_KMH)
+                moderate + t * (fast - moderate)
+            }
+            else -> fast
         }
     }
 

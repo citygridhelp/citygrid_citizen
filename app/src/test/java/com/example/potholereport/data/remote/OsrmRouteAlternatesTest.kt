@@ -284,4 +284,83 @@ class OsrmRouteAlternatesTest {
         )
         assertTrue(OsrmRouteClient.countSharpReversals(withUTurn) >= 1)
     }
+
+    @Test
+    fun isUsefulAlternateCorridor_rejectsLongDetourWithSmallGap() {
+        val primary = route(
+            listOf(start, 12.94 to 77.67, end),
+            12_000.0,
+        )
+        val irregular = route(
+            listOf(start, 12.941 to 77.6705, end),
+            13_100.0,
+        )
+        assertFalse(OsrmRouteClient.isUsefulAlternateCorridor(irregular, primary))
+    }
+
+    @Test
+    fun isUsefulAlternateCorridor_keepsParallelCorridor() {
+        val primary = route(
+            listOf(start, 12.94 to 77.67, end),
+            12_000.0,
+        )
+        val parallel = route(
+            listOf(start, 12.94 to 77.69, end),
+            12_600.0,
+        )
+        assertTrue(OsrmRouteClient.isUsefulAlternateCorridor(parallel, primary))
+    }
+
+    @Test
+    fun hasDeadEndReversal_rejectsExtraShortUTurns() {
+        val primary = route(
+            listOf(start, 12.94 to 77.67, end),
+            12_000.0,
+        )
+        val deadEnd = route(
+            listOf(start, 12.94 to 77.6702, end),
+            14_000.0,
+            steps = listOf(
+                OsrmRouteStep("Make a U-turn", 80.0, 15.0, "turn", "uturn", ""),
+                OsrmRouteStep("Make a U-turn", 90.0, 18.0, "turn", "uturn", ""),
+                OsrmRouteStep("Continue", 200.0, 40.0, "continue", "", "Main"),
+            ),
+        )
+        assertTrue(OsrmRouteClient.hasDeadEndReversal(deadEnd, primary))
+    }
+
+    @Test
+    fun passesRouteQuality_rejectsSpurEvenWhenLightFilterRequested() {
+        val primary = route(
+            points = (0..15).map { i ->
+                (12.90 + i * 0.005) to (77.66 + i * 0.0015)
+            },
+            distanceM = 10_000.0,
+            durationSec = 1_800.0,
+        )
+        val spur = route(
+            points = listOf(
+                12.9000 to 77.6600,
+                12.9020 to 77.6600,
+                12.9040 to 77.6600,
+                12.9060 to 77.6600,
+                12.9080 to 77.6600,
+                12.9060 to 77.66005,
+                12.9040 to 77.6601,
+                12.9020 to 77.6601,
+                12.9002 to 77.66005,
+                12.9100 to 77.6700,
+                12.9800 to 77.6800,
+            ),
+            distanceM = 11_000.0,
+            durationSec = 2_000.0,
+        )
+        assertFalse(
+            OsrmRouteClient.passesRouteQuality(
+                spur, primary,
+                start.first, start.second, end.first, end.second,
+                geometryStrict = false,
+            ),
+        )
+    }
 }

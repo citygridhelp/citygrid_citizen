@@ -1,5 +1,14 @@
 package com.example.potholereport.ui.home
 
+import com.example.potholereport.ui.theme.CitizenInk
+import com.example.potholereport.ui.theme.CitizenPrivacyCopy
+import com.example.potholereport.ui.theme.CitizenRadius
+import com.example.potholereport.ui.theme.CitizenSpace
+import com.example.potholereport.ui.theme.CitizenType
+import com.example.potholereport.ui.theme.CitizenIcon
+import com.example.potholereport.ui.theme.CitizenSelection
+import com.example.potholereport.ui.theme.CitizenBorder
+
 import android.util.Patterns
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
@@ -184,13 +193,13 @@ fun ReportSignInModal(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = CitizenSpace.Lg)
                 .clickable(
                     indication = null,
                     interactionSource = remember { MutableInteractionSource() },
                     onClick = { /* consume — do not dismiss */ },
                 ),
-            shape = RoundedCornerShape(0.dp),
+            shape = CitizenRadius.Card,
             color = Color.White,
             border = BorderStroke(1.dp, ModalDark),
         ) {
@@ -210,7 +219,7 @@ fun ReportSignInModal(
                             tint = Color.White,
                             modifier = Modifier.size(22.dp),
                         )
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             "SIGN IN",
                             color = Color.White,
@@ -263,15 +272,15 @@ fun ReportSignInModal(
                 ) {
                     if (modalTab == 0) {
                         Text(
-                            text = "Sign in to see your own report history and resolution rate. Your reports remain anonymous to other users.",
-                            color = Color(0xFF6B7280),
+                            text = "Sign in to see your own report history and resolution rate. ${CitizenPrivacyCopy.SHORT}",
+                            color = CitizenInk.Helper,
                             fontSize = 12.sp,
                             lineHeight = 16.sp,
                         )
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
-                        Text("EMAIL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
-                        Spacer(Modifier.height(4.dp))
+                        Text("EMAIL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CitizenInk.Helper)
+                        Spacer(modifier = Modifier.height(4.dp))
                         OutlinedTextField(
                             value = signInEmail,
                             onValueChange = {
@@ -279,19 +288,19 @@ fun ReportSignInModal(
                                 emailError = null
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("you@example.com", color = Color(0xFF9CA3AF)) },
+                            placeholder = { Text("you@example.com", color = CitizenInk.Disabled) },
                             singleLine = true,
                             enabled = !submitting,
                             isError = emailError != null,
-                            supportingText = emailError?.let { { Text(it, color = Color(0xFFB91C1C)) } },
+                            supportingText = emailError?.let { { Text(it, color = CitizenInk.Error) } },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                            shape = RoundedCornerShape(0.dp),
+                            shape = CitizenRadius.Card,
                             colors = modalFieldColors,
                         )
 
-                        Spacer(Modifier.height(12.dp))
-                        Text("PASSWORD", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Md))
+                        Text("PASSWORD", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CitizenInk.Helper)
+                        Spacer(modifier = Modifier.height(4.dp))
                         OutlinedTextField(
                             value = signInPassword,
                             onValueChange = {
@@ -307,18 +316,18 @@ fun ReportSignInModal(
                                     Icon(
                                         imageVector = if (passwordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
                                         contentDescription = if (passwordVisible) "Hide password" else "Show password",
-                                        tint = Color(0xFF6B7280),
+                                        tint = CitizenInk.Helper,
                                     )
                                 }
                             },
                             isError = passwordError != null,
-                            supportingText = passwordError?.let { { Text(it, color = Color(0xFFB91C1C)) } },
+                            supportingText = passwordError?.let { { Text(it, color = CitizenInk.Error) } },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                            shape = RoundedCornerShape(0.dp),
+                            shape = CitizenRadius.Card,
                             colors = modalFieldColors,
                         )
 
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Lg))
                         Button(
                             onClick = {
                                 var ok = true
@@ -356,36 +365,36 @@ fun ReportSignInModal(
                             },
                             enabled = !submitting,
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(0.dp),
+                            shape = CitizenRadius.Card,
                             colors = ButtonDefaults.buttonColors(containerColor = ModalDark, contentColor = Color.White),
                         ) {
                             Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = if (submitting) "SIGNING IN..." else "SIGN IN",
                                 fontWeight = FontWeight.Black,
                             )
                         }
 
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
                             "Sign-in is verified against your registered account.",
                             modifier = Modifier.fillMaxWidth(),
-                            color = Color(0xFF9CA3AF),
+                            color = CitizenInk.Disabled,
                             fontSize = 10.sp,
                         )
                     } else {
                         val fieldsLocked = submitting || verificationRequested
                         Text(
                             text = "Create your account and verify your email with the code we send you. Your name is stored securely and is never shown to other users.",
-                            color = Color(0xFF6B7280),
+                            color = CitizenInk.Helper,
                             fontSize = 12.sp,
                             lineHeight = 16.sp,
                         )
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
-                        Text("FULL NAME", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
-                        Spacer(Modifier.height(4.dp))
+                        Text("FULL NAME", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CitizenInk.Helper)
+                        Spacer(modifier = Modifier.height(4.dp))
                         OutlinedTextField(
                             value = signupFullName,
                             onValueChange = {
@@ -393,18 +402,18 @@ fun ReportSignInModal(
                                 nameError = null
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Your full name", color = Color(0xFF9CA3AF)) },
+                            placeholder = { Text("Your full name", color = CitizenInk.Disabled) },
                             singleLine = true,
                             enabled = !fieldsLocked,
                             isError = nameError != null,
-                            supportingText = nameError?.let { { Text(it, color = Color(0xFFB91C1C)) } },
-                            shape = RoundedCornerShape(0.dp),
+                            supportingText = nameError?.let { { Text(it, color = CitizenInk.Error) } },
+                            shape = CitizenRadius.Card,
                             colors = modalFieldColors,
                         )
 
-                        Spacer(Modifier.height(12.dp))
-                        Text("EMAIL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Md))
+                        Text("EMAIL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CitizenInk.Helper)
+                        Spacer(modifier = Modifier.height(4.dp))
                         OutlinedTextField(
                             value = signupEmail,
                             onValueChange = {
@@ -412,19 +421,19 @@ fun ReportSignInModal(
                                 emailError = null
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("you@example.com", color = Color(0xFF9CA3AF)) },
+                            placeholder = { Text("you@example.com", color = CitizenInk.Disabled) },
                             singleLine = true,
                             enabled = !fieldsLocked,
                             isError = emailError != null,
-                            supportingText = emailError?.let { { Text(it, color = Color(0xFFB91C1C)) } },
+                            supportingText = emailError?.let { { Text(it, color = CitizenInk.Error) } },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                            shape = RoundedCornerShape(0.dp),
+                            shape = CitizenRadius.Card,
                             colors = modalFieldColors,
                         )
 
-                        Spacer(Modifier.height(12.dp))
-                        Text("PASSWORD", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Md))
+                        Text("PASSWORD", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CitizenInk.Helper)
+                        Spacer(modifier = Modifier.height(4.dp))
                         OutlinedTextField(
                             value = signupPassword,
                             onValueChange = {
@@ -440,7 +449,7 @@ fun ReportSignInModal(
                                     Icon(
                                         imageVector = if (passwordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
                                         contentDescription = if (passwordVisible) "Hide password" else "Show password",
-                                        tint = Color(0xFF6B7280),
+                                        tint = CitizenInk.Helper,
                                     )
                                 }
                             },
@@ -449,17 +458,17 @@ fun ReportSignInModal(
                                 Text(
                                     text = passwordError
                                         ?: "Use 6+ chars with uppercase, lowercase, a number and a symbol.",
-                                    color = if (passwordError != null) Color(0xFFB91C1C) else Color(0xFF6B7280),
+                                    color = if (passwordError != null) CitizenInk.Error else CitizenInk.Helper,
                                 )
                             },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                            shape = RoundedCornerShape(0.dp),
+                            shape = CitizenRadius.Card,
                             colors = modalFieldColors,
                         )
 
-                        Spacer(Modifier.height(12.dp))
-                        Text("CONFIRM PASSWORD", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6B7280))
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Md))
+                        Text("CONFIRM PASSWORD", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CitizenInk.Helper)
+                        Spacer(modifier = Modifier.height(4.dp))
                         OutlinedTextField(
                             value = confirmPassword,
                             onValueChange = {
@@ -475,18 +484,18 @@ fun ReportSignInModal(
                                     Icon(
                                         imageVector = if (confirmPasswordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
                                         contentDescription = if (confirmPasswordVisible) "Hide password" else "Show password",
-                                        tint = Color(0xFF6B7280),
+                                        tint = CitizenInk.Helper,
                                     )
                                 }
                             },
                             isError = confirmError != null,
-                            supportingText = confirmError?.let { { Text(it, color = Color(0xFFB91C1C)) } },
+                            supportingText = confirmError?.let { { Text(it, color = CitizenInk.Error) } },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                            shape = RoundedCornerShape(0.dp),
+                            shape = CitizenRadius.Card,
                             colors = modalFieldColors,
                         )
 
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(CitizenSpace.Lg))
                         Button(
                             onClick = {
                                 var ok = true
@@ -534,11 +543,11 @@ fun ReportSignInModal(
                             },
                             enabled = !submitting,
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(0.dp),
+                            shape = CitizenRadius.Card,
                             colors = ButtonDefaults.buttonColors(containerColor = ModalDark, contentColor = Color.White),
                         ) {
                             Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = when {
                                     submitting && !verificationRequested -> "SENDING..."
@@ -550,14 +559,14 @@ fun ReportSignInModal(
                         }
 
                         if (verificationRequested) {
-                            Spacer(Modifier.height(14.dp))
+                            Spacer(modifier = Modifier.height(14.dp))
                             Text(
                                 "VERIFICATION CODE FROM EMAIL",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF6B7280),
+                                color = CitizenInk.Helper,
                             )
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
                             OutlinedTextField(
                                 value = code,
                                 onValueChange = {
@@ -565,16 +574,16 @@ fun ReportSignInModal(
                                     codeError = null
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("123456", color = Color(0xFF9CA3AF)) },
+                                placeholder = { Text("123456", color = CitizenInk.Disabled) },
                                 singleLine = true,
                                 enabled = !submitting,
                                 isError = codeError != null,
-                                supportingText = codeError?.let { { Text(it, color = Color(0xFFB91C1C)) } },
+                                supportingText = codeError?.let { { Text(it, color = CitizenInk.Error) } },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                shape = RoundedCornerShape(0.dp),
+                                shape = CitizenRadius.Card,
                                 colors = modalFieldColors,
                             )
-                            Spacer(Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
                             Button(
                                 onClick = {
                                     if (code.trim().length < 4) {
@@ -605,11 +614,11 @@ fun ReportSignInModal(
                                 },
                                 enabled = !submitting,
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(0.dp),
+                                shape = CitizenRadius.Card,
                                 colors = ButtonDefaults.buttonColors(containerColor = ModalDark, contentColor = Color.White),
                             ) {
                                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = if (submitting) "VERIFYING..." else "VERIFY & SIGN IN",
                                     fontWeight = FontWeight.Black,
@@ -618,7 +627,7 @@ fun ReportSignInModal(
                         }
 
                         infoMessage?.let {
-                            Spacer(Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
                             Text(
                                 text = it,
                                 modifier = Modifier.fillMaxWidth(),
@@ -648,7 +657,7 @@ private fun ModalAuthTab(
             Text(
                 title,
                 fontWeight = FontWeight.Bold,
-                color = if (selected) ModalDark else Color.Gray,
+                color = if (selected) ModalDark else CitizenInk.Disabled,
             )
         }
         Box(

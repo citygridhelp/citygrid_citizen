@@ -11,6 +11,7 @@ data class PlaceAddressFields(
     val subLocality: String? = null,
     val locality: String? = null,
     val subAdminArea: String? = null,
+    val adminArea: String? = null,
     val addressLines: List<String> = emptyList(),
 ) {
     companion object {
@@ -27,6 +28,7 @@ data class PlaceAddressFields(
                 subLocality = address.subLocality,
                 locality = address.locality,
                 subAdminArea = address.subAdminArea,
+                adminArea = address.adminArea,
                 addressLines = lines,
             )
         }
@@ -35,7 +37,8 @@ data class PlaceAddressFields(
 
 /**
  * Builds trip search labels that lead with a recognizable place / society / institution
- * name, then a short area context — not a building number, tower label, or bare locality.
+ * name, then a short area context — Google Maps style, not admin jargon
+ * (e.g. never "Bangalore Division").
  */
 object TripPlaceLabels {
 
@@ -48,6 +51,30 @@ object TripPlaceLabels {
     private val buildingLabelRegex = Regex(
         "(?i)^(building|bldg\\.?|blk\\.?|block|tower|wing|unit|flat|floor|door|" +
             "house|villa|apt\\.?|apartment|shop|plot|sy\\.?|survey|no\\.?)\\s*[#]?[\\dA-Za-z].*",
+    )
+
+    /**
+     * Android / OSM geocoders often put railway or revenue units in [subAdminArea]
+     * (e.g. "Bangalore Division", "Bengaluru Urban"). Those are not citizen-facing place names.
+     */
+    private val administrativeUnitRegex = Regex(
+        "(?i)\\b(" +
+            "division|district|taluk|taluka|tehsil|mandal|zone|circle|" +
+            "corporation|municipality|municipal\\s+corporation|nagar\\s+nigam|" +
+            "revenue(\\s+district)?|sub[- ]?division|sub[- ]?district|range|" +
+            "commissionerate|police\\s+district|urban\\s+district|rural\\s+district" +
+            ")\\b",
+    )
+
+    /** Map noisy locality / admin strings to the metro name we show in product UI. */
+    private val metroCanonicalRules: List<Pair<Regex, String>> = listOf(
+        Regex("(?i).*\\b(bengaluru|bangalore)\\b.*") to "Bengaluru",
+        Regex("(?i).*\\b(mumbai|bombay)\\b.*") to "Mumbai",
+        Regex("(?i).*\\b(delhi|new delhi)\\b.*") to "Delhi",
+        Regex("(?i).*\\bchennai\\b.*|.*\\bmadras\\b.*") to "Chennai",
+        Regex("(?i).*\\bhyderabad\\b.*") to "Hyderabad",
+        Regex("(?i).*\\bkolkata\\b.*|.*\\bcalcutta\\b.*") to "Kolkata",
+        Regex("(?i).*\\bpune\\b.*") to "Pune",
     )
 
     fun formatSearchResult(address: Address, queryHint: String = ""): String =
@@ -63,14 +90,34 @@ object TripPlaceLabels {
         return if (subtitle.isBlank()) title else "$title · $subtitle"
     }
 
+    /**
+     * City-picker / change-city search: a clean metro or place name (never "BANGALORE DIVISION").
+     */
+    fun formatCitySearchLabel(fields: PlaceAddressFields): String {
+        val locality = cleanAreaPart(fields.locality)
+        if (locality != null) return locality
+        val fromAdmin = cleanAreaPart(fields.subAdminArea)
+        if (fromAdmin != null) return fromAdmin
+        val sub = cleanAreaPart(fields.subLocality)
+        if (sub != null) return sub
+        fields.featureName?.trim()?.takeIf { isPlaceNameCandidate(it) }?.let { return it }
+        val line = fields.addressLines.firstOrNull()
+            ?.split(',')
+            ?.mapNotNull { cleanAreaPart(it) }
+            ?.firstOrNull()
+        return line ?: "Unknown place"
+    }
+
+    fun formatCitySearchLabel(address: Address): String =
+        formatCitySearchLabel(PlaceAddressFields.from(address))
+
     fun pickPlaceTitle(fields: PlaceAddressFields, queryHint: String = ""): String {
         val queryTokens = tokenizeQuery(queryHint)
         val areaNorms = listOfNotNull(
-            fields.subLocality,
-            fields.locality,
-            fields.subAdminArea,
-        ).map { it.trim().lowercase(Locale.US) }
-            .filter { it.isNotEmpty() }
+            cleanAreaPart(fields.subLocality),
+            cleanAreaPart(fields.locality),
+            cleanAreaPart(fields.subAdminArea),
+        ).map { it.lowercase(Locale.US) }
             .toSet()
 
         val candidates = buildList {
@@ -82,6 +129,14 @@ object TripPlaceLabels {
             fields.thoroughfare?.trim()?.let { add(it) }
             fields.subLocality?.trim()?.let { add(it) }
         }.distinct()
+            .mapNotNull { candidate ->
+                // Prefer cleaned form when the segment is an admin wrapper that still maps to a city.
+                when {
+                    isAdministrativeUnitName(candidate) -> cleanAreaPart(candidate)
+                    else -> candidate
+                }
+            }
+            .distinct()
 
         val named = candidates.filter { isPlaceNameCandidate(it) }
         val placeNamed = named.filter { candidate ->
@@ -96,13 +151,11 @@ object TripPlaceLabels {
                 }
             }
 
-            // Prefer society / POI names that match the distinctive search words.
             val placeMatch = placeNamed
                 .filter { scoreAgainstQuery(it, distinctiveTokens.ifEmpty { queryTokens }) > 0 }
                 .maxByOrNull { scoreAgainstQuery(it, queryTokens) }
             if (placeMatch != null) return placeMatch
 
-            // Strong non-area match even if some query tokens are area words.
             val strong = named
                 .filter { candidate ->
                     val n = candidate.lowercase(Locale.US)
@@ -115,7 +168,6 @@ object TripPlaceLabels {
                 return strong
             }
 
-            // Geocoder often returns "Building 41" / locality only — keep the user's place name.
             if (distinctiveTokens.isNotEmpty()) {
                 titleFromQuery(queryHint)?.let { return it }
             }
@@ -129,40 +181,44 @@ object TripPlaceLabels {
             val cleaned = stripLeadingAddressNumber(line)
             val firstSegment = cleaned.split(',').firstOrNull()?.trim().orEmpty()
             if (isPlaceNameCandidate(firstSegment)) return firstSegment
+            cleanAreaPart(firstSegment)?.let { return it }
             if (cleaned.length >= 3 && isPlaceNameCandidate(cleaned)) return cleaned
-            if (line.length >= 3 && isPlaceNameCandidate(line)) return line
         }
         return listOfNotNull(
-            fields.subLocality,
-            fields.locality,
-            fields.subAdminArea,
-        ).mapNotNull { it?.trim()?.takeIf { s -> s.isNotEmpty() } }
-            .firstOrNull()
+            cleanAreaPart(fields.subLocality),
+            cleanAreaPart(fields.locality),
+            cleanAreaPart(fields.subAdminArea),
+        ).firstOrNull()
             ?: "Unknown place"
     }
 
     fun pickPlaceSubtitle(fields: PlaceAddressFields, title: String): String {
         val titleNorm = title.lowercase(Locale.US)
-        val parts = listOf(
-            fields.subLocality,
-            fields.locality,
-            fields.subAdminArea,
-        ).mapNotNull { it?.trim()?.takeIf { s -> s.isNotEmpty() } }
-            .distinct()
+        // GMaps-style: neighbourhood, city — skip state and admin divisions.
+        val parts = listOfNotNull(
+            cleanAreaPart(fields.subLocality),
+            cleanAreaPart(fields.locality),
+            // Only if locality missing: a cleaned admin that resolved to a metro name.
+            cleanAreaPart(fields.subAdminArea).takeIf {
+                cleanAreaPart(fields.locality) == null
+            },
+        ).distinct()
             .filter { part ->
                 val p = part.lowercase(Locale.US)
                 p != titleNorm &&
                     !titleNorm.contains(p) &&
                     !p.contains(titleNorm) &&
-                    part !in setOf("India", "Unnamed Road")
+                    part !in setOf("India", "Unnamed Road") &&
+                    !isAdministrativeUnitName(part)
             }
             .take(2)
         return parts.joinToString(", ")
     }
 
-    /** True when [value] looks like a named place, not "#12" / "Building 41" / PIN. */
+    /** True when [value] looks like a named place, not "#12" / "Building 41" / PIN / admin unit. */
     fun isPlaceNameCandidate(value: String): Boolean {
         if (!isMeaningfulAreaName(value)) return false
+        if (isAdministrativeUnitName(value)) return false
         val s = value.trim()
         if (buildingLabelRegex.matches(s)) return false
         if (s.matches(Regex("(?i)^\\d+[A-Za-z]?\\s*(st|nd|rd|th)?\\s*(main|cross|road|rd|st|street)?$"))) {
@@ -172,6 +228,50 @@ object TripPlaceLabels {
             return false
         }
         return true
+    }
+
+    /** Railway / revenue / municipal admin labels that should not appear in trip UI. */
+    fun isAdministrativeUnitName(value: String): Boolean {
+        val s = value.trim()
+        if (s.length < 3) return false
+        if (administrativeUnitRegex.containsMatchIn(s)) return true
+        // e.g. "Bengaluru Urban", "Bangalore Rural"
+        if (s.matches(Regex("(?i)^.+\\s+(urban|rural)$"))) return true
+        return false
+    }
+
+    /**
+     * Drop admin jargon, or rewrite to a canonical metro name when the string
+     * clearly refers to one (e.g. "Bangalore Division" → "Bengaluru").
+     */
+    fun cleanAreaPart(raw: String?): String? {
+        val s = raw?.trim().orEmpty()
+        if (s.isEmpty() || !isMeaningfulAreaName(s)) return null
+        if (isAdministrativeUnitName(s)) {
+            return canonicalizeMetroName(s)
+        }
+        return canonicalizeMetroName(s) ?: s
+    }
+
+    /** Map "Bangalore" / "Bengaluru Urban" style strings to product metro names. */
+    fun canonicalizeMetroName(value: String): String? {
+        val s = value.trim()
+        if (s.isEmpty()) return null
+        for ((regex, canonical) in metroCanonicalRules) {
+            if (regex.matches(s) || regex.containsMatchIn(s)) {
+                // Only rewrite when the whole string is metro-ish or admin-wrapped metro.
+                val low = s.lowercase(Locale.US)
+                val isBareOrAdminWrapped = isAdministrativeUnitName(s) ||
+                    low == "bengaluru" || low == "bangalore" ||
+                    low == "mumbai" || low == "bombay" ||
+                    low == "delhi" || low == "new delhi" ||
+                    low == "chennai" || low == "madras" ||
+                    low == "hyderabad" || low == "kolkata" || low == "calcutta" ||
+                    low == "pune"
+                if (isBareOrAdminWrapped) return canonical
+            }
+        }
+        return null
     }
 
     /** Title-case a cleaned user query for use when geocoder omits the POI name. */

@@ -67,7 +67,7 @@ fun ForgotPasswordScreen(
             Text("Back to login")
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         Text(
             text = "Forgot password",
@@ -75,7 +75,7 @@ fun ForgotPasswordScreen(
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = if (supabaseLinkReset) {
                 "Enter your email and we will send a password reset link."
@@ -87,7 +87,7 @@ fun ForgotPasswordScreen(
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(32.dp))
 
         OutlinedTextField(
             value = email,
@@ -104,7 +104,7 @@ fun ForgotPasswordScreen(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
         )
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         Button(
             onClick = {
@@ -138,7 +138,7 @@ fun ForgotPasswordScreen(
         }
 
         if (codeSent && !supabaseLinkReset) {
-            Spacer(Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(14.dp))
             OutlinedTextField(
                 value = code,
                 onValueChange = {
@@ -152,7 +152,7 @@ fun ForgotPasswordScreen(
                 supportingText = codeError?.let { { Text(it) } },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             OutlinedTextField(
                 value = newPassword,
                 onValueChange = {
@@ -167,7 +167,7 @@ fun ForgotPasswordScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 visualTransformation = PasswordVisualTransformation(),
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             OutlinedTextField(
                 value = confirmPassword,
                 onValueChange = {
@@ -182,7 +182,7 @@ fun ForgotPasswordScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 visualTransformation = PasswordVisualTransformation(),
             )
-            Spacer(Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(14.dp))
             Button(
                 onClick = {
                     var valid = true
@@ -215,7 +215,7 @@ fun ForgotPasswordScreen(
         }
 
         infoMessage?.let {
-            Spacer(Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = it,
                 style = MaterialTheme.typography.bodyMedium,

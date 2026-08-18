@@ -19,176 +19,53 @@ import kotlin.math.max
  *  - YOLOv8 detection (1 output: [1, 4 + nc, anchors] or [1, anchors, 4 + nc])
  *  - YOLOv8-Seg (2 outputs: detection head + proto masks)
  *
+ * Load via [tryLoad] / [PotholeDetectorHolder] — missing `pothole_detect.tflite`
+ * is a no-op (heuristics-only validator).
+ *
  * For YOLO-Seg we currently use the detection head only — masks are derived in
  * [PotholeRiskAnalyzer] from the detection box (adaptive in-box thresholding),
  * which keeps inference simple and works for SSD/YOLO/YOLO-Seg uniformly.
  */
-internal class PotholeDetector(context: Context) {
+internal class PotholeDetector private constructor(
+    private val interpreter: Interpreter,
+    private val labels: List<String>,
+    private val inputWidth: Int,
+    private val inputHeight: Int,
+    private val isFloatingModel: Boolean,
+    private val modelKind: ModelKind,
+    private val ssdBoxesIndex: Int,
+    private val ssdClassesIndex: Int,
+    private val ssdScoresIndex: Int,
+    private val ssdPotholeClassIndex: Int,
+    private val yoloOutputIndex: Int,
+    private val yoloChannelFirst: Boolean,
+    private val yoloChannels: Int,
+    private val yoloAnchors: Int,
+    private val protoOutputIndex: Int,
+    private val protoHeight: Int,
+    private val protoWidth: Int,
+    private val protoChannels: Int,
+    private val protoChannelFirst: Boolean,
+) {
 
     private enum class ModelKind { SSD, YOLO_V8, YOLO_V8_SEG }
 
-    private val interpreter: Interpreter
-    private val labels: List<String>
-    private val inputWidth: Int
-    private val inputHeight: Int
-    private val isFloatingModel: Boolean
-    private val modelKind: ModelKind
-
-    // SSD specific output indices.
-    private val ssdBoxesIndex: Int
-    private val ssdClassesIndex: Int
-    private val ssdScoresIndex: Int
-    private val ssdPotholeClassIndex: Int
-
-    // YOLO specific output info.
-    private val yoloOutputIndex: Int
-    private val yoloChannelFirst: Boolean
-    private val yoloChannels: Int
-    private val yoloAnchors: Int
-
-    // YOLOv8-Seg proto-mask tensor info (NHWC = [1, mh, mw, nm]).
-    private val protoOutputIndex: Int
-    private val protoHeight: Int
-    private val protoWidth: Int
-    private val protoChannels: Int
-    private val protoChannelFirst: Boolean
-
-    init {
-        val assetManager = context.assets
-        val modelBuffer = loadModelFile(assetManager.openFd(MODEL_FILE))
-        interpreter = Interpreter(modelBuffer)
-        labels = assetManager.open(LABELS_FILE).bufferedReader().useLines { lines ->
-            lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
-        }
-        val inputTensor = interpreter.getInputTensor(0)
-        inputHeight = inputTensor.shape()[1]
-        inputWidth = inputTensor.shape()[2]
-        isFloatingModel = inputTensor.dataType().name == "FLOAT32"
-
-        modelKind = autoDetectModelKind()
-
-        // ---- SSD discovery (kept identical to legacy behavior) ----
-        var boxes = 0
-        var classes = 1
-        var scores = 2
-        var isTf2 = false
-        for (i in 0 until interpreter.outputTensorCount) {
-            val name = interpreter.getOutputTensor(i).name()
-            if (name.contains("StatefulPartitionedCall")) isTf2 = true
-            when {
-                name.contains("scores", ignoreCase = true) -> scores = i
-                name.contains("classes", ignoreCase = true) -> classes = i
-                name.contains("boxes", ignoreCase = true) ||
-                    name.contains("locations", ignoreCase = true) -> boxes = i
-            }
-        }
-        if (isTf2) {
-            scores = 0
-            boxes = 1
-            classes = 3
-        }
-        ssdBoxesIndex = boxes
-        ssdClassesIndex = classes
-        ssdScoresIndex = scores
-        ssdPotholeClassIndex = labels.indexOfFirst { it.equals("Pothole", ignoreCase = true) }
-            .takeIf { it >= 0 } ?: 0
-
-        // ---- YOLO output discovery ----
-        var yoloIdx = -1
-        var channelFirst = true
-        var channels = 0
-        var anchors = 0
-        if (modelKind == ModelKind.YOLO_V8 || modelKind == ModelKind.YOLO_V8_SEG) {
-            for (i in 0 until interpreter.outputTensorCount) {
-                val shape = interpreter.getOutputTensor(i).shape()
-                if (shape.size == 3 && shape[0] == 1) {
-                    val a = shape[1]
-                    val b = shape[2]
-                    if (a in 5..120 && b > a * 4) {
-                        yoloIdx = i
-                        channelFirst = true
-                        channels = a
-                        anchors = b
-                        break
-                    }
-                    if (b in 5..120 && a > b * 4) {
-                        yoloIdx = i
-                        channelFirst = false
-                        channels = b
-                        anchors = a
-                        break
-                    }
-                }
-            }
-        }
-        yoloOutputIndex = yoloIdx
-        yoloChannelFirst = channelFirst
-        yoloChannels = channels
-        yoloAnchors = anchors
-
-        // ---- YOLOv8-Seg proto tensor discovery ----
-        var protoIdx = -1
-        var ph = 0
-        var pw = 0
-        var pc = 0
-        var protoCF = false
-        if (modelKind == ModelKind.YOLO_V8_SEG) {
-            for (i in 0 until interpreter.outputTensorCount) {
-                val shape = interpreter.getOutputTensor(i).shape()
-                if (shape.size == 4 && shape[0] == 1) {
-                    protoIdx = i
-                    val a = shape[1]
-                    val b = shape[2]
-                    val c = shape[3]
-                    // NCHW [1, nm, mh, mw]: nm (~16-64) is much smaller than spatial dims.
-                    if (a in 8..96 && b > a * 2 && c > a * 2) {
-                        protoCF = true
-                        pc = a; ph = b; pw = c
-                    } else {
-                        // NHWC [1, mh, mw, nm] — typical Ultralytics TFLite export.
-                        protoCF = false
-                        ph = a; pw = b; pc = c
-                    }
-                    break
-                }
-            }
-        }
-        protoOutputIndex = protoIdx
-        protoHeight = ph
-        protoWidth = pw
-        protoChannels = pc
-        protoChannelFirst = protoCF
-    }
-
-    private fun autoDetectModelKind(): ModelKind {
-        val outCount = interpreter.outputTensorCount
-        // SSD object-detection TFLite exports usually expose 4 outputs.
-        if (outCount >= 4) return ModelKind.SSD
-        // YOLOv8-Seg exports both a detection head and a proto mask tensor.
-        if (outCount == 2) {
-            // Heuristic: one output is 3-D anchor head, other is 4-D proto map.
-            val a = interpreter.getOutputTensor(0).shape()
-            val b = interpreter.getOutputTensor(1).shape()
-            val anyProtoLike = (a.size == 4) || (b.size == 4)
-            if (anyProtoLike) return ModelKind.YOLO_V8_SEG
-        }
-        // Single 3D output → YOLOv8 detection head.
-        if (outCount == 1) {
-            val shape = interpreter.getOutputTensor(0).shape()
-            if (shape.size == 3 && shape[0] == 1) return ModelKind.YOLO_V8
-        }
-        return ModelKind.SSD
-    }
-
     fun maxPotholeScore(bitmap: Bitmap): Float = bestPotholeDetection(bitmap)?.score ?: 0f
 
-    fun bestPotholeDetection(bitmap: Bitmap): PotholeDetection? = when (modelKind) {
-        ModelKind.SSD -> runSsd(bitmap)
-        ModelKind.YOLO_V8, ModelKind.YOLO_V8_SEG -> runYolo(bitmap)
+    fun bestPotholeDetection(bitmap: Bitmap): PotholeDetection? = try {
+        when (modelKind) {
+            ModelKind.SSD -> runSsd(bitmap)
+            ModelKind.YOLO_V8, ModelKind.YOLO_V8_SEG -> runYolo(bitmap)
+        }
+    } catch (_: Exception) {
+        null
     }
 
     fun close() {
-        interpreter.close()
+        try {
+            interpreter.close()
+        } catch (_: Exception) {
+        }
     }
 
     // ---------------- SSD path (legacy, unchanged) ----------------
@@ -301,7 +178,7 @@ internal class PotholeDetector(context: Context) {
                 bestIdx = n
             }
         }
-        if (bestIdx < 0 || bestScore < YOLO_MIN_SCORE) return null
+        if (bestIdx < 0 || bestScore < PotholeDetectorGate.YOLO_MIN_SCORE) return null
 
         val cx = if (yoloChannelFirst) out[0][bestIdx] else out[bestIdx][0]
         val cy = if (yoloChannelFirst) out[1][bestIdx] else out[bestIdx][1]
@@ -455,17 +332,214 @@ internal class PotholeDetector(context: Context) {
         else -> FloatArray(shape.fold(1) { acc, v -> acc * v })
     }
 
-    private fun loadModelFile(fd: android.content.res.AssetFileDescriptor): MappedByteBuffer {
-        FileInputStream(fd.fileDescriptor).use { input ->
-            val channel = input.channel
-            return channel.map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
+    companion object {
+        private const val ASSET_DIR = "ml"
+        private const val MODEL_FILE_NAME = "pothole_detect.tflite"
+        private const val MODEL_FILE = "$ASSET_DIR/$MODEL_FILE_NAME"
+        private const val LABELS_FILE = "$ASSET_DIR/pothole_labels.txt"
+
+        /**
+         * Returns a detector when `assets/ml/pothole_detect.tflite` is present
+         * and loads cleanly; otherwise null (heuristics-only).
+         */
+        fun tryLoad(context: Context): PotholeDetector? {
+            return try {
+                val assetManager = context.assets
+                val files = assetManager.list(ASSET_DIR) ?: return null
+                if (MODEL_FILE_NAME !in files) return null
+                val modelBuffer = loadModelFile(assetManager.openFd(MODEL_FILE))
+                val interpreter = Interpreter(modelBuffer)
+                val labels = try {
+                    assetManager.open(LABELS_FILE).bufferedReader().useLines { lines ->
+                        lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
+                    }
+                } catch (_: Exception) {
+                    listOf("Pothole")
+                }
+                val inputTensor = interpreter.getInputTensor(0)
+                val inputHeight = inputTensor.shape()[1]
+                val inputWidth = inputTensor.shape()[2]
+                val isFloatingModel = inputTensor.dataType().name == "FLOAT32"
+                val modelKind = autoDetectModelKind(interpreter)
+
+                var boxes = 0
+                var classes = 1
+                var scores = 2
+                var isTf2 = false
+                for (i in 0 until interpreter.outputTensorCount) {
+                    val name = interpreter.getOutputTensor(i).name()
+                    if (name.contains("StatefulPartitionedCall")) isTf2 = true
+                    when {
+                        name.contains("scores", ignoreCase = true) -> scores = i
+                        name.contains("classes", ignoreCase = true) -> classes = i
+                        name.contains("boxes", ignoreCase = true) ||
+                            name.contains("locations", ignoreCase = true) -> boxes = i
+                    }
+                }
+                if (isTf2) {
+                    scores = 0
+                    boxes = 1
+                    classes = 3
+                }
+                val ssdPotholeClassIndex = labels.indexOfFirst {
+                    it.equals("Pothole", ignoreCase = true)
+                }.takeIf { it >= 0 } ?: 0
+
+                var yoloIdx = -1
+                var channelFirst = true
+                var channels = 0
+                var anchors = 0
+                if (modelKind == ModelKind.YOLO_V8 || modelKind == ModelKind.YOLO_V8_SEG) {
+                    for (i in 0 until interpreter.outputTensorCount) {
+                        val shape = interpreter.getOutputTensor(i).shape()
+                        if (shape.size == 3 && shape[0] == 1) {
+                            val a = shape[1]
+                            val b = shape[2]
+                            if (a in 5..120 && b > a * 4) {
+                                yoloIdx = i
+                                channelFirst = true
+                                channels = a
+                                anchors = b
+                                break
+                            }
+                            if (b in 5..120 && a > b * 4) {
+                                yoloIdx = i
+                                channelFirst = false
+                                channels = b
+                                anchors = a
+                                break
+                            }
+                        }
+                    }
+                }
+
+                var protoIdx = -1
+                var ph = 0
+                var pw = 0
+                var pc = 0
+                var protoCF = false
+                if (modelKind == ModelKind.YOLO_V8_SEG) {
+                    for (i in 0 until interpreter.outputTensorCount) {
+                        val shape = interpreter.getOutputTensor(i).shape()
+                        if (shape.size == 4 && shape[0] == 1) {
+                            protoIdx = i
+                            val a = shape[1]
+                            val b = shape[2]
+                            val c = shape[3]
+                            if (a in 8..96 && b > a * 2 && c > a * 2) {
+                                protoCF = true
+                                pc = a; ph = b; pw = c
+                            } else {
+                                protoCF = false
+                                ph = a; pw = b; pc = c
+                            }
+                            break
+                        }
+                    }
+                }
+
+                PotholeDetector(
+                    interpreter = interpreter,
+                    labels = labels,
+                    inputWidth = inputWidth,
+                    inputHeight = inputHeight,
+                    isFloatingModel = isFloatingModel,
+                    modelKind = modelKind,
+                    ssdBoxesIndex = boxes,
+                    ssdClassesIndex = classes,
+                    ssdScoresIndex = scores,
+                    ssdPotholeClassIndex = ssdPotholeClassIndex,
+                    yoloOutputIndex = yoloIdx,
+                    yoloChannelFirst = channelFirst,
+                    yoloChannels = channels,
+                    yoloAnchors = anchors,
+                    protoOutputIndex = protoIdx,
+                    protoHeight = ph,
+                    protoWidth = pw,
+                    protoChannels = pc,
+                    protoChannelFirst = protoCF,
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        private fun autoDetectModelKind(interpreter: Interpreter): ModelKind {
+            val outCount = interpreter.outputTensorCount
+            if (outCount >= 4) return ModelKind.SSD
+            if (outCount == 2) {
+                val a = interpreter.getOutputTensor(0).shape()
+                val b = interpreter.getOutputTensor(1).shape()
+                if (a.size == 4 || b.size == 4) return ModelKind.YOLO_V8_SEG
+            }
+            if (outCount == 1) {
+                val shape = interpreter.getOutputTensor(0).shape()
+                if (shape.size == 3 && shape[0] == 1) return ModelKind.YOLO_V8
+            }
+            return ModelKind.SSD
+        }
+
+        private fun loadModelFile(fd: android.content.res.AssetFileDescriptor): MappedByteBuffer {
+            FileInputStream(fd.fileDescriptor).use { input ->
+                val channel = input.channel
+                return channel.map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
+            }
+        }
+    }
+}
+
+/**
+ * Process-wide optional detector. Loads once on first use; safe when the
+ * TFLite asset is missing.
+ */
+internal object PotholeDetectorHolder {
+    @Volatile
+    private var detector: PotholeDetector? = null
+
+    @Volatile
+    private var loadAttempted = false
+
+    fun get(context: Context): PotholeDetector? {
+        if (loadAttempted) return detector
+        synchronized(this) {
+            if (loadAttempted) return detector
+            detector = PotholeDetector.tryLoad(context.applicationContext)
+            loadAttempted = true
+            return detector
         }
     }
 
-    companion object {
-        private const val MODEL_FILE = "ml/pothole_detect.tflite"
-        private const val LABELS_FILE = "ml/pothole_labels.txt"
-        private const val YOLO_MIN_SCORE = 0.18f
+    /** Test / debug: clear cached instance. */
+    fun resetForTests() {
+        synchronized(this) {
+            detector?.close()
+            detector = null
+            loadAttempted = false
+            PotholeDetectionCache.clear()
+        }
+    }
+}
+
+/** Caches last close-up detection so risk analysis can reuse the bbox/mask. */
+internal object PotholeDetectionCache {
+    @Volatile
+    private var uriKey: String? = null
+
+    @Volatile
+    private var detection: PotholeDetection? = null
+
+    fun put(uri: Uri, det: PotholeDetection?) {
+        uriKey = uri.toString()
+        detection = det
+    }
+
+    fun get(uri: Uri): PotholeDetection? {
+        return if (uriKey == uri.toString()) detection else null
+    }
+
+    fun clear() {
+        uriKey = null
+        detection = null
     }
 }
 

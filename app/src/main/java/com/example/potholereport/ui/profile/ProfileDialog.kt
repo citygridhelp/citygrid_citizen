@@ -50,6 +50,13 @@ import com.example.potholereport.data.EmailChangeStartResult
 import com.example.potholereport.data.EmailChangeVerifyResult
 import com.example.potholereport.data.ProfileAvatarIds
 import com.example.potholereport.data.UserProfileRepository
+import com.example.potholereport.ui.theme.CitizenIcon
+import com.example.potholereport.ui.theme.CitizenInk
+import com.example.potholereport.ui.theme.CitizenLightSurface
+import com.example.potholereport.ui.theme.CitizenRadius
+import com.example.potholereport.ui.theme.CitizenSpace
+import com.example.potholereport.ui.theme.CitizenType
+import com.example.potholereport.ui.theme.CitizenPrivacyCopy
 import kotlinx.coroutines.launch
 
 @Composable
@@ -62,9 +69,11 @@ fun ProfileDialog(
     onSave: (avatarId: String, verifiedNewEmail: String?) -> Unit,
     onStartEmailChange: suspend (String) -> EmailChangeStartResult,
     onVerifyEmailChange: suspend (otpEmail: String, code: String, targetNewEmail: String) -> EmailChangeVerifyResult,
+    startInEditMode: Boolean = false,
+    showSignOut: Boolean = true,
 ) {
     val scope = rememberCoroutineScope()
-    var editMode by rememberSaveable { mutableStateOf(false) }
+    var editMode by rememberSaveable { mutableStateOf(startInEditMode) }
     var draftAvatarId by rememberSaveable(avatarId) { mutableStateOf(avatarId) }
 
     var newEmailInput by rememberSaveable { mutableStateOf("") }
@@ -113,8 +122,9 @@ fun ProfileDialog(
     }
 
     Dialog(onDismissRequest = onDismiss) {
+        CitizenLightSurface {
         Surface(
-            shape = RoundedCornerShape(4.dp),
+            shape = CitizenRadius.Card,
             color = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface,
             tonalElevation = 6.dp,
@@ -124,7 +134,7 @@ fun ProfileDialog(
                     .fillMaxWidth()
                     .heightIn(max = 520.dp)
                     .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
+                    .padding(CitizenSpace.Xl),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -133,37 +143,40 @@ fun ProfileDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             "Profile",
-                            fontWeight = FontWeight.Black,
-                            fontSize = 18.sp,
+                            style = CitizenType.ScreenTitle,
                             color = valueColor,
                         )
                         Text(
-                            "Your identity stays private on public maps.",
-                            fontSize = 12.sp,
-                            color = labelColor,
-                            modifier = Modifier.padding(top = 2.dp),
+                            CitizenPrivacyCopy.SHORT,
+                            style = CitizenType.Helper,
+                            color = CitizenInk.Helper,
+                            modifier = Modifier.padding(top = CitizenSpace.Xs),
                         )
                     }
                     if (!editMode) {
-                        IconButton(onClick = {
-                            resetEditState()
-                            draftAvatarId = avatarId
-                            editMode = true
-                        }) {
+                        IconButton(
+                            onClick = {
+                                resetEditState()
+                                draftAvatarId = avatarId
+                                editMode = true
+                            },
+                            modifier = Modifier.size(CitizenIcon.Tap),
+                        ) {
                             Icon(
                                 Icons.Outlined.Edit,
                                 contentDescription = "Edit profile",
                                 tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(CitizenIcon.Header),
                             )
                         }
                     }
                 }
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(CitizenSpace.Lg))
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CartoonAvatar(avatarId = shownAvatarId, size = 72.dp)
-                    Spacer(Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.width(CitizenSpace.Lg))
                     Column {
                         Text(
                             "USER ID",
@@ -178,7 +191,7 @@ fun ProfileDialog(
                             fontSize = 15.sp,
                             color = valueColor,
                         )
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             "EMAIL",
                             fontSize = 10.sp,
@@ -191,24 +204,23 @@ fun ProfileDialog(
                 }
 
                 if (editMode) {
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(CitizenSpace.Lg))
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(CitizenSpace.Md))
 
                     Text(
                         "CHANGE AVATAR",
-                        fontSize = 10.sp,
-                        letterSpacing = 1.sp,
+                        style = CitizenType.Caption,
                         fontWeight = FontWeight.Bold,
-                        color = labelColor,
+                        color = CitizenInk.Helper,
                     )
                     Text(
                         "Preset characters only — no photo uploads.",
-                        fontSize = 11.sp,
-                        color = labelColor,
-                        modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+                        style = CitizenType.Helper,
+                        color = CitizenInk.Helper,
+                        modifier = Modifier.padding(top = CitizenSpace.Xs, bottom = CitizenSpace.Sm),
                     )
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Sm)) {
                         items(ProfileAvatarIds.ORDERED) { id ->
                             SelectableCartoonAvatar(
                                 avatarId = id,
@@ -218,13 +230,12 @@ fun ProfileDialog(
                         }
                     }
 
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(CitizenSpace.Md))
                     Text(
                         "CHANGE EMAIL",
-                        fontSize = 10.sp,
-                        letterSpacing = 1.sp,
+                        style = CitizenType.Caption,
                         fontWeight = FontWeight.Bold,
-                        color = labelColor,
+                        color = CitizenInk.Helper,
                     )
                     Text(
                         if (awaitingCurrentEmailCode) {
@@ -252,7 +263,7 @@ fun ProfileDialog(
                             singleLine = true,
                             enabled = !emailVerified && !emailBusy,
                             isError = emailError != null,
-                            supportingText = emailError?.let { err -> { Text(err, color = MaterialTheme.colorScheme.error) } },
+                            supportingText = emailError?.let { err -> { Text(err, color = CitizenInk.Error) } },
                             colors = fieldColors,
                         )
                     }
@@ -336,7 +347,7 @@ fun ProfileDialog(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                                 colors = fieldColors,
                             )
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             Button(
                                 onClick = {
                                     val target = newEmailInput.trim().lowercase()
@@ -378,7 +389,7 @@ fun ProfileDialog(
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 enabled = verificationCodeInput.length >= 4 && !emailBusy,
-                                shape = RoundedCornerShape(0.dp),
+                                shape = CitizenRadius.Sharp,
                             ) {
                                 if (emailBusy) {
                                     CircularProgressIndicator(
@@ -404,23 +415,25 @@ fun ProfileDialog(
                     }
                 }
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(20.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(CitizenSpace.Sm),
                 ) {
-                    OutlinedButton(
-                        onClick = onSignOut,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(0.dp),
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Outlined.Logout,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("SIGN OUT", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    if (showSignOut) {
+                        OutlinedButton(
+                            onClick = onSignOut,
+                            modifier = Modifier.weight(1f),
+                            shape = CitizenRadius.Sharp,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.Logout,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("SIGN OUT", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                     if (hasPendingChanges) {
                         Button(
@@ -430,7 +443,7 @@ fun ProfileDialog(
                                 onDismiss()
                             },
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(0.dp),
+                            shape = CitizenRadius.Sharp,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
                             ),
@@ -440,16 +453,17 @@ fun ProfileDialog(
                     } else {
                         OutlinedButton(
                             onClick = {
-                                if (editMode) exitEditMode() else onDismiss()
+                                if (editMode && !startInEditMode) exitEditMode() else onDismiss()
                             },
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(0.dp),
+                            shape = CitizenRadius.Sharp,
                         ) {
                             Text("CLOSE", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
+        }
         }
     }
 }

@@ -10,6 +10,7 @@ Related docs:
 - [`pothole_classification_model.md`](pothole_classification_model.md) — pothole photo classification: models, features, thresholds, metrics
 - [`ml_models_and_evaluation.md`](ml_models_and_evaluation.md) — full ML pipeline, risk analyzer, evaluation
 - `tools/train_pothole_model/CALIBRATION_NOTES.md` — ML / photo-validation thresholds (detailed)
+- [`../tools/train_pothole_model/MODEL_UPDATE_PROCESS.md`](../tools/train_pothole_model/MODEL_UPDATE_PROCESS.md) — #33M sample targets + retrain cadence
 
 *Last reviewed: 25 July 2026 · app `in.citygrid.citizen`*
 
@@ -65,7 +66,9 @@ Related docs:
 | Note max length | **240** characters | `noteMax` in `NewReportScreen.kt` |
 | Default severity | **Moderate** | `selectedSeverity` initial state |
 | Severity levels | Minor, Moderate, Severe, Critical | `PotholeSeverity.kt` |
-| Lane / position | **L / M / R / Full width (F)** — full width for craters spanning most of the road | `PotholePosition` |
+| Lane / position | **L / M / R / LM / MR / LMR** on wide-shot confirm (contiguous only; no LR). **LMR** = full road (legacy `F` still accepted). Section 04 removed | `PotholePosition`, `PotholeLaneSpan`, `WideShotLaneConfirmDialog` |
+| Wide-shot soft align | Warn when guideline match &lt; **~85%** (soft gate, not hard block) | `WideShotAlignmentGate`, `WIDE_SHOT_ALIGN_SOFT_TARGET` |
+| Traffic Flip | Default arrows toward camera = facing; **Flip** = against traffic | `TrafficFacingMode` via confirm dialog |
 | Direction metadata | `pothole_position`, `report_bearing_deg`, `traffic_bearing_deg`, `traffic_faces_camera` | migration `0012` |
 | Cloud upload | Only when **signed in** + Supabase configured; else local save + message | `NewReportScreen` submit branch |
 
@@ -95,7 +98,7 @@ Related docs:
 |------------|-------|--------|
 | Modes | **Car**, **Bike**, **Walk** | `TripVehicle` |
 | Route engine | FOSSGIS public OSRM `routing.openstreetmap.de` (`routed-car` / `routed-bike` / `routed-foot`) | `OsrmRouteClient` |
-| Live traffic | **Not used** — ETAs are static network times (OSRM). Do not claim “less traffic” in UI until a traffic source exists | Product decision Jul 2026 |
+| Live traffic | **Not used yet** — no congestion overlay. **Journey-start ETA** uses hour-of-week factors (`JourneyStartEta`) vs free-flow OSRM (“Leave now ~X · Usually Y”). Mappls/TomTom live feed still planned under #31 Phase B | Product decision Jul–Aug 2026 |
 | Request throttle | ≥ **~400 ms** between OSRM calls (public host courtesy) | `throttledGet` |
 | Start/end snap radius | **500 m** (courtyard/park → nearest road) | `SNAP_RADIUS_M` |
 | Soft max routes shown | **3** (1 primary + up to 2 useful alts — #23.1 trust over quantity) | `MAX_ROUTE_OPTIONS` |
@@ -162,18 +165,24 @@ When OSRM returns one path (common), the app probes left/right **via** points al
 | Route corridor | Perpendicular ≤ **28 m** from polyline | `ROUTE_CORRIDOR_M` |
 | Max alert distance | **2500 m** ahead (overview); street-follow map shows closer subset | `MAX_AHEAD_M`, street-follow caps |
 | Off-route trigger | Deviates **> 60 m** from route (accuracy-aware) | `OFF_ROUTE_REROUTE_M` |
-| Deviation recovery (#23.3) | Near known alt → **tap to confirm**; else hybrid **rejoin** (return ≤ **~400 m**, ETA within **~90 s** of full reroute) with dashed teal line; else **full reroute** (return &gt; **~500 m** or worse ETA) | `TripNavigationMatcher.planDeviation` |
+| Deviation recovery (#23.3) | Dest-reaching known alt → **auto-adopt**; corridor that **misses dest** → dashed **rejoin**; wrong network for vehicle (e.g. car on trail) → **U-turn** + rematch; else **full reroute** on vehicle profile | `TripNavigationMatcher.planDeviation` |
+| Pothole-aware ranking (#23.2) | Within **~120 s** ETA of each other, prefer lower severity-weighted risk (1/2/4/6); chip **“Similar time · fewer severe potholes”** | `TripRoutePotholeRanking` |
+| Covered route display | Traveled segment **hidden** — only remaining polyline drawn | `TripNavigationOverlay`, MapLibre trip route |
+| Route prefetch | OSRM + #23.2 ranking warm as soon as origin+destination known (search/map tap); Direction/Navigation reuse cache; successful packs persist in [TripRouteOfflineCache] for offline Direction | `tripRoutePrefetch`, `TripRouteOfflineCache`, `HomeScreen` |
 | Start correction | If start was off by ≥ **15 m** (or accuracy-scaled), correct from live GPS | `START_CORRECTION_M` |
 | Pothole notify distance | Voice/notify within **150 m** | `TRIP_POTHOLE_NOTIFY_WITHIN_M` |
-| Follow zoom | Street follow ~**18.8–19** (near max); nav overview ~**15.5**; trip map max zoom **19** | `TRIP_FOLLOW_ZOOM`, `TripStreetCamera`, `TRIP_MAP_MAX_ZOOM` |
+| Edge danger blink (#27) | Severe/Critical only; speed-scaled start **150 / 200 / 250 m** (&lt;30 / 30–69 / ≥70 km/h); cluster merge gap **≤ 7 m**; stronger pulse on **L/R/S**; Critical harder/faster; blink **on when muted**; stop after hole/**cluster end** passed | `TripDangerBlink`, `TripDangerEdgeBlink` |
+| Follow zoom | OSM street **20.5 / 21.2 / 22.0**; MapLibre street **16.8 / 17.6 / 18.4** (slow/mid/fast); look-ahead up to **~18 m** when moving; nav overview ~**15.5**; OSM trip max zoom **22** | `TripStreetCamera`, `TRIP_FOLLOW_ZOOM`, `TRIP_MAP_MAX_ZOOM` |
+| Offline nav | GPS + dead-reckon continue; **Direction offline** when destination was already routed (durable cache) even if start/GPS updates; no full OSRM reroute offline; known-alt / rejoin still work; offline chip in nav chrome; **on reconnect** refresh tiles + quiet mid-nav reroute **and** re-fetch planner routes | `TripRouteOfflineCache`, `NetworkReachability`, `HomeScreen`, `MapLibreDensityMap` |
+| Map chrome scale | FABs / compass / GPS chip / planner / nav rail scale with screen width (**0.84–1.08** vs 360dp); alt chips single-line | `MapUiScale`, `rememberMapUiScale` |
 
 ### 5.7 Place search / labels
 
 | Assumption | Value | Source |
 |------------|-------|--------|
-| Search bias | City-biased India geocoder queries | `HomeScreen` / trip search |
+| Search bias | City metro bbox + city-scoped geocode; Photon fuzzy autocomplete; Overpass landmarks (fuel, hospital, locality, PG, …) — all clickable | `TripPlaceSearch`, `TripPlaceSearchRemote`, `HomeScreen` |
 | Labels | Prefer place/institution name over house number / “Building 41”; may fall back to query text | `TripPlaceLabels` |
-| Recents | Cap destinations / starts / favorites | `TripRecentPlacesRepository` |
+| Recents | Cap destinations / starts / favorites; matching recents appear in typed suggestions | `TripRecentPlacesRepository` |
 
 ---
 
@@ -236,6 +245,7 @@ Detailed numbers live in **`tools/train_pothole_model/CALIBRATION_NOTES.md`**. H
 | Wide shot min road ratio | **0.24** | `PotholePhotoValidator` |
 | Duplicate photo hash distance | Reject if perceptual hash distance **< 8** | `MIN_HASH_DISTANCE` |
 | YOLO detection min score | **0.18** | `PotholeDetector` |
+| YOLO retrain cadence | After **+50–100** new verified boxed photos, or monthly | #33M / `MODEL_UPDATE_PROCESS.md` |
 
 ---
 
@@ -259,6 +269,9 @@ Detailed numbers live in **`tools/train_pothole_model/CALIBRATION_NOTES.md`**. H
 | City/metro boundary on submit | Reject or warn if GPS outside selected city metro |
 | Server-side duplicate guard | Enforce 30 m rule in Supabase/RPC |
 | Map cluster tap | Open report list / detail from cluster |
+| Edge danger blink (#27) | **Shipped in app** — see §5.6 |
+| Bilingual map labels (#25.3) | English + regional (GPS-default, user-selectable) via name overlay |
+| Turn-aware pothole alerts (#29) | Order vs turn + speed-scaled repeats; coalesce when close |
 
 ---
 

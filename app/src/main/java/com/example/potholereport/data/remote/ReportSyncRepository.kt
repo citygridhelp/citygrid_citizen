@@ -135,7 +135,7 @@ object ReportSyncRepository {
                 longitude = report.longitude.takeIf { !it.isNaN() },
                 areaLabel = report.areaLabel,
                 severity = report.severity.name,
-                citizenNote = report.note,
+                citizenNote = report.cloudCitizenNote(),
                 status = report.status.name,
                 citizenVisibleStatus = report.status.name,
                 assigneeKey = report.assigneeKey,

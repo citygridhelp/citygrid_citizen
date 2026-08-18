@@ -17,10 +17,14 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Darkens CARTO Positron **label** pixels in each tile bitmap without a whole-tile ColorMatrix.
+ * Darkens CARTO Voyager / Positron **label** pixels in each tile bitmap without a
+ * whole-tile ColorMatrix.
  *
  * Labels sit in a mid-grey band; pale road fills stay above that band and are left alone.
  * Avoids contrast filters that fade / thin residential streets (especially at high zoom).
+ *
+ * #25: stronger ink so place / street names stay readable when street-follow overzooms.
+ * #25.2 adds Overpass street/place name overlays at high zoom (see StreetNameOverlayClient).
  */
 object CartoBasemapLabelDarkener {
 
@@ -64,34 +68,49 @@ object CartoBasemapLabelDarkener {
     fun remapLabelGrey(color: Int): Int {
         val a = Color.alpha(color)
         if (a == 0) return color
+        return remapLabelChannels(
+            a = a,
+            r = Color.red(color),
+            g = Color.green(color),
+            b = Color.blue(color),
+        )
+    }
 
-        val r = Color.red(color)
-        val g = Color.green(color)
-        val b = Color.blue(color)
+    /**
+     * Channel-level remap for unit tests (no Android Color stubs).
+     * Returns packed ARGB.
+     */
+    fun remapLabelChannels(a: Int, r: Int, g: Int, b: Int): Int {
         val maxC = max(r, max(g, b))
         val minC = min(r, min(g, b))
         val chroma = maxC - minC
         val lum = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
 
-        // Background + pale road fills / casings (CARTO Positron streets sit very light).
-        if (lum >= 200) return color
+        // Background + pale road fills / casings (CARTO streets sit very light).
+        if (lum >= 198) return packArgb(a, r, g, b)
 
         // Tinted water / park / land fills.
-        if (isTintedFill(r, g, b, chroma, lum)) return color
+        if (isTintedFill(r, g, b, chroma, lum)) return packArgb(a, r, g, b)
 
-        // Label ink: low-chroma mid greys only — darken by scaling (not contrast stretch).
-        if (chroma > 36 || lum !in 78..175) return color
+        // Label ink: low-chroma mid greys (Voyager + Positron). Slightly wider band
+        // than v1.0.6 so lighter street names at high zoom still get pulled darker.
+        if (chroma > 42 || lum !in 68..188) return packArgb(a, r, g, b)
 
+        // #25 — stronger darken for readable names when tiles are overzoomed (#25.1 + #25.2 contrast).
         val scale = when {
-            lum >= 140 -> 0.42f
-            lum >= 110 -> 0.48f
-            else -> 0.55f
+            lum >= 145 -> 0.24f
+            lum >= 120 -> 0.30f
+            lum >= 95 -> 0.36f
+            else -> 0.42f
         }
         val nr = (r * scale).toInt().coerceIn(0, 255)
         val ng = (g * scale).toInt().coerceIn(0, 255)
         val nb = (b * scale).toInt().coerceIn(0, 255)
-        return Color.argb(a, nr, ng, nb)
+        return packArgb(a, nr, ng, nb)
     }
+
+    private fun packArgb(a: Int, r: Int, g: Int, b: Int): Int =
+        (a and 0xFF shl 24) or (r and 0xFF shl 16) or (g and 0xFF shl 8) or (b and 0xFF)
 
     private fun isTintedFill(r: Int, g: Int, b: Int, chroma: Int, lum: Int): Boolean {
         if (chroma < 16) return false
@@ -115,7 +134,8 @@ class CartoLabelDarkeningTilesOverlay(
 
     override fun onTileReadyToDraw(c: Canvas, currentMapTile: Drawable, tileRect: Rect) {
         if (currentMapTile is BitmapDrawable) {
-            // Bilinear when overzooming past native tile levels — softer road edges.
+            // Bilinear when overzooming past native tile levels — softer road edges
+            // and less blocky label strokes at street-follow zoom.
             currentMapTile.isFilterBitmap = true
             currentMapTile.bitmap?.let { bmp ->
                 if (bmp.isMutable) {

@@ -11,36 +11,66 @@ import android.os.VibratorManager
 /** Distance at which a pothole first triggers sound/vibration once. */
 const val TRIP_POTHOLE_NOTIFY_WITHIN_M = 150.0
 
-/** Human-readable side for the trip banner. */
-fun formatTripPotholeSide(sideLabel: String?): String? {
-    val raw = sideLabel?.trim().orEmpty()
-    if (raw.isEmpty()) return null
-    return when (raw.lowercase()) {
-        "left", "l" -> "on your left"
-        "right", "r" -> "on your right"
-        "middle", "m", "center", "centre" -> "in the middle of the road"
-        "full width", "fullwidth", "full road", "full road pothole", "f",
-        "across", "across the road", "whole road", "crater",
-        -> "across the road"
-        else -> raw
+/**
+ * Compact lane code for capsule, map pins, and markers:
+ * L / M / R / LM / MR / LMR.
+ */
+fun formatTripPotholeSideLetter(sideLabel: String?): String? =
+    when (TripNavigationMatcher.normalizeSideKey(sideLabel)) {
+        "left" -> "L"
+        "right" -> "R"
+        "middle" -> "M"
+        "lm" -> "LM"
+        "mr" -> "MR"
+        "full" -> "LMR"
+        else -> null
     }
+
+/** Spoken / banner side phrase — same keys as [formatTripPotholeSideLetter]. */
+fun formatTripPotholeSide(sideLabel: String?): String? {
+    val key = TripNavigationMatcher.normalizeSideKey(sideLabel)
+    if (key != null) {
+        return when (key) {
+            "left" -> "on your left"
+            "right" -> "on your right"
+            "middle" -> "in the middle of the road"
+            "lm" -> "between the left and middle of the road"
+            "mr" -> "between the middle and right of the road"
+            "full" -> "across the road"
+            else -> null
+        }
+    }
+    val raw = sideLabel?.trim().orEmpty()
+    return raw.takeIf { it.isNotEmpty() }
 }
 
-/** Full trip-banner line for the next pothole alert. */
+/** Full trip-banner / voice line for the next pothole alert. */
 fun formatTripPotholeAlertLine(alert: TripPotholeAlert): String {
-    val severity = alert.report.severity.title
+    val phrase = alert.report.severity.driverPhrase
     val distance = alert.distanceMeters.toInt().coerceAtLeast(0)
     val side = formatTripPotholeSide(alert.sideLabel)?.let { " · $it" }.orEmpty()
-    return "Next $severity pothole in $distance m$side"
+    return "Next $phrase in $distance m$side"
 }
 
-/** Banner / capsule accent by severity — light red → full red. */
+/** Marker / blink fill by severity — light red → full red. */
 fun tripPotholeAlertAccentArgb(severity: PotholeSeverity): Int =
     when (severity) {
-        PotholeSeverity.MINOR -> 0xFFFECACA.toInt()      // pale rose
-        PotholeSeverity.MODERATE -> 0xFFF87171.toInt()   // light red
-        PotholeSeverity.SEVERE -> 0xFFEF4444.toInt()     // red
-        PotholeSeverity.CRITICAL -> 0xFFDC2626.toInt()   // strong red
+        PotholeSeverity.MINOR -> 0xFFFECACA.toInt() // pale rose
+        PotholeSeverity.MODERATE -> 0xFFF87171.toInt() // light red
+        PotholeSeverity.SEVERE -> 0xFFEF4444.toInt() // red
+        PotholeSeverity.CRITICAL -> 0xFFDC2626.toInt() // strong red
+    }
+
+/**
+ * Readable ink on white for capsule / banner severity text.
+ * Same severity ladder as [tripPotholeAlertAccentArgb], darker for contrast.
+ */
+fun tripPotholeAlertInkArgb(severity: PotholeSeverity): Int =
+    when (severity) {
+        PotholeSeverity.MINOR -> 0xFFB45309.toInt() // amber caution
+        PotholeSeverity.MODERATE -> 0xFFDC2626.toInt()
+        PotholeSeverity.SEVERE -> 0xFFB91C1C.toInt() // same as Critical for outdoor contrast
+        PotholeSeverity.CRITICAL -> 0xFFB91C1C.toInt()
     }
 
 /**

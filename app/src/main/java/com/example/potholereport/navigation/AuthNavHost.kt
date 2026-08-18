@@ -40,7 +40,7 @@ import com.example.potholereport.ui.auth.ForgotPasswordScreen
 import com.example.potholereport.ui.auth.LoginScreen
 import com.example.potholereport.ui.auth.SignupScreen
 import com.example.potholereport.ui.emergency.EmergencyScreen
-import com.example.potholereport.ui.home.HomeScreen
+import com.example.potholereport.ui.neighbourhood.NeighbourhoodShell
 import com.example.potholereport.ui.report.NewReportScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -185,6 +185,7 @@ fun AuthNavHost(
         }
         withContext(Dispatchers.IO) {
             AppAutoRefresh.checkPlayStoreUpdate(context)
+            AppAutoRefresh.refreshWeatherAlerts(context)
         }
         bumpUiRefresh()
     }
@@ -203,6 +204,7 @@ fun AuthNavHost(
                     scope.launch {
                         withContext(Dispatchers.IO) {
                             AppAutoRefresh.checkPlayStoreUpdate(context)
+                            AppAutoRefresh.refreshWeatherAlerts(context)
                         }
                         if (idleMs >= AppAutoRefresh.RESUME_IDLE_MS) {
                             withContext(Dispatchers.IO) {
@@ -229,7 +231,7 @@ fun AuthNavHost(
         modifier = modifier,
     ) {
         composable(AuthRoute.Home.route) {
-            HomeScreen(
+            NeighbourhoodShell(
                 onEmergencyClick = { navController.navigate(AuthRoute.Emergency.route) },
                 onOpenNewReport = { city ->
                     navController.navigate(AuthRoute.NewReport.createRoute(city))
@@ -237,6 +239,9 @@ fun AuthNavHost(
                 recentReportsEpoch = recentReportsEpoch,
                 uiRefreshEpoch = uiRefreshEpoch,
                 onRecentReportsMutated = { bumpRecentReportsDisplay() },
+                onFeedbackMessage = { message ->
+                    scope.launch { snackbarHostState.showSnackbar(message) }
+                },
                 isSignedIn = isSignedIn,
                 signedInEmail = signedInEmail,
                 anonymousUserId = anonymousUserId,

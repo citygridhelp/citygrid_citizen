@@ -27,22 +27,194 @@ Do **not** rely on chat or memory alone — **this backlog is the source of trut
 
 ---
 
-## ★ Highest priority (do next — user reminder 27 Jul 2026)
+## ★ Highest priority (do next)
+
+> **#36 remaining (do first):** **36.1** hub types · **36.4** unregistered issue filter · **36.5** map look. **36.3 speed-breaker strip shipped.** **36.2 View-all charts shipped.** **36.6–36.9 shipped.**  
+> **#33M reminder (periodic):** Retrain YOLO on Indian-road photos + Supabase stills; then heuristics→YOLO.  
+> **ML Phase H — Hardening** (cloud assist, companion relay, rate limits, privacy) when ready.  
+> **Phases A–G shipped** (YOLO, roles, IMU, 20s vision, Unconfirmed inbox, denser keyframes, swerve).  
+> **#34 (Settings WIP gates):** Bump detection remains grayed (`IMU_BUMP_ENABLED`). Companion phone and USB camera are **on**.
+
+---
+
+## ML auto-detect pipeline (IMU + vision → report)
+
+Phased product path for passive detection while navigating. Full flow:
+Navigate → IMU bump / keyframe → still → YOLO → High auto-report / Medium Unconfirmed / Low drop.
+See also [`ml_models_and_evaluation.md`](ml_models_and_evaluation.md).
+
+### 33. On-device YOLO + auto-report pipeline
+
+**Status:** **Phases A–G shipped** (Aug 2026). **Next: Phase H (optional hardening).**
+
+| Phase | Scope | Status |
+|-------|--------|--------|
+| **A** | Train/wire YOLO on stills; `PotholeDetector` in validator + risk; bootstrap `.tflite` | **Shipped** |
+| **B** | Device roles in Settings — *Nav + report* · *Camera only* · *Both* | **Shipped** |
+| **C** | IMU “felt a bump” events | **Shipped** (Settings **grayed / WIP** — see **#34.1**) |
+| **D** | Event → road keyframe “time travel” → YOLO → High/Med/Low | **Shipped** |
+| **E** | Unconfirmed inbox UX (Confirm / Reject / Edit → `addReport`) | **Shipped** (avatar menu → Unconfirmed) |
+| **F** | Richer short analysis window | **Shipped** (~2 fps / 20 s + post-event burst; no MediaRecorder) |
+| **G** | Avoid/swerve lateral detection → Unconfirmed only | **Shipped** (`TripSwerveMonitor` / leave-rejoin) |
+| **G+** | Continuous road-video YOLO scan (camera ON → auto-capture) | **Shipped** (`analyzeRoadVideo` + Settings toggle) |
+| **H** | Hardening — cloud assist, companion relay, rate limits, privacy | **Next / planned** |
+
+**Phase A key files:** `PotholeDetector.kt`, `PotholeDetectorGate.kt`, `PotholePhotoValidator.kt`, `PotholeRiskAnalyzer.kt`, `assets/ml/pothole_detect.tflite`.
+
+**Phase B key files:** `TripDeviceRole` in `TripCompanionSettings.kt`, `CitizenUiSettingsRepository.applyTripDeviceRole`, `CitizenSettingsDialog.kt`.
+
+**Phase C key files:** `TripImuBump.kt`, `TripImuBumpDetector.kt`, `TripBumpConfirmCard.kt`, HomeScreen Navigate wiring, Settings bump On/Off.  
+**Note:** Bump On/Off is temporarily **disabled in Settings** (`TripFeatureGates.IMU_BUMP_ENABLED = false`) while other testing runs — tracked as enhancement **#34.1**.
+
+**Phase D key files:** `TripRoadKeyframeBuffer.kt`, `TripBumpVisionGate.kt`, `TripBumpVisionPipeline.kt`, `TripUnconfirmedDetectionStore.kt`; camera still ticker in `TripRoadCameraPreview` / USB / companion publish.
+
+**Design rules (locked):** signed-in only for auto-report; same duplicate + metro bounds; rate limit; user can disable auto-report; stills before continuous video; IMU on nav phone, eyes on road/companion cam.
+
+**Enhancement (deferred):** after **5 confirms** near the same bump/pothole spot, publish a **public** map mark and sync across phones via Supabase. Personal marks on-device ship now; cross-device public crowd is not blocking.
+
+### 33M. Major enhancement — Indian YOLO + continuous training loop (periodic)
+
+**Status:** **Active process** (Aug 2026) — first India+public mix shipped in `assets/ml/pothole_detect.tflite`; hard reject still **off**. Recurring model work; do not block Phase H / product UX.
+
+**Ask:** Keep improving detection as citizens upload real Indian evidence. Process + per-category counts: [`tools/train_pothole_model/MODEL_UPDATE_PROCESS.md`](../tools/train_pothole_model/MODEL_UPDATE_PROCESS.md).
+
+| Track | Work |
+|-------|------|
+| **Retrain** | Collect Indian-road close-ups (+ ~30% hard negatives) → box in Roboflow → retrain YOLOv8 / YOLOv8-Seg → replace `assets/ml/pothole_detect.tflite` |
+| **Sample targets** | Next useful: **150–200** boxed pothole close-ups, **80–120** wide, **80–120 manholes** (empty label), **150** other negatives. Solid / hard-reject review: **400–600** potholes + **200+** manholes. Bump/ditch as classes only after **300–500** each |
+| **Heuristics → YOLO** | After precision/recall review on a frozen India set (mAP50 ≥ 0.70, manhole FP down), enable `YOLO_HARD_REJECT_ENABLED` and make YOLO the primary accept/reject gate (heuristics as fallback / assist) |
+| **Supabase training loop** | Export `evidence` + `reports.photo_path` / `wide_photo_path`. Sort → box → mix with public set. Prefer Unconfirmed Confirm/Reject and officer “not a pothole” over raw submits. No nightly train on unlabeled uploads |
+| **Cadence** | After **+50–100 new verified boxed** photos, or monthly once volume is steady; also each release that expands capture |
+| **Ship** | TFLite stays in the APK until an OTA path exists. Update calibration notes + val metrics on every promote |
+
+**Do now (no extra app code):** dashboard download from Storage `evidence` → folder sort → Roboflow boxes → `train_yolov8.py` → copy TFLite → rebuild.
+
+**Automate later:** export script, review staging folder, dedup, CI/Colab train with promotion gates, optional OTA model (needs app work).
+
+**Depends on:** Growing signed-in uploads; labeling time; frozen India test set.
+
+**Does not replace:** Phase H / product UX. Heuristics stay the report gate until the manhole gate passes.
+
+---
+
+## Navigation map enhancements (after current trip steps)
+
+### 31. Live traffic + journey-start ETA (MapLibre / navigation)
+
+**Status:** **Phase A (journey-start ETA) shipped in code** — device-verify (Aug 2026). **Live traffic overlay (Phase B) still deferred.**
+
+**Ask:** Let the user know what traffic will be like when they start the journey (leave-now delay, optional leave-later prediction), and optionally show congestion colors on the trip map.
+
+**Today:** MapLibre + OpenFreeMap / MapTiler Streets. OSRM ETAs are **static** (no congestion). Do not claim “less traffic” / “live traffic” in UI until a real feed is wired.
+
+**Shipped (Phase A):** `JourneyStartEta` — India metro hour-of-week leave-now factor vs free-flow OSRM. Planner shows **“Leave now ~X · Usually Y”** (amber when congested). Alternate chips use **Now ~X** when congested. No map congestion colors.
+
+**Still deferred:** Phase B map colors, Phase C leave-later, Phase D crowd, Mappls/TomTom client when keys are available.
+
+**Research notes (1 Aug 2026):**
+
+| Path | Role | Cost reality |
+|------|------|----------------|
+| **Mappls (MapMyIndia)** | Best India fit for **leave-now** traffic ETA + **predictive** “leave at 8 AM” | Free dev signup; production usually paid |
+| **TomTom Traffic** | India flow/incidents; MapLibre green/yellow/red overlay | Freemium → paid at scale |
+| **MapTiler** | Basemap already keyed; not a free city-wide traffic feed | Free tier = maps limits, not Google-like traffic |
+| **Crowd GPS (own users)** | Long-term free signal while Navigation is on | Needs density + consent; weak until many concurrent trips |
+| Public OSRM / OpenFreeMap | Basemap + routing only | **No** live traffic |
+
+**Phased scope (when un-parked):**
+
+1. **Phase A — Leave now:** On Direction / Navigation, show traffic-aware ETA vs static OSRM (e.g. Mappls `route_eta` / `route_traffic`, or TomTom flow along the route). Copy like “Now 28 min · Usually 18 min”.
+2. **Phase B — Map colors:** Congestion overlay on fullscreen trip map (TomTom/Mappls tiles); toggle Traffic on/off.
+3. **Phase C — Leave later:** Predictive ETA for a chosen departure time (Mappls predictive, or own hour-of-week averages).
+4. **Phase D — Crowd fill:** Opt-in anonymized speed samples during Navigation; color only high-confidence segments; never invent congestion.
+
+**Product rules:** Prefer India coverage; keep OSRM geometry until traffic-aware routing is an explicit switch; privacy/consent for any crowd upload.
+
+**Key files (when built):** `CitizenMapTiler.kt`, `MapLibreDensityMap.kt`, `OsrmRouteClient` / new traffic client, trip planner ETA UI, `local.properties` secrets, `docs/product_assumptions.md`.
+
+---
+
+### 32. Trip capture source (camera / camera+map / USB / companion)
+
+**Status:** **Phase 0–6 shipped in code** (Aug 2026).
+
+**Ask:** During navigation, let the user choose how road (and optional cabin) cameras feed capture and analysis — phone lenses, USB cams, or another phone on the same account — and how the trip UI shows map vs live camera.
+
+**Model:**
+
+| Concept | Options |
+|---------|---------|
+| **Display** | Map only · Camera · Camera + map (Switch → Split) |
+| **Road (rear)** | Phone back · Phone front · USB 1 · USB 2 · Companion |
+| **Cabin (front)** | Off · Phone front/back · USB 1/2 · Companion |
+| **Applies when** | Navigate active |
+| **Capture kind** | Stills for reports (no continuous video in early phases) |
+
+**Phases:**
+
+| Phase | Scope | Status |
+|-------|--------|--------|
+| **0** | Settings UI + prefs | **Shipped** |
+| **1** | Full-screen road camera (phone back/front) during Navigate; Report on camera chrome | **Shipped** |
+| **2a** | Camera ↔ map Switch (left-rail toggle) | **Shipped** |
+| **2b** | Split — landscape side-by-side · portrait stacked (camera | map) | **Shipped** |
+| **3** | Phone front/back role assignment; cabin PIP when other lens + concurrent support | **Shipped** |
+| **4** | Companion phone — pairing code + Wi‑Fi / hotspot / **USB tethering** stills | **Shipped** — Settings enabled (**#34.2**) |
+| **5** | USB UVC experimental — inventory, permission, CameraX external when OEM exposes it | **Shipped in code** — **Settings grayed / WIP** (**#34.3**) |
+| **6** | Multi-feed analysis on road stills → Report close-up | **Shipped** |
+
+**Phase 4 transport decision:** Same Wi‑Fi is **not** a forever product requirement (cloud/account relay can come later). Phase 4 path: local HTTP stills + pairing code. Navigator discovers via NSD on Wi‑Fi **and** probes USB-tether IPs (RNDIS/NCM, typically 192.168.42.x) when a cable is used. A second Android phone is **not** a UVC webcam — do not map it to USB camera 1.
+
+**Phase 5 USB decision:** Host-mode UVC (`com.herohan:UVCAndroid`) when the OEM does not expose the webcam through CameraX. Detect UVC-class devices (not MTP/RNDIS phones), request permission, preview via CameraX external or UVC. Dual-USB preview of two UVC streams at once is deferred.
+
+**Phase 6 decision:** Road stills only (cabin excluded). Live CameraX road session snaps on Report when bound; companion / USB stills publish into `TripRoadStillStore` (~90 s freshness). When primary + secondary exist, `PotholePhotoValidator` pick-best → FileProvider URI prefills `NewReportScreen` and re-runs close-up validation + risk analyzer.
+
+**Phase 0–6 files:** prior Phase 0–5 files + `TripRoadStillStore.kt`, `TripRoadStillCapturer.kt`, `TripRoadCloseUpPrefill.kt`, ImageCapture on phone/USB road preview, `NewReportScreen(initialCloseUpUri)`.
+
+**Product notes:** Normal Report wizard unchanged. Lens ≠ USB — USB is a source assigned to Road/Cabin roles. Companion is a separate device path, not a phone lens. CameraX preview; Report opens the existing signed-in / sign-in report path. Cabin PIP needs device concurrent-camera support; otherwise Road stays live with a short note.
+
+**Settings WIP (Aug 2026):** Bump detection stays grayed (`IMU_BUMP_ENABLED`). Companion + USB camera chips are enabled.
+
+---
+
+### 34. Re-enable WIP-gated trip features (bump / companion / USB)
+
+**Status:** **Enhancement — bump still gated** (Aug 2026). Companion + USB camera are enabled in Settings.
+
+**Ask:** Finish reliability work, then turn the Settings controls back on so citizens can use bump sensing, companion phone road feed, and USB cameras again.
+
+| Sub | Feature | Settings today | Gate flag | Done when |
+|-----|---------|----------------|-----------|-----------|
+| **34.1** | **Bump detection** (IMU → Unconfirmed / auto-draft) | Grayed · forced Off · “Work in progress” | `TripFeatureGates.IMU_BUMP_ENABLED` | Field-stable bump UX; set flag `true` |
+| **34.2** | **Companion phone** (Nav + report / Camera only · pairing · Road = Another phone · Wi‑Fi or USB tethering stills) | **Enabled** | `TripFeatureGates.COMPANION_CAMERA_ENABLED` | Reliable link + stills; set flag `true` |
+| **34.3** | **USB camera 1/2** (road / cabin OTG · CameraX external) | Road + cabin chips grayed · “Work in progress” | `TripFeatureGates.USB_CAMERA_ENABLED` | Stable preview/capture on target devices; set flag `true` |
+
+**Key files:** `TripFeatureGates.kt`, `CitizenSettingsDialog.kt`, `CitizenUiSettingsRepository.kt`, `TripCaptureSettings.kt` (selectable), companion/USB preview + LAN (`TripCompanionLan`, `TripUsbCameraPreview`).
+
+**Related:** **#32** Phase 4–5, **#33** Phase C, optional **#33** Phase H companion cloud relay later.
+
+---
+
+## Parked highest priority (user reminder 27 Jul 2026)
+
+> **Focus lock:** Near-term = trip/navigation polish. **#31** stays in **Navigation map enhancements** until un-parked after those steps.
 
 ### 23. Trip alternate-route quality + deviation handling (MOST IMPORTANT — revisit)
 
-**Status:** **In progress (27 Jul 2026)** — **23.1** + **23.3** implemented in app; **23.2** pothole ranking still later.
+**Status:** **Shipped in code** — device-verify remaining. Tap-to-confirm for known alts; hybrid rejoin uses ~400 m / 90 s thresholds; MapLibre draws rejoin + offered alternate.
 
 **Shipped in code (device-verify):**
 
 | Piece | Detail |
 |-------|--------|
 | **23.1** | Soft max routes **3** (1 primary + ≤2 alts) |
+| **23.2** | When ETAs within **~120 s**, reorder by severity-weighted pothole risk; chip **“Similar time · fewer severe potholes”** |
 | **23.3 offer** | Preview corridors kept after Navigate; if off-route near a known alt → orange **Tap to use** (no auto-switch) |
 | **23.3 rejoin** | Hybrid: dashed **teal** return line when return ≤ ~400 m (and ETA within ~90 s when probed); else full OSRM reroute |
 | **23.3 clear** | Rejoin / offer chrome clears when back on corridor |
+| **Covered route** | Traveled segment is **hidden** on the map (remaining blue only) |
 
-**Still later:** **23.2** pothole-aware ranking when ETAs are close.
+**Still later:** Device tune of the 120 s ETA window / weights if field tests need it.
 
 **Problem today (pre-change):** Alternates sometimes **missing**, or include **waste / meaningless diversions**. Quality filters and via-probes need a better Google-like balance. Reroute on deviation existed (~60 m off-route) but did not distinguish “user chose a better corridor” vs “user should rejoin.”
 
@@ -61,30 +233,32 @@ Do **not** rely on chat or memory alone — **this backlog is the source of trut
 - Reject: too similar to primary, out-and-back spurs, excess U-turns, gross corridor waste, bike-only scraps beside a road primary.
 - Soft fallback: if strict filter leaves &lt; 2 options, keep **light-filtered distinct** corridors rather than showing nothing.
 
-**23.2 — Ranking (later, after 23.1 stable):**
+**23.2 — Ranking (shipped in code):**
 
 - Default sort: **ETA** (static OSRM — no live traffic yet).
-- When time delta is small (threshold TBD), prefer route with **lower pothole risk** (severity-weighted count ahead on corridor).
-- Surface in UI: e.g. “Similar time · fewer severe potholes” on alternate chip.
-- Optional: let user pick “Fastest” vs “Safer road” before Navigate.
+- When time delta ≤ **~120 s**, prefer route with **lower pothole risk** (severity-weighted: Minor 1 · Moderate 2 · Severe 4 · Critical 6).
+- Surface in UI: **“Similar time · fewer severe potholes”** on the safer chip.
+- Key files: `TripRoutePotholeRanking.kt`, `HomeScreen.kt` (`rankTripRoutesByPotholeRisk`).
 
 **23.3 — When user deviates (draft):**
 
 | Situation | Behaviour |
 |-----------|-----------|
 | Slight drift / GPS jitter | No drama — existing snap + tolerance |
-| Off original route, **on a known alternate** from preview | Offer that alternate with **tap to confirm** (do not auto-switch) |
-| Off route, **not** on a known alternate | Prefer **rejoin** (dashed return line) unless rejoin is clearly worse than a full **reroute** — see threshold below |
-| User clearly chose a long intentional detour | Full reroute to destination from current position |
+| Off original route, **on a known alternate** that still reaches the destination | **Auto-continue** that alternate for the chosen vehicle (no tap). |
+| On a corridor that **does not reach the destination** | Dashed **rejoin** onto a route that does |
+| On a path **unsuitable for the vehicle** (e.g. car on jungle / dirt-bike trail — poor OSRM snap) | **U-turn** + rematch on the vehicle network |
+| Off route, otherwise | **Full reroute** for the best vehicle-appropriate path to the destination |
 
-**Decided (27 Jul 2026):**
+**Decided (updated Aug 2026):**
 
 | Question | Decision |
 |----------|----------|
-| Auto-switch to alternate vs tap | **Tap to confirm** |
-| Rejoin line on map | **Yes** — dashed, **different color grading** from active route / alternates |
-| Pothole ranking weights (#23.2) | **Later — not now** |
-| Rejoin vs reroute | **Hybrid** — prefer rejoin while return is short **and** not clearly slower; otherwise full reroute |
+| Auto-switch to alternate vs tap | **Auto-adopt** when GPS is on a known preview alternate that still reaches the destination |
+| Rejoin line on map | **Only** when the corridor the driver is on does **not** meet the destination (or tiny GPS spur). Never while continuing a valid dest-reaching alternate |
+| Vehicle-aware recovery | Use trip vehicle (Car/Bike/Walk) OSRM profile; wrong network → U-turn |
+| Pothole ranking weights (#23.2) | **Shipped** — Minor 1 · Moderate 2 · Severe 4 · Critical 6; ETA window **~120 s** |
+| Rejoin vs reroute | Rejoin for dead-end / missing-dest corridors; else rematch best vehicle route |
 
 **Hybrid threshold (draft — tune on device):**
 
@@ -125,72 +299,127 @@ Numbers above are starting points — adjust after road tests in Bengaluru traff
 
 ### 25. Clearer map labels when zoomed in
 
-**Status:** Not implemented — **enhancement** (captured 27 Jul 2026).
+**Status:** **25.1 shipped in code (27 Jul 2026)** — device-verify. **25.2** / **25.3** deferred (deeper readability + bilingual regional names).
 
-**Ask:** Increase place / street label font size and clarity at higher zoom so names stay readable (especially in street-follow / trip zoom).
+**Ask:** Increase place / street label clarity at higher zoom so names stay readable (especially in street-follow / trip zoom).
 
-**Notes:** Basemap labels already come from CARTO Voyager (#14). Options to explore: zoom-linked label emphasis, stronger contrast (existing darkener), alternate labeled tile style, or a light vector/label overlay only at high zoom. Avoid making overview zoom look crowded.
+**Why 25.1 vs later:** Basemap labels are **raster** (CARTO Voyager tiles). We cannot truly enlarge glyph size or swap languages without a separate name layer — so this pass improves **contrast + install path**; true font-size / denser names are **#25.2**; bilingual regional + English is **#25.3**.
 
-**Key files:** `CartoBasemapLabelDarkener.kt`, `HomeScreen.kt` (tile source / trip zoom), possibly trip-only chrome.
+#### 25.1 — Readable contrast now (done)
+
+- [x] Install `installCartoLabelDarkeningTilesOverlay()` on home map + report-detail map (was defined but unused)
+- [x] Stronger mid-grey → charcoal remap tuned for Voyager street/place ink
+- [x] Keep pale roads / water / parks untouched; bilinear filter on overzoom
+- [x] Unit tests for remap behaviour
+
+**Key files:** `CartoBasemapLabelDarkener.kt`, `HomeScreen.kt`, `ReportDetailDialog.kt`, `CartoBasemapLabelDarkenerTest.kt`.
+
+#### 25.2 — In-depth label readability (later — important)
+
+**Status:** **Shipped in code** — device-verify (Aug 2026). Overpass street/place name overlay at zoom ≥15 (MapLibre SymbolLayer + OSM markers); stronger CARTO label darken; hidden when Heat is on / city overview.
+
+#### 25.3 — Bilingual labels: English + regional / chosen language (later)
+
+**Status:** Not implemented — **enhancement** (captured 27 Jul 2026). No code yet.
+
+**Ask:** Along with the **English** basemap label, show the **regional / native** name for that place (e.g. English + ಕನ್ನಡ / Hindi), so users can recognize places both ways.
+
+| Rule | Detail |
+|------|--------|
+| **Default** | Regional language from **GPS region / metro native** (e.g. Bengaluru → Kannada alongside English) |
+| **User control** | Setting to pick which regional language to show with English (or turn regional off) |
+| **Display** | Prefer **both** on map when space allows (English + selected language), not replace English by default |
+| **Translate / understand** | User can change language as needed so labels match what they understand |
+
+**Depends on:** A name overlay / vector source with multilingual OSM tags (`name`, `name:en`, `name:kn`, …) — raster Voyager tiles alone cannot swap languages. Builds naturally after **#25.2**.
+
+**Open questions (edit later):**
+
+- [ ] Dual-line vs “Name (regional)” on one line?
+- [ ] Languages offered (Kannada / Hindi / Tamil / Telugu / …) vs free locale pick?
+- [ ] Trip search results also bilingual?
+- [ ] Offline: cache regional names for visible tiles?
 
 ---
 
 ### 26. Adopt more Google Maps–like traits (product think)
 
-**Status:** Not implemented — **exploration / product** (captured 27 Jul 2026).
+**Status:** **Shipped in code** (Aug 2026) — Recenter FAB (blue nav icon) on osmdroid + MapLibre; next-maneuver first in capsule; alternate chips single-line + MapLibre “Tap to use alternate” chip; journey-start ETA on planner. Skip 3D tilt on osmdroid (documented limit).
 
 **Ask:** Study and selectively copy useful Google Maps behaviours for trip + city map (without claiming to be GMaps or requiring their SDK).
 
-**Draft trait candidates (pick later):**
+**Shipped trait set:**
 
-- [ ] Camera feel (follow lag, bearing settle, overview ↔ street morph)
-- [ ] Route card / ETA / alternate chips presentation
-- [ ] Recenter / compass / traffic-like affordances (as far as OSM/OSRM allow)
+- [x] Recenter / follow re-arm (blue FAB when panned away)
+- [x] Next-maneuver priority in top capsule
+- [x] Alternate chips + mid-nav tap-to-use
+- [x] Responsive chrome + speed-linked street zoom (#22 polish)
+- [ ] Camera feel further tune (follow lag) — device-verify
 - [ ] Search result titles vs address hierarchy (partially done)
-- [ ] Gesture polish (two-finger tilt N/A on osmdroid 2D — document limits)
-
-**Reminder:** Capture a short “keep / skip / can’t do on osmdroid” list before coding large UI changes.
+- [x] Gesture polish (two-finger tilt N/A on osmdroid 2D — documented)
 
 ---
 
 ### 27. Soft edge “danger blink” for severe / critical ahead (Witcher-style)
 
-**Status:** Not implemented — **enhancement** (captured 27 Jul 2026).
+**Status:** **Shipped in code (27 Jul 2026)** — device-verify. Product locked rules below.
 
-**Ask:** During navigation, when a **Severe** or **Critical** pothole is ahead, show a soft game-like blink / pulse on roughly **three screen edges** (e.g. left, right, and top — not a full red overlay), inspired by damage/danger vignettes (Witcher-style), not a harsh full-screen flash.
+**Ask:** During navigation, when a **Severe** or **Critical** pothole (or cluster) is ahead, show a soft game-like blink / pulse on roughly **three screen edges** (left, right, and top — not a full red overlay), inspired by damage/danger vignettes (Witcher-style), not a harsh full-screen flash.
 
 **Intent:** Peripheral danger cue without blocking the road view or the speed/turn capsule.
 
-**Open questions:**
+**Implemented:**
 
-- [ ] Trigger distance (e.g. only inside alert window / next ahead pothole)?
-- [ ] Severity-only vs Critical stronger pulse?
-- [ ] Respect mute / reduced-motion if we add accessibility later?
+| Piece | Detail |
+|-------|--------|
+| Logic | `TripDangerBlink` — zones, speed start distances, L/R/S, Critical vs Severe |
+| UI | `TripDangerEdgeBlink` under trip chrome (fullscreen Navigate) |
+| Mute | Blink **still shows** when voice muted |
 
-**Key files:** `HomeScreen.kt` (trip fullscreen chrome), `TripNavigationMatcher.kt` / alert state.
+#### Locked product rules (27 Jul 2026)
+
+| Topic | Declaration |
+|-------|-------------|
+| Who gets blink | **Severe** and **Critical** only (Minor / Moderate: no edge blink for now) |
+| Mute | **Blink stays on** when voice is muted (eyes-only warning) |
+| Side emphasis | Pulse **stronger toward hazard side**: **L** / **R** / **S** (straight / middle / full-road) |
+| Stop when | Keep pulsing until the hole / **cluster end** is **passed** (do not cut off at ~15 m) |
+| Critical vs Severe | **Critical** pulse is **harder and faster** than Severe (worst severity in zone) |
+| Trigger distance | **Speed-scaled** — slow **150 m** / mid **200 m** / fast **250 m** |
+| Close holes | **Cluster** if consecutive Severe/Critical within **≤ 7 m** along route |
+
+**Key files:** `TripDangerBlink.kt`, `TripDangerEdgeBlink.kt`, `HomeScreen.kt`, `TripDangerBlinkTest.kt`, [`product_assumptions.md`](product_assumptions.md) §5.6.
 
 ---
 
 ### 28. Wide-shot on-screen L / M / R side selection (combine steps)
 
-**Status:** Not implemented — **enhancement** (captured 27 Jul 2026).
+**Status:** Implemented (27 Jul 2026) — enhancement.
 
-**Ask:** While taking the **wide shot**, let the user tap **Left / Middle / Right** on the camera preview (where the pothole sits in the photo). One step then covers both “capture wide shot” and “pothole position in photo.”
+**Ask:** While confirming the **wide shot**, tap **Left / Middle / Right** on the photo (contiguous multi-select). One step covers capture + position + traffic Flip.
 
-**Wins:**
+**Shipped behaviour:**
 
-1. Faster report flow (less scrolling to section 04).
-2. Position is chosen **while looking at the photo**, matching the “as per the photo, tap that side” guidance.
+| Rule | Detail |
+|------|--------|
+| Spans | Contiguous only: **L, M, R, LM, MR, LMR** (order irrelevant). **LR blocked** |
+| LMR | Replaces separate **Full road** control (storage code `LMR`; legacy `F` still maps) |
+| Section 04 | **Removed** — wide-shot span is source of truth (Adjust lanes on summary) |
+| Guidelines | Dashed road-border overlay; soft ~**85%** alignment warn (not hard block) |
+| Traffic | Animated arrows toward camera; **Flip** → against traffic (`AWAY`) |
+| Arrow opacity | Scales with **screen brightness** (stronger in sun) |
 
-**Notes:** Keep section 04 as edit/confirm fallback; Full road pothole can stay on the form or as a fourth on-screen control. Traffic-facing confirm can stay after wide verify.
+**Key files:** `WideShotLaneConfirmDialog.kt`, `PotholeLaneSpan.kt`, `PotholePosition.kt`, `NewReportScreen.kt`, `ScreenBrightnessOpacity.kt`, `WideShotAlignmentGate.kt`.
 
-**Key files:** `NewReportScreen.kt` (camera / wide-shot UI), `PotholePosition.kt`.
+**Field test:** Deferred — user will exercise #28 after other open work. Fixed trapezoid guidelines for now.
+
+**Follow-up (important, later):** **#30** — auto-scan road borders so digital guidelines snap to the real edges.
 
 ---
 
 ### 29. Turn-aware, speed-scaled pothole alerts
 
-**Status:** Not implemented — **enhancement** (captured 27 Jul 2026).
+**Status:** **Shipped in code** — device-verify (Aug 2026). Shared [TripAlertScheduler] orders turn vs pothole by route meters, coalesces &lt;~40 m, severity×speed horizons / repeats; mute skips TTS (haptic on first still).
 
 **Ask:** When both a **turn** and a **pothole** are approaching, schedule alerts from **order on the route** and **driving speed**.
 
@@ -217,6 +446,34 @@ Prefer **time-to-event** (or distance ÷ speed) over fixed “N beeps”:
 
 ---
 
+### 30. Auto-match digital road guidelines to real road borders (scan → snap)
+
+**Status:** **Shipped in code** — device-verify (Aug 2026). Classical luminance/gradient border scan (`RoadBorderSnap`); snaps dashed guidelines when confidence is strong; falls back to fixed trapezoid; soft gate unchanged.
+
+**Ask:** On the wide-shot confirm screen, **scan** the photo for actual left/right road borders, then snap the dashed digital guidelines (and L/M/R thirds) to that detected road polygon — including when the reporter stands at the curb (skewed perspective).
+
+**Why important:** Fixed trapezoid forces the user to frame to the template. Auto-snap makes L/M/R mean “thirds of the real road,” which is more accurate for trip alerts.
+
+**Product shape (locked for backlog):**
+
+| Piece | Intent |
+|-------|--------|
+| Detect | Road edges / carriageway mask from the wide photo |
+| Snap | Guidelines follow detected borders; L/M/R partition that width |
+| Soft gate | Keep ~**85%** confidence idea — warn if lock is weak; don’t hard-block |
+| Fallback | If scan fails, keep today’s fixed trapezoid |
+| Optional later | User fine-drag edges when auto is close but not perfect |
+
+**Approach options (decide on build):** classical CV / light segmentation / hybrid auto + drag. Prefer hybrid for field robustness.
+
+**Illustration:** `enhancement-28-auto-road-border-match.png` (assets / canvases discussion 28 Jul 2026).
+
+**Depends on:** #28 shipped UX (confirm overlay, Flip, contiguous spans).
+
+**Key files (likely):** `WideShotLaneConfirmDialog.kt`, `WideShotAlignmentGate.kt`, possibly new road-edge helper / ML path.
+
+---
+
 ### Review notes — better possibilities (27 Jul 2026, no code yet)
 
 Cross-check of open enhancements. Treat as **proposals** until promoted to numbered items.
@@ -225,9 +482,10 @@ Cross-check of open enhancements. Treat as **proposals** until promoted to numbe
 |---|------|--------------|
 | **A** | One **alert scheduler** for #22 + #27 + #29 (voice, capsule, edge blink) | Avoids three systems fighting for attention at a turn |
 | **B** | On **#23** alternates: prefer corridors with **fewer severe/critical** ahead when time delta is small | Unique City Grid value vs plain GMaps ETA |
-| **C** | **#25** labels: boost contrast / native z20 tiles first; don’t invent a second font overlay unless needed | Less work, fewer clutter bugs at overview zoom |
+| **C** | **#25.1** contrast done; **#25.2** larger/vector names; **#25.3** English + regional language (GPS-default, user-selectable) | Raster can’t enlarge or translate glyphs — overlay after 25.1 verified |
 | **D** | **#26** GMaps traits — ship only: strong **Recenter**, clear **next-maneuver priority**, better **alternate chips**; skip 3D tilt on osmdroid | Highest UX return, honest about 2D limits |
 | **E** | **#28** wide-shot L/M/R: optional **auto-suggest** side from photo blob, user taps to confirm | Faster + still “as per the photo” |
+| **H** | **#30** auto-snap guidelines to **scanned road borders** (after #28 field test) | L/M/R = thirds of real road, curb-friendly |
 | **F** | Cluster of potholes before a turn → **one count cue**, then detail the next hole | Stops alert spam on bad stretches |
 | **G** | Edge blink (#27) / repeats (#29) must **respect mute / volume** | Accessibility + night driving |
 
@@ -593,6 +851,112 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 ---
 
+### 35. Weather rain-risk map overlay (Open-Meteo → radar Phase C)
+
+**Ask:** Show where rain is likely on the city map (helps drivers anticipate flooded / worsened pothole stretches). Complements Heat (report density) without mixing fills.
+
+**Status:** **Phases A+B in code** (Aug 2026). **Blob patches (18 Aug 2026) — device-verify before more threshold tweaks.** **#35.1b is the next important map enhancement** (light/partly cloud still visible). **Phase C** (live radar / nowcast + trip cue) stays after that.
+
+**Locked product rules:**
+
+| Decision | Detail |
+|----------|--------|
+| Toggle | **Weather** chip next to Heat / Severity (default **off**) |
+| Horizons | Chips **Now · 1h · 3h · 6h · 12h · 24h**. **Now** = current hour. Other chips = forecast at that clock time. Map wash still uses rain/cloud in the window from now. |
+| Visual | Soft **cloud ovals** over metro cells, **hue by intensity** (grey cloud → violet drizzle → cyan light → yellow-green moderate → orange-red heavy → magenta storm). Not street-perfect. |
+| Exclusivity | Weather **XOR** Heat — turning one on turns the other off |
+| Trip cue | **Deferred to Phase C** — only after overlay is solid |
+| Data (A+B) | Open-Meteo multi-point forecast (no API key); ~4×4 cell grid; cache ~10 min |
+
+#### 35.1 — Phase A+B (shipped in code)
+
+- [x] Extend Open-Meteo for hourly + daily metrics (`CityWeatherRepository.fetchRainGrid`)
+- [x] Soft rain-risk overlay on MapLibre (`LYR_WEATHER`) + osmdroid (`CityWeatherRainOverlay`); intensity hue (Aug 2026)
+- [x] Weather toggle + Now / 1h / 3h / 6h / 12h / 24h chips; Heat mutual exclusion
+- [x] Hide overlay on fullscreen trip (same gate pattern as Heat)
+- [x] Keep home weather subline (`fetchToday`) unchanged
+- [x] Localized cloud blobs per cell (not a city-wide rectangle) — **18 Aug 2026; needs device test**
+
+**Key files:** `CityWeatherRainGrid.kt` (`CityWeatherRainColors`), `CityWeatherRepository.kt`, `CityWeatherRainOverlay.kt`, `MapLibreDensityMap.kt`, `NeighbourhoodMapFilters.kt`, `HomeScreen.kt`.
+
+#### 35.1b — Device verify + light / partly cloud (next important map enhancement)
+
+**Do not lower thresholds until a Map-tab test run proves blobs actually draw.** Earlier MapLibre fills were invisible (hidden FillLayer, no repaint, pause/resume). If the test shows patches, then paint **mainly clear / thin cloud** too — not only ≥22% cover.
+
+**Test run (do first):**
+
+- [ ] Map tab → Weather on → 1h, then 3h / 6h / 12h / 24h
+- [ ] Confirm ovals appear and grow with a longer window
+- [ ] Partly cloudy ticker: scattered grey patches, not a full-city sheet
+- [ ] Clear window: little or nothing is OK
+- [ ] Leave Map and return: wash still there
+
+**Then (if patches work but look too empty):**
+
+- [ ] Paint cells below the current ~22% cloud gate (mainly clear / thin cloud)
+- [ ] Keep rain cells on the intensity palette; keep Heat XOR Weather
+- [ ] Do **not** add extra FillLayers (GPU crash history) — stay on one GeoJSON fill + feature colors
+
+**Reminder trigger:** After any Map / Weather turn, or when they ask “what next?” after #36.1–36.5. Do not let 35.1b go silent behind Phase C radar.
+
+#### 35.2 — Phase C (enhancement — after 35.1b)
+
+**Ask:** Live / near-term “where is rain *now*” plus optional in-trip awareness.
+
+| Track | Work |
+|-------|------|
+| **C1 — Radar / nowcast tiles** | Animated or stepped precipitation radar over MapLibre (provider TBD: RainViewer-style, OpenWeather, Mappls/IMD commercial, etc.). Respect ToS, API keys, and tile caching. |
+| **C2 — Accuracy copy** | Honest UI (“area tendency / radar ~km scale” — never claim street-perfect). |
+| **C3 — Trip rain cue** | After overlay is solid: soft chip / TTS-safe line e.g. “Heavy rain likely on this route in ~40 min” (mute-respecting; no spam). |
+| **C4 — Product gates** | Weather vs Heat vs future Traffic (#31 B) — one fill at a time; Settings kill-switch if needed. |
+| **C5 — Point-in-time forecast (parked)** | Optional second mode: treat `1h / 3h / 6h / 12h / 24h` as a **future clock time** (“what does rain look like around 3 hours from now”) instead of today’s default **window from now** (“rain sometime in the next 3 hours”). Not required now — keep duration-from-now as the product meaning. |
+
+**Depends on:** Stable A+B field verify; chosen radar provider + cost; trip mute / alert scheduler patterns (#22 / #29).
+
+**Acceptance (Phase C draft):**
+
+- [ ] Radar/nowcast toggle or mode under Weather (or separate chip) without stacking on Heat
+- [ ] Visible rain cells update on a sensible refresh (e.g. 5–15 min) without janking the map
+- [ ] Optional trip cue only when confidence/horizon is useful; respects mute
+- [ ] Privacy / Data safety updated if a new third-party weather/radar endpoint is added
+
+---
+
+### 36. Home / hub / map polish (next run — do first)
+
+**Ask (14 Aug 2026):** Complete these together. **36.6–36.9 shipped** the same day; **36.2 and 36.3 shipped** later. **36.1, 36.4–36.5** remain.
+
+**Status:** **Partial.** **36.2, 36.3, 36.6–36.9 shipped.** **36.1, 36.4–36.5 queued.**
+
+| # | Work | Notes |
+|---|------|--------|
+| **36.1** | **Report type per hub tile** | Each Report hub type (pothole, manhole, light pole, waterlogging, reckless driving, harassment, stray dog, …) must submit / store / display as **that** civic type end-to-end — not a generic pothole-shaped report. NewReport, My Reports, map filter, and hub entry must stay type-aware. |
+| **36.2** | **View all → bar chart + list** | **Shipped.** Home **All Issues → View all** opens List / Bar / Pie + Sort (accountability charts), not the issue map. |
+| **36.3** | **Speed breakers are not dots** | Confirm as speed breaker → **yellow-black strip 90° to the road**. Personal until **5** users confirm the same spot, then everyone sees it. Never a numbered cluster dot. |
+| **36.4** | **Unregistered civic marks follow the filter** | Unregistered **pothole** must **not** be a generic dot. When **Potholes** is selected, count/show it with potholes. When **Open manholes** (or other type) is selected, count/show that type — same rule per selected issue filter. |
+| **36.5** | **Map page look** | Issue Map / Map tab chrome does not look good — restyle layout, filters, markers, and empty states so it matches the neighbourhood UI. |
+| **36.6** | **SOS capsule + unread Alerts dots** | **Shipped.** Home bell replaced by SOS capsule. Unread red dot on the Alerts tab (not SOS). Each unread Alerts row keeps a red dot until that item is read. |
+| **36.7** | **Dark theme contrast** | **Shipped.** Help / About / Settings / Profile / Notifications dialogs use a light surface so `CitizenInk` copy stays readable in system dark theme. |
+| **36.8** | **Help and Support** | **Shipped.** Clickable `citygridhelp@gmail.com` (`mailto:`) plus How-to videos (one row per app section; YouTube channel placeholder until dedicated videos exist). |
+| **36.9** | **About — weekend PDF** | **Shipped (copy only).** About states that every weekend a PDF is emailed to the user and the government covering concerns + city-wide issue types. No PDF generator yet. |
+
+**Key files (36.6–36.9):** `NeighbourhoodHomeScreen.kt`, `NeighbourhoodShell.kt`, `NeighbourhoodBottomBar.kt`, `NeighbourhoodAlertsScreen.kt`, `NeighbourhoodTrustScreen.kt`, `HomeScreen.kt` (About), `CityGridSupport.kt`, `Theme.kt` (`CitizenLightSurface`).
+
+**Acceptance (draft):**
+
+- [ ] Hub tile → NewReport uses that `CivicIssueType`; saved report keeps it; filters/lists match
+- [x] View all opens a bar chart + list of recent updates (not only the map)
+- [x] Speed-breaker marks (personal or public) render as a yellow-black strip across the road (not a cluster dot)
+- [ ] Issue filter: unregistered potholes count with potholes; unregistered manholes with manholes; no leftover anonymous dots for those kinds
+- [ ] Map tab / Issue Map visual polish matches home (spacing, chips, markers, empty/loading)
+- [x] Home header shows SOS capsule instead of bell; Alerts tab gets the unread red badge
+- [x] Each unread alert row keeps a red dot until that item is read
+- [x] About City Grid (and other Profile/About/Help strings) readable in dark theme
+- [x] Help: `citygridhelp@gmail.com` mailto + YouTube how-to links per section
+- [x] About copy mentions weekend PDF emailed to user and government covering concerns + city issue report
+
+---
+
 ### 18. “Report a pothole” CTA — rounded button, centered label
 
 **Status:** **Shipped** (v1.0.2). Pill/capsule shape on home CTA and New Report submit button.
@@ -733,9 +1097,9 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 - [ ] Optional: show lane/traffic metadata in `ReportDetailDialog`
 - [ ] Play Store release notes for trip feature
 - [ ] **Parked — in-nav trip banner:** restore bottom nav card (remaining distance, ETA %, next turn, ahead pothole line). Removed from live UI to free the map; replace with a new bottom control when designed. Logic helpers still in `HomeScreen.kt` (`remainingTripSeconds`, `formatTripEta`, `formatTripDistance`, turn/alert state).
-- [ ] **Parked — responsive map chrome:** scale trip/map chrome (FABs, compass, GPS chip, search fields, fonts) from screen width so small phones stay compact; keep labels single-line (ellipsis, no wrap). Partial `MapUiScale` may already exist in `HomeScreen.kt` — revisit and finish as polish later (not a major product feature).
-- [ ] Street-follow POV + speed-linked zoom polish (deferred)
-- [ ] Offline nav: GPS progress continues; map/info when online
+- [x] **Parked — responsive map chrome:** scale trip/map chrome (FABs, compass, GPS chip, search fields, fonts) from screen width so small phones stay compact; keep labels single-line (ellipsis, no wrap). **`MapUiScale` / `rememberMapUiScale`** wired into osmdroid + MapLibre chrome, planner, nav rail (Aug 2026).
+- [x] Street-follow POV + speed-linked zoom polish — MapLibre speed bands + look-ahead; smoother OSM zoom lerp (Aug 2026).
+- [x] Offline nav: GPS progress continues; offline chip; map/info refresh when online (Aug 2026).
 - [ ] Pending-upload UX message when network is slow during report submit
 
 ---
@@ -746,10 +1110,15 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 | When | Focus | Items |
 |------|--------|-------|
-| **Now** | Ship **1.0.6** to Play closed test | Basemap place/street names (#14); stronger label contrast |
-| **Next (trip)** | **#23** alternate routes; then **#25–#29** trip/report UX enhancements | User list 27 Jul 2026 |
-| **Next (citizen)** | **#17.2** area tap + name popup; optional **#10.6** | After 1.0.6 |
-| **Later (citizen)** | **#20** weekly digest; **#21** Accountability overview toggle | Needs product design |
+| **★ Next run** | **#36** remaining: hub types · unregistered filter · map look | **#36.1, 36.4–36.5** |
+| **★ Next map enhancement** | **#35.1b** Weather — device-verify blobs, then light/partly cloud | After a Map-tab test run |
+| **★ Now** | **#34** re-enable bump / companion / USB after testing | **#34.1–34.3** (`TripFeatureGates`) |
+| **★ Now** | **ML Phase H** hardening (optional) | **#33** H |
+| **Major / periodic** | Indian YOLO retrain + heuristics→YOLO + Supabase photo loop | **#33M** |
+| **After a few steps** | **#31** navigation map enhancement | Live + journey-start traffic (Mappls/TomTom; crowd later) |
+| **Enhancement (map)** | **#35.2** Weather Phase C — radar / nowcast + trip rain cue | After **#35.1b** |
+| **Parked** | Numbered enhancements #23–#30 etc. | Resume as needed |
+| **Later (citizen)** | **#20** weekly digest; **#21** Accountability overview toggle | Needs product / device matrix |
 | **Last (citizen)** | Testing polish | **#19** tap cluster → view reports |
 | **Parked** | Government app | **#9**, **#10.2** seed — [government_app_handover.md](government_app_handover.md) § G1–G8 |
 | **Low / strategic** | Identity | #2 account linking, #3 email history |
@@ -758,17 +1127,18 @@ Passive GPS updates move the pin only; camera moves on **Locate me** or city cha
 
 | Priority | Suggested order |
 |----------|-----------------|
-| **★ Next (trip — #1)** | **#23** alternate-route quality (user: most important; reconfirmed 27 Jul) |
-| **Next (trip / map UX)** | **#25** clearer zoomed labels · **#26** GMaps-like traits · **#27** edge blink · **#28** wide-shot L/M/R · **#29** turn-aware pothole alerts |
-| **Next (trip UX shipped)** | **#24** home map = reports only; fullscreen trip = free pan / nav only |
-| Shipping now | **#14** basemap labels — **1.0.6** |
-| **Next (citizen)** | **#17.2** area tap + name popup + heat legend; optional **#10.6** |
-| Later (citizen) | **#20** weekly digest; **#21** Accountability overview |
-| Last (citizen) | **#19** tap map cluster → view reports |
+| **★ Next run** | **#36.1, 36.4–36.5** hub types · unregistered issue filter · map look (**36.2, 36.3, 36.6–36.9 shipped**) |
+| **★ Next map enhancement** | **#35.1b** Weather device-verify + light/partly cloud (important; do not skip) |
+| **★ Now** | **#34** bump · companion · USB — finish testing, flip `TripFeatureGates` |
+| **★ Now** | **#33 Phase H** hardening (optional) when field-ready |
+| **Major / periodic** | **#33M** Indian YOLO retrain · heuristics→YOLO · Supabase training loop |
+| **After a few steps** | **#31** Live traffic + journey-start ETA (navigation map enhancement) |
+| **Enhancement (map)** | **#35.2** Weather Phase C — live radar / nowcast + optional trip rain cue (**after 35.1b**) |
+| **Parked (enhancements)** | **#23–#30**, #17.2, #19–#21, #25.3, #26 |
 | **Parked (gov)** | **#9** two-way sync, **#10.2** seed/officers — [government_app_handover.md](government_app_handover.md) |
 | Low / strategic | #2 account linking, #3 email history |
 | Reference only | #1 (document current design) |
-| **Shipped (v1.0.2–1.0.6 + backend)** | #4, #5, #6, **#8**, #11, #12, #13, #14 (G-lite → basemap), #15, #16, #17.1, #18, **#10.0–10.1, #10.4–10.5** GBA boundary/corp/ward routing, map bounds/clusters/severity/GPS pill |
+| **Shipped (v1.0.2–1.0.6 + backend)** | #4, #5, #6, **#8**, #11, #12, #13, #14 (G-lite → basemap), #15, #16, #17.1, #18, **#10.0–10.1, #10.4–10.5** GBA · trip #22–#28 · **#32** (phone path live; companion/USB gated **#34**) · **#33 Phase A–G** (bump gated **#34.1**) · **#35.1** Weather A+B (rain-risk grid; Phase C deferred) |
 
 When an item ships, follow **After each implementation — update checklist** at the top of this file. Minimum: mark the item **Shipped** with version + update the **Shipped** row in the tables below.
 

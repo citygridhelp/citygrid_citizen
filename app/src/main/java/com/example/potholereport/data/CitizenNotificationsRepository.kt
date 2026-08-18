@@ -142,14 +142,63 @@ object CitizenNotificationsRepository {
         )
     }
 
-    private fun addNotification(notification: CitizenNotification) {
-        val ctx = appContext ?: return
+    /**
+     * Bell notice when road-video AI auto-captures a pothole or queues Unconfirmed.
+     */
+    /**
+     * Periodic rain / weather bulletin for the Alerts Weather tab.
+     * [id] is cadence-bucketed so the same window is not posted twice.
+     */
+    fun addWeatherAlert(id: String, title: String, body: String): Boolean {
+        val trimmedId = id.trim()
+        if (trimmedId.isEmpty()) return false
+        return addNotification(
+            CitizenNotification(
+                id = trimmedId,
+                type = CitizenNotification.Type.WEATHER,
+                title = title.trim().ifBlank { "Weather update" },
+                body = body.trim().ifBlank { "Latest city weather is in Alerts." },
+                createdAtMs = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    fun notifyVisionCapture(
+        title: String,
+        body: String,
+        reportId: Long? = null,
+    ) {
+        val now = System.currentTimeMillis()
+        val trimmedTitle = title.trim().ifBlank { "Road video capture" }
+        val type = if (
+            trimmedTitle.contains("Unconfirmed", ignoreCase = true) &&
+            !trimmedTitle.contains("filed from", ignoreCase = true)
+        ) {
+            CitizenNotification.Type.UNCONFIRMED
+        } else {
+            CitizenNotification.Type.GENERAL
+        }
+        addNotification(
+            CitizenNotification(
+                id = "vision-capture-$now",
+                type = type,
+                title = trimmedTitle,
+                body = body.trim().ifBlank { "A pothole was detected from road video." },
+                createdAtMs = now,
+                reportId = reportId,
+            ),
+        )
+    }
+
+    private fun addNotification(notification: CitizenNotification): Boolean {
+        val ctx = appContext ?: return false
         synchronized(lock) {
-            if (cache.any { it.id == notification.id }) return
+            if (cache.any { it.id == notification.id }) return false
             cache.add(notification)
             trimPileOverflow()
             trimReadWhileOverSteadyCap()
             saveToDisk(ctx)
+            return true
         }
     }
 
@@ -182,9 +231,11 @@ object CitizenNotificationsRepository {
                     add(
                         CitizenNotification(
                             id = o.getString("id"),
-                            type = CitizenNotification.Type.valueOf(
-                                o.optString("type", CitizenNotification.Type.GENERAL.name),
-                            ),
+                            type = runCatching {
+                                CitizenNotification.Type.valueOf(
+                                    o.optString("type", CitizenNotification.Type.GENERAL.name),
+                                )
+                            }.getOrDefault(CitizenNotification.Type.GENERAL),
                             title = o.getString("title"),
                             body = o.getString("body"),
                             createdAtMs = o.getLong("time"),
