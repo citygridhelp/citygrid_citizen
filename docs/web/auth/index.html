@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in — City Grid</title>
+  <meta name="description" content="Sign in or create your City Grid account. Same login on web and in the Android app." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/site.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="top">
+      <a class="brand" href="../index.html">
+        <img src="../assets/logo.png" alt="" />
+        City Grid
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="../index.html">Home</a>
+        <a href="../start/index.html">Get started</a>
+        <a href="index.html" aria-current="page">Sign in</a>
+        <a href="../privacy/index.html">Privacy</a>
+      </nav>
+    </header>
+
+    <main class="landing">
+      <div class="landing-bg" aria-hidden="true"></div>
+      <div class="landing-card" style="max-width:440px">
+        <button type="button" class="card-close" data-close-card aria-label="Close">×</button>
+        <img class="mark" src="../assets/logo.png" alt="City Grid" />
+        <h1>Sign in</h1>
+        <p class="sub">One account — web or app</p>
+        <span class="role-chip" id="roleChip">Citizen</span>
+        <p class="body" style="margin-top:12px">
+          Use the same email and password as the Android app. After signup you’ll get a 6-digit code by email.
+        </p>
+
+        <div id="configWarn" class="auth-msg is-err auth-hidden" role="alert">
+          Missing <code>supabase-config.js</code>. Copy the example or run
+          <code>python docs/web/scripts/gen_supabase_config.py</code>, then serve over http (not file://).
+        </div>
+
+        <div id="modeTabs" class="auth-tabs" role="tablist">
+          <button type="button" id="tabLogin" role="tab" aria-selected="true">Log in</button>
+          <button type="button" id="tabSignup" role="tab" aria-selected="false">Sign up</button>
+        </div>
+
+        <form id="loginForm" class="auth-form" autocomplete="on">
+          <label>Email
+            <input id="loginEmail" name="email" type="email" required autocomplete="username" />
+          </label>
+          <label>Password
+            <input id="loginPassword" name="password" type="password" required minlength="6" autocomplete="current-password" />
+          </label>
+          <button class="btn btn-primary" type="submit">Log in</button>
+        </form>
+
+        <form id="signupForm" class="auth-form auth-hidden" autocomplete="on">
+          <label>Name
+            <input id="signupName" name="name" type="text" autocomplete="name" />
+          </label>
+          <label>Email
+            <input id="signupEmail" name="email" type="email" required autocomplete="username" />
+          </label>
+          <label>Password
+            <input id="signupPassword" name="password" type="password" required minlength="6" autocomplete="new-password" />
+          </label>
+          <button class="btn btn-primary" type="submit">Create account</button>
+        </form>
+
+        <form id="otpForm" class="auth-form auth-hidden" autocomplete="one-time-code">
+          <p class="meta" style="margin:0;text-transform:none;letter-spacing:0;font-weight:400">
+            Enter the 6-digit code sent to <strong id="otpEmailLabel"></strong>
+          </p>
+          <label>Code
+            <input id="otpCode" name="otp" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="8" required autocomplete="one-time-code" />
+          </label>
+          <button class="btn btn-primary" type="submit">Verify &amp; continue</button>
+          <button class="btn btn-ghost" type="button" id="otpResend">Resend code</button>
+        </form>
+
+        <p id="authMsg" class="auth-msg" role="status" aria-live="polite"></p>
+        <p class="meta">
+          Prefer the phone?
+          <a href="https://play.google.com/store/apps/details?id=in.citygrid.citizen">Get the app</a>
+          · <a href="../start/index.html">Get started</a>
+        </p>
+      </div>
+    </main>
+
+    <footer class="foot">
+      <div>© <span data-year>2026</span> City Grid</div>
+      <div><a href="../index.html">← Home</a></div>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../assets/supabase-config.js"></script>
+  <script src="../assets/cg-auth.js"></script>
+  <script src="../assets/year.js"></script>
+  <script src="../assets/close-card.js"></script>
+  <script>
+(function () {
+  var role = CgAuth.roleFromQuery();
+  var dest = CgAuth.destinationForRole(role);
+  document.getElementById("roleChip").textContent =
+    role === "commercial" ? "Commercial" : "Citizen";
+
+  var msgEl = document.getElementById("authMsg");
+  var loginForm = document.getElementById("loginForm");
+  var signupForm = document.getElementById("signupForm");
+  var otpForm = document.getElementById("otpForm");
+  var pendingEmail = "";
+
+  function setMsg(text, kind) {
+    msgEl.textContent = text || "";
+    msgEl.className = "auth-msg" + (kind ? " is-" + kind : "");
+  }
+
+  function showPanel(which) {
+    loginForm.classList.toggle("auth-hidden", which !== "login");
+    signupForm.classList.toggle("auth-hidden", which !== "signup");
+    otpForm.classList.toggle("auth-hidden", which !== "otp");
+    document.getElementById("modeTabs").classList.toggle("auth-hidden", which === "otp");
+    document.getElementById("tabLogin").setAttribute("aria-selected", which === "login" ? "true" : "false");
+    document.getElementById("tabSignup").setAttribute("aria-selected", which === "signup" ? "true" : "false");
+  }
+
+  if (!CgAuth.configOk()) {
+    document.getElementById("configWarn").classList.remove("auth-hidden");
+    return;
+  }
+
+  var client = CgAuth.createClient();
+  if (!client) {
+    setMsg("Could not load Supabase client. Check your network and config.", "err");
+    return;
+  }
+
+  CgAuth.getSession(client).then(function (session) {
+    if (session) location.replace(dest);
+  });
+
+  document.getElementById("tabLogin").addEventListener("click", function () {
+    showPanel("login");
+    setMsg("");
+  });
+  document.getElementById("tabSignup").addEventListener("click", function () {
+    showPanel("signup");
+    setMsg("");
+  });
+
+  loginForm.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    setMsg("Signing in…");
+    var email = document.getElementById("loginEmail").value;
+    var password = document.getElementById("loginPassword").value;
+    var r = await CgAuth.login(client, email, password);
+    if (r.ok) {
+      setMsg("Signed in. Redirecting…", "ok");
+      location.replace(dest);
+      return;
+    }
+    var map = {
+      EMAIL_NOT_VERIFIED: "Email not verified yet — use Sign up to resend a code.",
+      NO_ACCOUNT: "No account for that email. Switch to Sign up.",
+      WRONG_PASSWORD: "Wrong password. Try again.",
+    };
+    setMsg(map[r.code] || "Login failed.", "err");
+  });
+
+  signupForm.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    setMsg("Sending code…");
+    var name = document.getElementById("signupName").value;
+    pendingEmail = CgAuth.normalizeEmail(document.getElementById("signupEmail").value);
+    var password = document.getElementById("signupPassword").value;
+    var r = await CgAuth.startSignup(client, name, pendingEmail, password);
+    if (r.ok) {
+      document.getElementById("otpEmailLabel").textContent = pendingEmail;
+      showPanel("otp");
+      setMsg("Check your email for the 6-digit code.", "ok");
+      return;
+    }
+    if (r.code === "EMAIL_ALREADY_REGISTERED") {
+      setMsg("That email already has an account — log in instead.", "err");
+      showPanel("login");
+      document.getElementById("loginEmail").value = pendingEmail;
+      return;
+    }
+    setMsg(r.message || "Could not start signup.", "err");
+  });
+
+  otpForm.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    setMsg("Verifying…");
+    var code = document.getElementById("otpCode").value;
+    var r = await CgAuth.verifySignup(client, pendingEmail, code);
+    if (r.ok) {
+      setMsg("Verified. Redirecting…", "ok");
+      location.replace(dest);
+      return;
+    }
+    var map = {
+      EXPIRED: "Code expired — tap Resend code.",
+      INVALID_CODE: "Invalid code. Check and try again.",
+    };
+    setMsg(map[r.code] || "Verification failed.", "err");
+  });
+
+  document.getElementById("otpResend").addEventListener("click", async function () {
+    if (!pendingEmail) return;
+    setMsg("Resending…");
+    var r = await CgAuth.resendSignup(client, pendingEmail);
+    if (r.ok) setMsg("Code resent. Check your inbox.", "ok");
+    else if (r.code === "EMAIL_ALREADY_REGISTERED") {
+      setMsg("Account already confirmed — log in.", "err");
+      showPanel("login");
+    } else setMsg(r.message || "Could not resend.", "err");
+  });
+})();
+  </script>
+</body>
+</html>

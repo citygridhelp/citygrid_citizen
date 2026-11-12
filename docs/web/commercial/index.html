@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Commercial — City Grid</title>
+  <meta name="description" content="City Grid commercial / fleet workspace — provisioned access on the same account." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/site.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="top">
+      <a class="brand" href="../index.html">
+        <img src="../assets/logo.png" alt="" />
+        City Grid
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="../index.html">Home</a>
+        <a href="../b/index.html">Commercial</a>
+        <a href="index.html" aria-current="page">Workspace</a>
+        <a href="../privacy/index.html">Privacy</a>
+      </nav>
+    </header>
+
+    <main class="landing">
+      <div class="landing-bg" aria-hidden="true"></div>
+      <div class="landing-card" style="max-width:520px">
+        <button type="button" class="card-close" data-close-card aria-label="Close">×</button>
+        <img class="mark" src="../assets/logo.png" alt="City Grid" />
+        <h1>Commercial</h1>
+        <p class="sub">Fleet / corridor — provisioned</p>
+        <div class="toolbar-row">
+          <span class="email" id="userEmail">…</span>
+          <button type="button" class="btn btn-ghost" id="signOutBtn">Sign out</button>
+        </div>
+        <p class="body" style="margin-top:14px">
+          You’re signed in with the <strong>same City Grid account</strong> used for citizen reports and parking.
+          Fleet / corridor tools are opened per organisation — we provision access after a short kickoff.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="mailto:citygridhelp@gmail.com?subject=City%20Grid%20commercial%20access">Request access</a>
+          <a class="btn btn-ghost" href="../citizen/reports/index.html">My citizen reports</a>
+        </div>
+        <p class="meta">
+          +91 72591 19413 · <a href="../b/index.html">About commercial</a>
+        </p>
+      </div>
+    </main>
+
+    <footer class="foot">
+      <div>© <span data-year>2026</span> City Grid</div>
+      <div><a href="../index.html">← Home</a></div>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../assets/supabase-config.js"></script>
+  <script src="../assets/cg-auth.js"></script>
+  <script src="../assets/year.js"></script>
+  <script src="../assets/close-card.js"></script>
+  <script>
+(function () {
+  var authUrl = "../auth/index.html?role=commercial";
+  if (!CgAuth.configOk()) {
+    document.getElementById("userEmail").textContent = "Missing supabase-config.js";
+    return;
+  }
+  var client = CgAuth.createClient();
+  if (!client) return;
+
+  document.getElementById("signOutBtn").addEventListener("click", async function () {
+    await CgAuth.signOut(client);
+    location.replace(authUrl);
+  });
+
+  CgAuth.getSession(client).then(function (session) {
+    if (!session) {
+      location.replace(authUrl);
+      return;
+    }
+    document.getElementById("userEmail").textContent =
+      (session.user && session.user.email) || "Signed in";
+    CgAuth.ensureCitizenProfile(client);
+  });
+})();
+  </script>
+</body>
+</html>
