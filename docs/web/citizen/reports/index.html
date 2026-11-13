@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../../assets/site.css" />
+  <link rel="stylesheet" href="../../assets/site.css?v=web-create-2" />
 </head>
 <body>
   <div class="shell">
@@ -19,44 +19,68 @@
       </a>
       <nav class="nav" aria-label="Primary">
         <a href="../../index.html">Home</a>
-        <a href="../../c/index.html">Citizen</a>
-        <a href="index.html" aria-current="page">My reports</a>
+        <a href="../index.html">My hub</a>
+        <a href="index.html" aria-current="page">Reports</a>
+        <a href="../parking/index.html">Parking</a>
         <a href="../../privacy/index.html">Privacy</a>
+        <div class="account-menu">
+          <button type="button" class="account-btn" id="accountMenuBtn" aria-haspopup="true" aria-expanded="false" aria-label="Account menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2.2c-4 0-7.5 2-7.5 4.5V21h15v-2.3c0-2.5-3.5-4.5-7.5-4.5Z"/>
+            </svg>
+          </button>
+          <div class="account-dropdown" id="accountDropdown" hidden>
+            <button type="button" id="headerSignOut">Sign out</button>
+          </div>
+        </div>
       </nav>
     </header>
 
-    <main class="landing">
-      <div class="landing-bg" aria-hidden="true"></div>
-      <div class="landing-card" style="max-width:560px">
-        <button type="button" class="card-close" data-close-card aria-label="Close">×</button>
-        <img class="mark" src="../../assets/logo.png" alt="City Grid" />
-        <h1>My reports</h1>
-        <p class="sub">Same account as the app</p>
-        <div class="toolbar-row">
-          <span class="email" id="userEmail">…</span>
-          <button type="button" class="btn btn-ghost" id="signOutBtn">Sign out</button>
+    <main class="hub">
+      <div class="hub-head">
+        <div>
+          <p class="section-label">Citizen</p>
+          <h1>My reports</h1>
+          <p class="hub-sub">Same account as the app · status syncs either way</p>
         </div>
-        <p id="listMsg" class="auth-msg" role="status" aria-live="polite">Loading…</p>
-        <ul class="report-list" id="reportList"></ul>
-        <p class="meta" style="margin-top:18px">
-          New reports are filed in the
-          <a href="https://play.google.com/store/apps/details?id=in.citygrid.citizen">Android app</a>
-          (camera + GPS). This page shows status for reports tied to your login.
-        </p>
+        <div class="hub-actions">
+          <a class="btn btn-primary" href="new/index.html">New report</a>
+          <button type="button" class="btn btn-ghost" id="reportsClose" data-close-card data-close-fallback="../index.html">Close</button>
+        </div>
       </div>
+
+      <section class="hub-card hub-card-wide reports-wide">
+        <div class="reports-wide-top">
+          <span class="email" id="userEmail">…</span>
+          <p id="listMsg" class="auth-msg" role="status" aria-live="polite">Loading…</p>
+        </div>
+        <div class="reports-wide-scroll">
+          <ul class="report-list report-list-wide" id="reportList"></ul>
+        </div>
+        <p class="meta reports-wide-foot">
+          File from the web (camera + GPS) or the
+          <a href="https://play.google.com/store/apps/details?id=in.citygrid.citizen">Android app</a>.
+        </p>
+      </section>
     </main>
 
     <footer class="foot">
       <div>© <span data-year>2026</span> City Grid</div>
-      <div><a href="../../index.html">← Home</a></div>
+      <div><a href="../index.html">← Hub</a></div>
     </footer>
+  </div>
+
+  <div class="lightbox" id="lightbox" hidden>
+    <button type="button" class="lightbox-close" id="lightboxClose" aria-label="Close">×</button>
+    <img id="lightboxImg" alt="Report evidence" />
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="../../assets/supabase-config.js"></script>
-  <script src="../../assets/cg-auth.js"></script>
+  <script src="../../assets/cg-auth.js?v=web-create-1"></script>
+  <script src="../../assets/account-menu.js"></script>
   <script src="../../assets/year.js"></script>
-  <script src="../../assets/close-card.js"></script>
+  <script src="../../assets/close-card.js?v=back-hub-1"></script>
   <script>
 (function () {
   var authUrl = "../../auth/index.html?role=citizen";
@@ -75,11 +99,6 @@
     return;
   }
 
-  document.getElementById("signOutBtn").addEventListener("click", async function () {
-    await CgAuth.signOut(client);
-    location.replace(authUrl);
-  });
-
   async function boot() {
     var session = await CgAuth.getSession(client);
     if (!session) {
@@ -97,20 +116,75 @@
     }
     if (!r.reports.length) {
       msgEl.className = "auth-msg";
-      msgEl.textContent = "No reports on this account yet. File one from the app, then refresh.";
+      msgEl.textContent = "No reports yet. Tap New report to file with photo + GPS.";
       return;
     }
-    msgEl.textContent = r.reports.length + " report" + (r.reports.length === 1 ? "" : "s");
-    msgEl.className = "auth-msg is-ok";
+    if (/[?&]filed=1/.test(location.search)) {
+      msgEl.className = "auth-msg is-ok";
+      msgEl.textContent =
+        "Report filed. " + r.reports.length + " report" + (r.reports.length === 1 ? "" : "s") + " on this account.";
+    } else {
+      msgEl.textContent = r.reports.length + " report" + (r.reports.length === 1 ? "" : "s");
+      msgEl.className = "auth-msg is-ok";
+    }
     listEl.innerHTML = r.reports
       .map(function (row) {
         var title = CgAuth.issueLabel(row.issue_type);
         var area = row.area_label ? " · " + row.area_label : "";
         var when = CgAuth.formatWhen(row.created_at_ms);
         var st = CgAuth.statusLabel(row);
+        var close = CgAuth.evidenceUrl(row.photo_path);
+        var wide = CgAuth.evidenceUrl(row.wide_photo_path);
+        var afterTop = CgAuth.proofsUrl(row.completion_top_path);
+        var afterWide = CgAuth.proofsUrl(row.completion_wide_path);
+        var hasPhoto = !!(close || wide || afterTop || afterWide);
+        var thumbs = "";
+        if (hasPhoto) {
+          thumbs = '<div class="report-thumbs">';
+          if (close) {
+            thumbs +=
+              '<img src="' +
+              escapeHtml(close) +
+              '" alt="Before" loading="lazy" data-full="' +
+              escapeHtml(close) +
+              '" />';
+          }
+          if (wide) {
+            thumbs +=
+              '<img class="wide" src="' +
+              escapeHtml(wide) +
+              '" alt="Wide" loading="lazy" data-full="' +
+              escapeHtml(wide) +
+              '" />';
+          }
+          if (afterTop) {
+            thumbs +=
+              '<img src="' +
+              escapeHtml(afterTop) +
+              '" alt="After" loading="lazy" data-full="' +
+              escapeHtml(afterTop) +
+              '" />';
+          }
+          if (afterWide) {
+            thumbs +=
+              '<img class="wide" src="' +
+              escapeHtml(afterWide) +
+              '" alt="After wide" loading="lazy" data-full="' +
+              escapeHtml(afterWide) +
+              '" />';
+          }
+          thumbs += "</div>";
+        }
+        var ba =
+          close && afterTop
+            ? '<p class="report-meta">Before / after available</p>'
+            : "";
         return (
-          '<li class="report-card">' +
-          "<h3>" +
+          '<li class="report-card' +
+          (hasPhoto ? " has-media" : "") +
+          '">' +
+          thumbs +
+          "<div><h3>" +
           escapeHtml(title) +
           "</h3>" +
           '<p class="report-meta">' +
@@ -118,13 +192,19 @@
           escapeHtml(area) +
           (row.city_key ? " · " + escapeHtml(row.city_key) : "") +
           "</p>" +
+          ba +
           '<span class="report-status">' +
           escapeHtml(st) +
-          "</span>" +
-          "</li>"
+          "</span></div></li>"
         );
       })
       .join("");
+    listEl.querySelectorAll("img[data-full]").forEach(function (img) {
+      img.addEventListener("click", function () {
+        document.getElementById("lightboxImg").src = img.getAttribute("data-full");
+        document.getElementById("lightbox").hidden = false;
+      });
+    });
   }
 
   function escapeHtml(s) {
@@ -134,6 +214,17 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
+
+  document.getElementById("lightboxClose").addEventListener("click", function () {
+    document.getElementById("lightbox").hidden = true;
+    document.getElementById("lightboxImg").src = "";
+  });
+  document.getElementById("lightbox").addEventListener("click", function (e) {
+    if (e.target.id === "lightbox") {
+      document.getElementById("lightbox").hidden = true;
+      document.getElementById("lightboxImg").src = "";
+    }
+  });
 
   boot();
 })();

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="assets/site.css" />
+  <link rel="stylesheet" href="assets/site.css?v=account-orange" />
 </head>
 <body>
   <div class="shell">
@@ -21,7 +21,18 @@
         <a href="index.html" aria-current="page">Home</a>
         <a href="#vision">Vision</a>
         <a href="#who">Who it’s for</a>
-        <a href="start/index.html">Get started</a>
+        <a class="nav-login" href="start/index.html" data-guest-only>Login</a>
+        <a href="citizen/index.html" data-auth-only class="is-auth-hidden">My hub</a>
+        <div class="account-menu is-auth-hidden" data-auth-only>
+          <button type="button" class="account-btn" id="accountMenuBtn" aria-haspopup="true" aria-expanded="false" aria-label="Account menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2.2c-4 0-7.5 2-7.5 4.5V21h15v-2.3c0-2.5-3.5-4.5-7.5-4.5Z"/>
+            </svg>
+          </button>
+          <div class="account-dropdown" id="accountDropdown" hidden>
+            <button type="button" id="headerSignOut">Sign out</button>
+          </div>
+        </div>
       </nav>
     </header>
 
@@ -35,7 +46,8 @@
             Roads, parking, and what comes next — live map, AI assist, and tools for citizens and local businesses.
           </p>
           <div class="cta-row">
-            <a class="btn btn-primary" href="start/index.html">Get started</a>
+            <a class="btn btn-primary" href="start/index.html" data-guest-cta>Get started</a>
+            <a class="btn btn-primary is-auth-hidden" href="citizen/index.html" data-auth-cta>My hub</a>
             <a class="btn btn-ghost" href="https://play.google.com/store/apps/details?id=in.citygrid.citizen">Google Play</a>
           </div>
           <span class="note-chip">Not a municipal portal</span>
@@ -288,6 +300,10 @@
       </div>
     </footer>
   </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="assets/supabase-config.js"></script>
+  <script src="assets/cg-auth.js"></script>
+  <script src="assets/account-menu.js"></script>
   <script src="assets/year.js"></script>
   <script src="assets/social.js"></script>
 </body>

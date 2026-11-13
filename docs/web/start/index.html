@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../assets/site.css" />
+  <link rel="stylesheet" href="../assets/site.css?v=account-orange" />
 </head>
 <body>
   <div class="shell">
@@ -24,13 +24,24 @@
         <a href="../index.html#about">About</a>
         <a href="../index.html#contact">Contact</a>
         <a href="../privacy/index.html">Privacy</a>
-        <a href="index.html" aria-current="page">Get started</a>
+        <a class="nav-login" href="index.html" aria-current="page" data-guest-only>Login</a>
+        <a href="../citizen/index.html" data-auth-only class="is-auth-hidden">My hub</a>
+        <div class="account-menu is-auth-hidden" data-auth-only>
+          <button type="button" class="account-btn" id="accountMenuBtn" aria-haspopup="true" aria-expanded="false" aria-label="Account menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2.2c-4 0-7.5 2-7.5 4.5V21h15v-2.3c0-2.5-3.5-4.5-7.5-4.5Z"/>
+            </svg>
+          </button>
+          <div class="account-dropdown" id="accountDropdown" hidden>
+            <button type="button" id="headerSignOut">Sign out</button>
+          </div>
+        </div>
       </nav>
     </header>
 
     <main class="landing">
       <div class="landing-bg" aria-hidden="true"></div>
-      <div class="landing-card">
+      <div class="landing-card landing-card--start">
         <button type="button" class="card-close" data-close-card aria-label="Close">×</button>
         <img class="mark" src="../assets/logo.png" alt="City Grid" />
         <h1>Get started</h1>
@@ -39,30 +50,24 @@
           One account works on <strong>web</strong> and in the <strong>Android app</strong>.
           Choose <strong>citizen</strong> (roads + parking) or <strong>commercial</strong> (fleet / corridor — provisioned).
         </p>
-        <div class="start-actions">
-          <div>
-            <div class="cta-row">
-              <a class="btn btn-primary" href="../auth/index.html?role=citizen">Sign in on web</a>
-              <a class="btn btn-ghost" href="https://play.google.com/store/apps/details?id=in.citygrid.citizen">Get the app</a>
-            </div>
-            <p class="meta" style="margin-top:14px">
-              Same email + password in the app. Citizen login opens <strong>My reports</strong> on the web.
-            </p>
-          </div>
+        <div class="start-actions start-app-row">
           <a class="scan-app" href="https://play.google.com/store/apps/details?id=in.citygrid.citizen" title="Scan for Google Play">
             <img src="../assets/qr_play_store.png" alt="QR code for City Grid on Google Play" width="96" height="96" />
             <span>Scan to install</span>
           </a>
+          <a class="btn btn-ghost" href="https://play.google.com/store/apps/details?id=in.citygrid.citizen">Get the app</a>
         </div>
-        <div class="grid-3" style="margin-top:22px;grid-template-columns:1fr 1fr">
-          <a class="tile" href="../auth/index.html?role=citizen" style="text-decoration:none;color:inherit">
+        <div class="start-role-grid" style="display:flex;flex-direction:row;flex-wrap:nowrap;gap:14px;width:100%">
+          <div class="tile" style="flex:1 1 0;min-width:0">
             <h3>Citizen</h3>
-            <p>Sign in → see your reports. File new ones in the app. Parking uses the same login.</p>
-          </a>
-          <a class="tile" href="../auth/index.html?role=commercial" style="text-decoration:none;color:inherit">
+            <p>Roads + parking. Report in the app; see status and CGC on the web hub.</p>
+            <a class="btn btn-primary" href="../auth/index.html?role=citizen">Sign in</a>
+          </div>
+          <div class="tile" style="flex:1 1 0;min-width:0">
             <h3>Commercial</h3>
-            <p>Sign in with the same account, then request provisioned fleet / corridor access.</p>
-          </a>
+            <p>Fleet / corridor on the same road truth. Provisioned after you sign in.</p>
+            <a class="btn btn-primary" href="../auth/index.html?role=commercial">Sign in</a>
+          </div>
         </div>
         <p class="meta">
           Stuck? <a href="mailto:citygridhelp@gmail.com">citygridhelp@gmail.com</a> · +91 72591 19413
@@ -75,6 +80,10 @@
       <div><a href="../index.html">← Home</a></div>
     </footer>
   </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../assets/supabase-config.js"></script>
+  <script src="../assets/cg-auth.js"></script>
+  <script src="../assets/account-menu.js"></script>
   <script src="../assets/year.js"></script>
   <script src="../assets/close-card.js"></script>
 </body>

@@ -9,7 +9,10 @@ Static pages live in this folder:
 | `b/index.html` | `…/web/b/` ← commercial card QR |
 | `start/index.html` | `…/web/start/` ← Get started |
 | `auth/index.html` | `…/web/auth/` ← signup / login / OTP |
-| `citizen/reports/` | `…/web/citizen/reports/` ← My reports (signed in) |
+| `citizen/` | `…/web/citizen/` ← citizen hub (reports, CGC, ratings, parking, live ideas) |
+| `citizen/reports/` | `…/web/citizen/reports/` ← reports list |
+| `citizen/reports/new/` | `…/web/citizen/reports/new/` ← file report (photo + GPS) |
+| `citizen/parking/` | `…/web/citizen/parking/` ← add / manage lots (photo + pin) |
 | `commercial/` | `…/web/commercial/` ← commercial after login |
 | `privacy/index.html` | `…/web/privacy/` ← styled Privacy Policy |
 | `login/`, `signup/` | Redirect to `auth/?role=citizen` |
@@ -22,7 +25,7 @@ One account: email + password, signup confirms with a 6-digit email OTP (same fl
 
 | Role | After login |
 |------|-------------|
-| Citizen (`?role=citizen`) | `citizen/reports/` — rows where `reporter_auth_id = auth.uid()` |
+| Citizen (`?role=citizen`) | Homepage (logged-in: no Get started, Sign out bar, My hub) · hub at `citizen/` |
 | Commercial (`?role=commercial`) | `commercial/` — account ready; fleet access still provisioned |
 
 Config (anon key is public; never put the service-role key here):

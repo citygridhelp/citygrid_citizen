@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../assets/site.css" />
+  <link rel="stylesheet" href="../assets/site.css?v=account-orange" />
 </head>
 <body>
   <div class="shell">
@@ -21,7 +21,18 @@
         <a href="../index.html">Home</a>
         <a href="../b/index.html">Commercial</a>
         <a href="index.html" aria-current="page">Workspace</a>
+        <a href="../citizen/index.html">My hub</a>
         <a href="../privacy/index.html">Privacy</a>
+        <div class="account-menu">
+          <button type="button" class="account-btn" id="accountMenuBtn" aria-haspopup="true" aria-expanded="false" aria-label="Account menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2.2c-4 0-7.5 2-7.5 4.5V21h15v-2.3c0-2.5-3.5-4.5-7.5-4.5Z"/>
+            </svg>
+          </button>
+          <div class="account-dropdown" id="accountDropdown" hidden>
+            <button type="button" id="headerSignOut">Sign out</button>
+          </div>
+        </div>
       </nav>
     </header>
 
@@ -34,7 +45,6 @@
         <p class="sub">Fleet / corridor — provisioned</p>
         <div class="toolbar-row">
           <span class="email" id="userEmail">…</span>
-          <button type="button" class="btn btn-ghost" id="signOutBtn">Sign out</button>
         </div>
         <p class="body" style="margin-top:14px">
           You’re signed in with the <strong>same City Grid account</strong> used for citizen reports and parking.
@@ -42,7 +52,7 @@
         </p>
         <div class="cta-row">
           <a class="btn btn-primary" href="mailto:citygridhelp@gmail.com?subject=City%20Grid%20commercial%20access">Request access</a>
-          <a class="btn btn-ghost" href="../citizen/reports/index.html">My citizen reports</a>
+          <a class="btn btn-ghost" href="../citizen/index.html">My citizen hub</a>
         </div>
         <p class="meta">
           +91 72591 19413 · <a href="../b/index.html">About commercial</a>
@@ -59,6 +69,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="../assets/supabase-config.js"></script>
   <script src="../assets/cg-auth.js"></script>
+  <script src="../assets/account-menu.js"></script>
   <script src="../assets/year.js"></script>
   <script src="../assets/close-card.js"></script>
   <script>
@@ -70,11 +81,6 @@
   }
   var client = CgAuth.createClient();
   if (!client) return;
-
-  document.getElementById("signOutBtn").addEventListener("click", async function () {
-    await CgAuth.signOut(client);
-    location.replace(authUrl);
-  });
 
   CgAuth.getSession(client).then(function (session) {
     if (!session) {

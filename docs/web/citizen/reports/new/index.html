@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>New report — City Grid</title>
+  <meta name="description" content="File a civic report from the web — photo + GPS, same account as the Android app." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../../../assets/site.css?v=easy-report-1" />
+</head>
+<body>
+  <div class="shell">
+    <header class="top">
+      <a class="brand" href="../../../index.html">
+        <img src="../../../assets/logo.png" alt="" />
+        City Grid
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="../../../index.html">Home</a>
+        <a href="../../index.html">My hub</a>
+        <a href="../index.html">Reports</a>
+        <a href="index.html" aria-current="page">New report</a>
+        <div class="account-menu">
+          <button type="button" class="account-btn" id="accountMenuBtn" aria-haspopup="true" aria-expanded="false" aria-label="Account menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2.2c-4 0-7.5 2-7.5 4.5V21h15v-2.3c0-2.5-3.5-4.5-7.5-4.5Z"/>
+            </svg>
+          </button>
+          <div class="account-dropdown" id="accountDropdown" hidden>
+            <button type="button" id="headerSignOut">Sign out</button>
+          </div>
+        </div>
+      </nav>
+    </header>
+
+    <main class="hub easy-report">
+      <div class="hub-head">
+        <div>
+          <p class="section-label">Citizen</p>
+          <h1>New report</h1>
+          <p class="hub-sub">Same easy path as the app — photo, GPS, tap type, submit.</p>
+        </div>
+        <div class="hub-actions">
+          <button type="button" class="btn btn-ghost" data-close-card data-close-fallback="../../index.html">Close</button>
+        </div>
+      </div>
+
+      <form id="reportForm" class="easy-report-form">
+        <input type="hidden" id="issueType" value="POTHOLE" />
+        <input type="hidden" id="severity" value="MODERATE" />
+        <input type="hidden" id="lat" />
+        <input type="hidden" id="lon" />
+
+        <!-- 01 Photo -->
+        <section class="hub-card easy-step">
+          <p class="easy-step-n">01</p>
+          <h2>Photo</h2>
+          <p class="meta">Tap to open the camera — close-up of the hazard.</p>
+          <label class="easy-photo" id="closePhotoLabel">
+            <input type="file" id="closePhoto" accept="image/*" capture="environment" />
+            <span class="easy-photo-empty" id="closeEmpty">
+              <strong>Take photo</strong>
+              <span>or choose from gallery</span>
+            </span>
+            <img id="closePreview" class="easy-photo-img" alt="Close-up" hidden />
+          </label>
+          <div id="wideWrap" class="easy-wide" hidden>
+            <p class="meta">Wide shot (pothole / manhole) — optional on web.</p>
+            <label class="file-pill">
+              Add wide photo
+              <input type="file" id="widePhoto" accept="image/*" capture="environment" />
+            </label>
+            <img id="widePreview" class="capture-preview" alt="" hidden />
+          </div>
+        </section>
+
+        <!-- 02 What -->
+        <section class="hub-card easy-step">
+          <p class="easy-step-n">02</p>
+          <h2>What is it?</h2>
+          <div class="chip-grid" id="issueChips" role="listbox" aria-label="Issue type"></div>
+        </section>
+
+        <!-- 03 Condition -->
+        <section class="hub-card easy-step">
+          <p class="easy-step-n">03</p>
+          <h2>How bad?</h2>
+          <div class="chip-row" id="sevChips" role="listbox" aria-label="Severity">
+            <button type="button" class="chip" data-sev="MINOR">Minor</button>
+            <button type="button" class="chip is-on" data-sev="MODERATE">Moderate</button>
+            <button type="button" class="chip" data-sev="SEVERE">Severe</button>
+            <button type="button" class="chip" data-sev="CRITICAL">Critical</button>
+          </div>
+        </section>
+
+        <!-- 04 Location (auto) -->
+        <section class="hub-card easy-step">
+          <p class="easy-step-n">04</p>
+          <h2>Location</h2>
+          <p class="meta" id="locMeta">Getting GPS…</p>
+          <p class="meta" id="cityGuess"></p>
+          <div class="cta-row">
+            <button type="button" class="btn btn-ghost" id="btnLocate">Retry GPS</button>
+            <button type="button" class="btn btn-ghost" id="btnAdjust">Adjust coords</button>
+          </div>
+          <div class="park-edit-grid" id="coordGrid" hidden>
+            <label>Latitude
+              <input id="latVisible" type="number" step="any" />
+            </label>
+            <label>Longitude
+              <input id="lonVisible" type="number" step="any" />
+            </label>
+          </div>
+        </section>
+
+        <!-- Optional note -->
+        <section class="hub-card easy-step">
+          <button type="button" class="easy-note-toggle" id="noteToggle" aria-expanded="false">
+            + Add landmark note <span class="meta">(optional)</span>
+          </button>
+          <div id="noteWrap" hidden>
+            <label class="easy-note-label">
+              <textarea id="citizenNote" rows="2" maxlength="240" placeholder="e.g. Near clinic gate, left of speed breaker"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <p id="formMsg" class="auth-msg" role="status"></p>
+        <div class="easy-submit-bar">
+          <button class="btn btn-primary easy-submit" type="submit" id="submitBtn" disabled>Add a photo to continue</button>
+        </div>
+      </form>
+    </main>
+
+    <footer class="foot">
+      <div>© <span data-year>2026</span> City Grid</div>
+      <div><a href="../../index.html">← Hub</a></div>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../../assets/supabase-config.js"></script>
+  <script src="../../../assets/cg-auth.js?v=web-create-1"></script>
+  <script src="../../../assets/account-menu.js"></script>
+  <script src="../../../assets/year.js"></script>
+  <script src="../../../assets/close-card.js?v=back-hub-1"></script>
+  <script>
+(function () {
+  var authUrl = "../../../auth/index.html?role=citizen";
+  var msg = document.getElementById("formMsg");
+  var client;
+  var needsWide = { POTHOLE: true, MANHOLE: true };
+
+  // App hub order
+  var TYPES = [
+    { id: "POTHOLE", label: "Pothole" },
+    { id: "MANHOLE", label: "Manhole" },
+    { id: "SPEED_BREAKER", label: "Speed breaker" },
+    { id: "LIGHT", label: "Street light" },
+    { id: "FLOOD", label: "Waterlog" },
+    { id: "RECKLESS", label: "Reckless" },
+    { id: "INTIMIDATION", label: "Intimidation" },
+    { id: "HARASSMENT", label: "Harassment" },
+    { id: "GARBAGE", label: "Garbage" },
+    { id: "STRAY_DOG", label: "Stray dog" },
+    { id: "ACCIDENT_PRONE", label: "Accident-prone" },
+  ];
+
+  function hasPhoto() {
+    return !!(document.getElementById("closePhoto").files && document.getElementById("closePhoto").files[0]);
+  }
+  function hasLoc() {
+    var la = Number(document.getElementById("lat").value);
+    var lo = Number(document.getElementById("lon").value);
+    return isFinite(la) && isFinite(lo);
+  }
+
+  function syncSubmit() {
+    var btn = document.getElementById("submitBtn");
+    if (!hasPhoto()) {
+      btn.disabled = true;
+      btn.textContent = "Add a photo to continue";
+      return;
+    }
+    if (!hasLoc()) {
+      btn.disabled = true;
+      btn.textContent = "Waiting for GPS…";
+      return;
+    }
+    btn.disabled = false;
+    btn.textContent = "Submit report";
+  }
+
+  function setIssue(id) {
+    document.getElementById("issueType").value = id;
+    document.querySelectorAll("#issueChips .chip").forEach(function (c) {
+      c.classList.toggle("is-on", c.getAttribute("data-issue") === id);
+    });
+    var showWide = !!needsWide[id];
+    document.getElementById("wideWrap").hidden = !showWide;
+  }
+
+  function setSev(id) {
+    document.getElementById("severity").value = id;
+    document.querySelectorAll("#sevChips .chip").forEach(function (c) {
+      c.classList.toggle("is-on", c.getAttribute("data-sev") === id);
+    });
+  }
+
+  function applyCoords(lat, lon, accuracy) {
+    document.getElementById("lat").value = lat.toFixed(6);
+    document.getElementById("lon").value = lon.toFixed(6);
+    document.getElementById("latVisible").value = lat.toFixed(6);
+    document.getElementById("lonVisible").value = lon.toFixed(6);
+    var key = CgAuth.guessCityKey(lat, lon);
+    document.getElementById("cityGuess").textContent = "City · " + key;
+    document.getElementById("locMeta").textContent = accuracy
+      ? "GPS locked · ±" + Math.round(accuracy) + " m"
+      : "Location set";
+    document.getElementById("locMeta").classList.remove("is-err");
+    syncSubmit();
+  }
+
+  function locate(showMsg) {
+    if (!navigator.geolocation) {
+      document.getElementById("locMeta").textContent = "GPS not available — tap Adjust coords.";
+      document.getElementById("coordGrid").hidden = false;
+      syncSubmit();
+      return;
+    }
+    if (showMsg) document.getElementById("locMeta").textContent = "Getting GPS…";
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        applyCoords(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+      },
+      function (err) {
+        document.getElementById("locMeta").textContent =
+          (err && err.message) || "GPS failed — retry or adjust coords.";
+        document.getElementById("coordGrid").hidden = false;
+        syncSubmit();
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
+    );
+  }
+
+  if (!CgAuth.configOk()) {
+    msg.className = "auth-msg is-err";
+    msg.textContent = "Missing supabase-config.js";
+    return;
+  }
+  client = CgAuth.createClient();
+  if (!client) return;
+
+  var chips = document.getElementById("issueChips");
+  TYPES.forEach(function (t, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (i === 0 ? " is-on" : "");
+    b.setAttribute("data-issue", t.id);
+    b.setAttribute("role", "option");
+    b.textContent = t.label;
+    b.addEventListener("click", function () {
+      setIssue(t.id);
+    });
+    chips.appendChild(b);
+  });
+  setIssue("POTHOLE");
+
+  document.querySelectorAll("#sevChips .chip").forEach(function (c) {
+    c.addEventListener("click", function () {
+      setSev(c.getAttribute("data-sev"));
+    });
+  });
+
+  document.getElementById("closePhoto").addEventListener("change", function () {
+    var f = this.files && this.files[0];
+    var img = document.getElementById("closePreview");
+    var empty = document.getElementById("closeEmpty");
+    if (!f) {
+      img.hidden = true;
+      empty.hidden = false;
+      syncSubmit();
+      return;
+    }
+    img.src = URL.createObjectURL(f);
+    img.hidden = false;
+    empty.hidden = true;
+    syncSubmit();
+  });
+
+  document.getElementById("widePhoto").addEventListener("change", function () {
+    var f = this.files && this.files[0];
+    var img = document.getElementById("widePreview");
+    if (!f) {
+      img.hidden = true;
+      return;
+    }
+    img.src = URL.createObjectURL(f);
+    img.hidden = false;
+  });
+
+  document.getElementById("noteToggle").addEventListener("click", function () {
+    var wrap = document.getElementById("noteWrap");
+    var open = wrap.hidden;
+    wrap.hidden = !open;
+    this.setAttribute("aria-expanded", open ? "true" : "false");
+    this.innerHTML = open
+      ? "− Hide note <span class=\"meta\">(optional)</span>"
+      : "+ Add landmark note <span class=\"meta\">(optional)</span>";
+  });
+
+  document.getElementById("btnLocate").addEventListener("click", function () {
+    locate(true);
+  });
+  document.getElementById("btnAdjust").addEventListener("click", function () {
+    document.getElementById("coordGrid").hidden = false;
+  });
+  document.getElementById("latVisible").addEventListener("change", function () {
+    var la = Number(this.value);
+    var lo = Number(document.getElementById("lonVisible").value);
+    if (isFinite(la) && isFinite(lo)) applyCoords(la, lo, 0);
+  });
+  document.getElementById("lonVisible").addEventListener("change", function () {
+    var la = Number(document.getElementById("latVisible").value);
+    var lo = Number(this.value);
+    if (isFinite(la) && isFinite(lo)) applyCoords(la, lo, 0);
+  });
+
+  document.getElementById("reportForm").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var session = await CgAuth.getSession(client);
+    if (!session) {
+      location.replace(authUrl);
+      return;
+    }
+    if (!hasPhoto()) {
+      msg.className = "auth-msg is-err";
+      msg.textContent = "Add a photo to continue.";
+      return;
+    }
+    if (!hasLoc()) {
+      msg.className = "auth-msg is-err";
+      msg.textContent = "Waiting for GPS — tap Retry GPS.";
+      locate(true);
+      return;
+    }
+    var btn = document.getElementById("submitBtn");
+    btn.disabled = true;
+    msg.className = "auth-msg";
+    msg.textContent = "Uploading + filing…";
+    var note = (document.getElementById("citizenNote").value || "").trim();
+    var r = await CgAuth.createReport(client, {
+      issue_type: document.getElementById("issueType").value,
+      severity: document.getElementById("severity").value,
+      area_label: note.slice(0, 120),
+      citizen_note: note,
+      latitude: Number(document.getElementById("lat").value),
+      longitude: Number(document.getElementById("lon").value),
+      city_key: CgAuth.guessCityKey(
+        Number(document.getElementById("lat").value),
+        Number(document.getElementById("lon").value)
+      ),
+      closeFile: document.getElementById("closePhoto").files[0],
+      wideFile: document.getElementById("widePhoto").files[0] || null,
+    });
+    if (!r.ok) {
+      btn.disabled = false;
+      syncSubmit();
+      msg.className = "auth-msg is-err";
+      msg.textContent = r.message || "Could not submit report.";
+      return;
+    }
+    msg.className = "auth-msg is-ok";
+    msg.textContent = "Filed — opening your reports…";
+    location.href = "../index.html?filed=1";
+  });
+
+  syncSubmit();
+  locate(true);
+
+  CgAuth.getSession(client).then(function (session) {
+    if (!session) location.replace(authUrl);
+  });
+})();
+  </script>
+</body>
+</html>
