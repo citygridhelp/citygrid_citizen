@@ -105,3 +105,7 @@ Add a build step that writes `assets/supabase-config.js` from secrets (`SUPABASE
 ## Card QR targets
 
 Keep card backs pointing at `/web/c/` and `/web/b/`; those pages now deep-link into web auth.
+
+Homepage QR (site root): `assets/qr_homepage.png` →  
+`https://citygridhelp.github.io/citygrid_citizen/web/`  
+(also copied under `docs/pitch/qr_homepage.png` for print).
